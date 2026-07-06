@@ -15,9 +15,13 @@
 #include <QButtonGroup>
 #include <QStyle>
 #include <QStyleFactory>
+#include <QFileInfo>
+#include <QDir>
 
 #include "ui/ProjectPanel.h"
 #include "ui/PreviewPanel.h"
+#include "ui/ParamsPanel.h"
+#include "ui/Toolbar.h"
 
 class MainWindow : public QMainWindow {
     Q_OBJECT
@@ -33,7 +37,7 @@ public:
         setupStepBar();
         setupConnections();
 
-        statusBar()->showMessage("就绪 — P0.2 核心框架已启动");
+        statusBar()->showMessage("就绪 — 拖入 RAW 文件或点击导入开始");
     }
 
 private:
@@ -45,6 +49,10 @@ private:
         mainLayout->setContentsMargins(0, 0, 0, 0);
         mainLayout->setSpacing(0);
 
+        // 顶部工具栏
+        m_toolbar = new Toolbar(this);
+        mainLayout->addWidget(m_toolbar);
+
         // 主内容区：三栏布局
         auto* contentSplitter = new QSplitter(Qt::Horizontal, this);
         contentSplitter->setHandleWidth(2);
@@ -52,51 +60,24 @@ private:
             "QSplitter::handle { background-color: #30363D; }"
         );
 
-        // 左侧面板：ProjectPanel
+        // 左侧面板：ProjectPanel（卡片式文件列表）
         m_projectPanel = new ProjectPanel(this);
-        m_projectPanel->setMinimumWidth(200);
-        m_projectPanel->setMaximumWidth(400);
+        m_projectPanel->setMinimumWidth(240);
+        m_projectPanel->setMaximumWidth(420);
         contentSplitter->addWidget(m_projectPanel);
 
-        // 中央面板：PreviewPanel
+        // 中央面板：PreviewPanel（QLabel + QScrollArea）
         m_previewPanel = new PreviewPanel(this);
         contentSplitter->addWidget(m_previewPanel);
 
-        // 右侧面板：参数面板（占位）
-        m_paramsPanel = new QWidget(this);
-        m_paramsPanel->setMinimumWidth(200);
-        m_paramsPanel->setMaximumWidth(400);
-        m_paramsPanel->setStyleSheet(
-            "QWidget { background-color: #161B22; border-left: 1px solid #30363D; }"
-        );
-        auto* paramsLayout = new QVBoxLayout(m_paramsPanel);
-        paramsLayout->setContentsMargins(12, 12, 12, 12);
-        paramsLayout->setSpacing(8);
-
-        auto* paramsTitle = new QLabel("处理参数", m_paramsPanel);
-        paramsTitle->setStyleSheet("font-size: 14px; font-weight: bold; color: #E6EDF3;");
-        paramsLayout->addWidget(paramsTitle);
-
-        auto* paramsPlaceholder = new QLabel(
-            "P0.2 占位面板\n\n"
-            "后续阶段将添加：\n"
-            "• 对齐参数\n"
-            "• 堆栈算法选择\n"
-            "• 降噪强度\n"
-            "• 输出格式",
-            m_paramsPanel
-        );
-        paramsPlaceholder->setStyleSheet(
-            "color: #8B949E; font-size: 12px; line-height: 1.6;"
-        );
-        paramsPlaceholder->setAlignment(Qt::AlignTop | Qt::AlignLeft);
-        paramsLayout->addWidget(paramsPlaceholder);
-        paramsLayout->addStretch();
-
+        // 右侧面板：ParamsPanel（实际参数面板）
+        m_paramsPanel = new ParamsPanel(this);
+        m_paramsPanel->setMinimumWidth(240);
+        m_paramsPanel->setMaximumWidth(420);
         contentSplitter->addWidget(m_paramsPanel);
 
-        // 设置默认比例：20% / 60% / 20%
-        contentSplitter->setSizes({280, 840, 280});
+        // 设置默认比例：22% / 56% / 22%
+        contentSplitter->setSizes({308, 784, 308});
 
         mainLayout->addWidget(contentSplitter, 1);
 
@@ -202,10 +183,13 @@ private:
 
         auto* fitViewAction = new QAction("适应视图", this);
         fitViewAction->setShortcut(QKeySequence("Ctrl+0"));
-        connect(fitViewAction, &QAction::triggered, this, []() {
-            // 通过 PreviewPanel 的方法实现
-        });
+        connect(fitViewAction, &QAction::triggered, m_previewPanel, &PreviewPanel::fitToView);
         viewMenu->addAction(fitViewAction);
+
+        auto* actualPixelsAction = new QAction("实际像素 (1:1)", this);
+        actualPixelsAction->setShortcut(QKeySequence("Ctrl+1"));
+        connect(actualPixelsAction, &QAction::triggered, m_previewPanel, &PreviewPanel::resetZoom);
+        viewMenu->addAction(actualPixelsAction);
 
         // 帮助菜单
         auto* helpMenu = menuBar()->addMenu("帮助");
@@ -236,13 +220,48 @@ private:
     }
 
     void setupConnections() {
+        // Toolbar 信号
+        connect(m_toolbar, &Toolbar::importFilesClicked, this, &MainWindow::onImportClicked);
+        connect(m_toolbar, &Toolbar::importFolderClicked, this, &MainWindow::onImportFolderClicked);
+        connect(m_toolbar, &Toolbar::clearProjectClicked, this, [this]() {
+            m_projectPanel->clearFiles();
+            m_previewPanel->clearImage();
+            statusBar()->showMessage("项目已清空", 3000);
+        });
+        connect(m_toolbar, &Toolbar::startProcessClicked, this, [this]() {
+            statusBar()->showMessage("处理功能将在后续版本实现", 3000);
+        });
+        connect(m_toolbar, &Toolbar::exportResultClicked, this, [this]() {
+            statusBar()->showMessage("导出功能将在后续版本实现", 3000);
+        });
+        connect(m_toolbar, &Toolbar::settingsClicked, this, [this]() {
+            statusBar()->showMessage("设置功能将在后续版本实现", 3000);
+        });
+        connect(m_toolbar, &Toolbar::aboutClicked, this, &MainWindow::onAboutClicked);
+
+        // 文件选择 -> 预览加载
         connect(m_projectPanel, &ProjectPanel::fileSelected, this, [this](const QString& filePath) {
             m_previewPanel->loadImage(filePath);
-            statusBar()->showMessage(QString("已加载：%1").arg(filePath), 3000);
+            statusBar()->showMessage(QString("已加载：%1").arg(QFileInfo(filePath).fileName()), 3000);
         });
 
+        // 元数据请求
         connect(m_projectPanel, &ProjectPanel::requestMetadata, this, [this](const QString& filePath) {
             onViewMetadata(filePath);
+        });
+
+        // 预览区空状态导入按钮
+        connect(m_previewPanel, &PreviewPanel::importRequested, this, &MainWindow::onImportClicked);
+
+        // 鼠标像素信息
+        connect(m_previewPanel, &PreviewPanel::mousePixelInfo, this, [](int x, int y, int r, int g, int b) {
+            Q_UNUSED(x) Q_UNUSED(y) Q_UNUSED(r) Q_UNUSED(g) Q_UNUSED(b)
+            // 已在 PreviewPanel 内部处理显示
+        });
+
+        // 参数变化
+        connect(m_paramsPanel, &ParamsPanel::paramsChanged, this, [this]() {
+            statusBar()->showMessage("参数已更新", 2000);
         });
     }
 
@@ -319,9 +338,10 @@ private slots:
     }
 
 private:
+    Toolbar* m_toolbar = nullptr;
     ProjectPanel* m_projectPanel = nullptr;
     PreviewPanel* m_previewPanel = nullptr;
-    QWidget* m_paramsPanel = nullptr;
+    ParamsPanel* m_paramsPanel = nullptr;
     QWidget* m_stepBar = nullptr;
     QButtonGroup* m_stepGroup = nullptr;
 };

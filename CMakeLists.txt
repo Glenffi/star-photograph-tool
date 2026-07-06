@@ -51,6 +51,8 @@ set(SOURCES
     src/core/ThumbnailGenerator.cpp
     src/ui/ProjectPanel.cpp
     src/ui/PreviewPanel.cpp
+    src/ui/Toolbar.cpp
+    src/ui/ParamsPanel.cpp
 )
 
 set(HEADERS
@@ -58,6 +60,8 @@ set(HEADERS
     src/core/ThumbnailGenerator.h
     src/ui/ProjectPanel.h
     src/ui/PreviewPanel.h
+    src/ui/Toolbar.h
+    src/ui/ParamsPanel.h
 )
 
 # 创建可执行文件
