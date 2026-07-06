@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(StarProcessor VERSION 0.1.0 LANGUAGES CXX)
+project(StarProcessor VERSION 0.2.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -21,19 +21,60 @@ endif()
 # 查找 Qt6 组件
 find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets)
 
+# 查找 LibRaw（brew 安装路径）
+find_library(LibRaw_LIBRARY 
+    NAMES raw libraw
+    PATHS /opt/homebrew/opt/libraw/lib
+    NO_DEFAULT_PATH
+)
+find_path(LibRaw_INCLUDE_DIR 
+    libraw/libraw.h
+    PATHS /opt/homebrew/opt/libraw/include
+    NO_DEFAULT_PATH
+)
+
+if(NOT LibRaw_LIBRARY)
+    message(FATAL_ERROR "LibRaw 库未找到。请确保已通过 brew 安装：brew install libraw")
+endif()
+
+if(NOT LibRaw_INCLUDE_DIR)
+    message(FATAL_ERROR "LibRaw 头文件未找到。请确保已通过 brew 安装：brew install libraw")
+endif()
+
+message(STATUS "LibRaw 库: ${LibRaw_LIBRARY}")
+message(STATUS "LibRaw 头文件: ${LibRaw_INCLUDE_DIR}")
+
 # 定义源文件
 set(SOURCES
     src/main.cpp
+    src/core/RawImageLoader.cpp
+    src/core/ThumbnailGenerator.cpp
+    src/ui/ProjectPanel.cpp
+    src/ui/PreviewPanel.cpp
+)
+
+set(HEADERS
+    src/core/RawImageLoader.h
+    src/core/ThumbnailGenerator.h
+    src/ui/ProjectPanel.h
+    src/ui/PreviewPanel.h
 )
 
 # 创建可执行文件
-add_executable(${PROJECT_NAME} ${SOURCES})
+add_executable(${PROJECT_NAME} ${SOURCES} ${HEADERS})
 
-# 链接 Qt 库
+# 包含目录
+target_include_directories(${PROJECT_NAME} PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${LibRaw_INCLUDE_DIR}
+)
+
+# 链接 Qt 库和 LibRaw
 target_link_libraries(${PROJECT_NAME}
     Qt6::Core
     Qt6::Gui
     Qt6::Widgets
+    ${LibRaw_LIBRARY}
 )
 
 # macOS 特定设置
