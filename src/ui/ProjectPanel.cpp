@@ -8,6 +8,7 @@
 #include <QDir>
 #include <QItemSelectionModel>
 #include <QDebug>
+#include <algorithm>
 
 ProjectPanel::ProjectPanel(QWidget* parent)
     : QWidget(parent)

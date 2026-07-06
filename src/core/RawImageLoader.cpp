@@ -74,15 +74,8 @@ bool RawImageLoader::loadRaw(const std::string& filePath, ImageData& out) {
                 }
             }
         } else {
-            // 回退：使用彩色数据的第一通道
-            out.data.resize(out.width * out.height);
-            for (int y = 0; y < out.height; ++y) {
-                for (int x = 0; x < out.width; ++x) {
-                    int idx = (processor.imgdata.sizes.top_margin + y) * rawWidth
-                            + (processor.imgdata.sizes.left_margin + x);
-                    out.data[y * out.width + x] = processor.imgdata.rawdata.raw_image[idx];
-                }
-            }
+            std::cerr << "LibRaw raw_image 不可用: " << filePath << std::endl;
+            return false;
         }
     } else {
         // 已经是 RGB 数据（如 Foveon 传感器或 DNG）

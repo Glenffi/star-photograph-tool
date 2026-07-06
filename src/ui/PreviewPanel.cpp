@@ -7,6 +7,7 @@
 #include <QFileInfo>
 #include <QDebug>
 #include <QApplication>
+#include <algorithm>
 
 PreviewPanel::PreviewPanel(QWidget* parent)
     : QWidget(parent)

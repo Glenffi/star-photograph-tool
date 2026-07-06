@@ -4,6 +4,8 @@
 #include <QFileInfo>
 #include <QDebug>
 
+#include <QMetaObject>
+
 class ThumbnailTask : public QRunnable {
 public:
     ThumbnailTask(const QString& filePath, int maxSize, ThumbnailGenerator* generator)
@@ -16,14 +18,18 @@ public:
         
         if (!loader.loadRaw(m_filePath.toStdString(), imageData)) {
             qWarning() << "缩略图生成失败：无法加载 RAW" << m_filePath;
-            emit m_generator->thumbnailReady(m_filePath, QPixmap());
+            QMetaObject::invokeMethod(m_generator, [this]() {
+                emit m_generator->thumbnailReady(m_filePath, QPixmap());
+            }, Qt::QueuedConnection);
             return;
         }
         
         std::vector<uint8_t> thumbData;
         if (!loader.generateThumbnail(imageData, m_maxSize, thumbData)) {
             qWarning() << "缩略图生成失败：无法生成缩略图" << m_filePath;
-            emit m_generator->thumbnailReady(m_filePath, QPixmap());
+            QMetaObject::invokeMethod(m_generator, [this]() {
+                emit m_generator->thumbnailReady(m_filePath, QPixmap());
+            }, Qt::QueuedConnection);
             return;
         }
         
@@ -39,11 +45,13 @@ public:
         if (thumbWidth < 1) thumbWidth = 1;
         if (thumbHeight < 1) thumbHeight = 1;
         
-        // 创建 QImage
+        // 创建 QImage（在 worker 线程安全）
         QImage image(thumbData.data(), thumbWidth, thumbHeight, thumbWidth * 3, QImage::Format_RGB888);
-        QPixmap pixmap = QPixmap::fromImage(image.copy());
         
-        emit m_generator->thumbnailReady(m_filePath, pixmap);
+        // 将 QPixmap 转换移到主线程执行
+        QMetaObject::invokeMethod(m_generator, [this, image]() {
+            emit m_generator->thumbnailReady(m_filePath, QPixmap::fromImage(image.copy()));
+        }, Qt::QueuedConnection);
     }
     
 private:
