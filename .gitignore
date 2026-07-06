@@ -1,0 +1,44 @@
+# 构建产物
+/build/
+/cmake-build-*/
+/out/
+/.vs/
+/.idea/
+
+# Qt 生成的文件
+*.moc
+moc_*.cpp
+moc_*.h
+qrc_*.cpp
+ui_*.h
+*.pro.user
+*.pro.user.*
+
+# 编译产物
+*.o
+*.obj
+*.so
+*.dll
+*.dylib
+*.exe
+*.app/
+*.ipa
+
+# macOS
+.DS_Store
+*.dSYM/
+
+# Windows
+*.pdb
+*.ilk
+*.manifest
+
+# IDE
+.vscode/
+*.swp
+*.swo
+*~
+
+# 依赖管理
+/vcpkg_installed/
+/conan/
