@@ -16,6 +16,7 @@ ParamsPanel::ParamsPanel(QWidget* parent)
     : QWidget(parent)
 {
     setupUI();
+    loadPreset();
 }
 
 void ParamsPanel::setupUI() {
@@ -471,6 +472,10 @@ void ParamsPanel::onRestoreDefaults() {
 void ParamsPanel::onSavePreset() {
     // 占位：后续实现预设保存
     emitParamsChanged();
+}
+
+void ParamsPanel::loadPreset() {
+    // 占位：后续实现从 QSettings 加载预设
 }
 
 void ParamsPanel::emitParamsChanged() {
