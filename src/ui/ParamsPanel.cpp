@@ -520,12 +520,12 @@ QString ParamsPanel::alignMethod() const {
 
 QString ParamsPanel::stackMethod() const {
     if (!m_stackAlgorithm) return "average";
-    QString text = m_stackAlgorithm->currentText();
-    if (text == "Sigma Clipping") return "average";
-    if (text == "Median") return "median";
-    if (text == "Mean") return "average";
-    if (text == "Kappa-Sigma") return "kappa-sigma";
-    if (text == "Winsorized") return "winsorized";
+    int index = m_stackAlgorithm->currentIndex();
+    // 0: Median (已实现)
+    // 1: Mean (已实现)
+    // 2+: 未实现，选择时已被回退到 0 或 1
+    if (index == 0) return "median";
+    if (index == 1) return "average";
     return "average";
 }
 

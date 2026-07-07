@@ -18,9 +18,9 @@ public:
         
         if (!loader.loadRaw(m_filePath.toStdString(), imageData)) {
             qWarning() << "缩略图生成失败：无法加载 RAW" << m_filePath;
-            QMetaObject::invokeMethod(m_generator, [this]() {
-                emit m_generator->metadataReady(m_filePath, 0, 0.0, 0.0, 0);
-                emit m_generator->thumbnailReady(m_filePath, QPixmap());
+            QMetaObject::invokeMethod(m_generator, [generator = m_generator, filePath = m_filePath]() {
+                emit generator->metadataReady(filePath, 0, 0.0, 0.0, 0);
+                emit generator->thumbnailReady(filePath, QPixmap());
             }, Qt::QueuedConnection);
             return;
         }
@@ -30,15 +30,15 @@ public:
         double exposureTime = imageData.exposureTime;
         double aperture = imageData.aperture;
         int focalLength = imageData.focalLength;
-        QMetaObject::invokeMethod(m_generator, [this, iso, exposureTime, aperture, focalLength]() {
-            emit m_generator->metadataReady(m_filePath, iso, exposureTime, aperture, focalLength);
+        QMetaObject::invokeMethod(m_generator, [generator = m_generator, filePath = m_filePath, iso, exposureTime, aperture, focalLength]() {
+            emit generator->metadataReady(filePath, iso, exposureTime, aperture, focalLength);
         }, Qt::QueuedConnection);
         
         std::vector<uint8_t> thumbData;
         if (!loader.generateThumbnail(imageData, m_maxSize, thumbData)) {
             qWarning() << "缩略图生成失败：无法生成缩略图" << m_filePath;
-            QMetaObject::invokeMethod(m_generator, [this]() {
-                emit m_generator->thumbnailReady(m_filePath, QPixmap());
+            QMetaObject::invokeMethod(m_generator, [generator = m_generator, filePath = m_filePath]() {
+                emit generator->thumbnailReady(filePath, QPixmap());
             }, Qt::QueuedConnection);
             return;
         }
@@ -61,8 +61,8 @@ public:
         QImage imageOwned = image.copy();
         
         // 将 QPixmap 转换移到主线程执行
-        QMetaObject::invokeMethod(m_generator, [this, imageOwned]() {
-            emit m_generator->thumbnailReady(m_filePath, QPixmap::fromImage(imageOwned));
+        QMetaObject::invokeMethod(m_generator, [generator = m_generator, filePath = m_filePath, imageOwned]() {
+            emit generator->thumbnailReady(filePath, QPixmap::fromImage(imageOwned));
         }, Qt::QueuedConnection);
     }
     
