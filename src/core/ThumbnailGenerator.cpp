@@ -19,10 +19,20 @@ public:
         if (!loader.loadRaw(m_filePath.toStdString(), imageData)) {
             qWarning() << "缩略图生成失败：无法加载 RAW" << m_filePath;
             QMetaObject::invokeMethod(m_generator, [this]() {
+                emit m_generator->metadataReady(m_filePath, 0, 0.0, 0.0, 0);
                 emit m_generator->thumbnailReady(m_filePath, QPixmap());
             }, Qt::QueuedConnection);
             return;
         }
+        
+        // 先发射元数据（主线程安全）
+        int iso = imageData.iso;
+        double exposureTime = imageData.exposureTime;
+        double aperture = imageData.aperture;
+        int focalLength = imageData.focalLength;
+        QMetaObject::invokeMethod(m_generator, [this, iso, exposureTime, aperture, focalLength]() {
+            emit m_generator->metadataReady(m_filePath, iso, exposureTime, aperture, focalLength);
+        }, Qt::QueuedConnection);
         
         std::vector<uint8_t> thumbData;
         if (!loader.generateThumbnail(imageData, m_maxSize, thumbData)) {
@@ -47,10 +57,12 @@ public:
         
         // 创建 QImage（在 worker 线程安全）
         QImage image(thumbData.data(), thumbWidth, thumbHeight, thumbWidth * 3, QImage::Format_RGB888);
+        // 深拷贝：thumbData 是局部变量，run() 返回后会被释放
+        QImage imageOwned = image.copy();
         
         // 将 QPixmap 转换移到主线程执行
-        QMetaObject::invokeMethod(m_generator, [this, image]() {
-            emit m_generator->thumbnailReady(m_filePath, QPixmap::fromImage(image.copy()));
+        QMetaObject::invokeMethod(m_generator, [this, imageOwned]() {
+            emit m_generator->thumbnailReady(m_filePath, QPixmap::fromImage(imageOwned));
         }, Qt::QueuedConnection);
     }
     
@@ -65,6 +77,20 @@ ThumbnailGenerator::ThumbnailGenerator(QObject* parent)
 {
     m_pool.setMaxThreadCount(QThread::idealThreadCount());
     m_pool.setExpiryTimeout(30000); // 30秒超时
+    
+    // 在构造函数中一次性连接 batch 进度跟踪，避免 generateBatch 重复连接
+    connect(this, &ThumbnailGenerator::thumbnailReady, this, [this](const QString&, const QPixmap&) {
+        QMutexLocker locker(&m_mutex);
+        if (m_totalBatch <= 0) return; // 不是 batch 模式
+        
+        m_completedBatch++;
+        emit batchProgress(m_completedBatch, m_totalBatch);
+        if (m_completedBatch >= m_totalBatch) {
+            m_totalBatch = 0;
+            m_completedBatch = 0;
+            emit batchFinished();
+        }
+    });
 }
 
 void ThumbnailGenerator::generateAsync(const QString& filePath, int maxSize) {
@@ -81,16 +107,6 @@ void ThumbnailGenerator::generateBatch(const QStringList& filePaths, int maxSize
     for (const QString& filePath : filePaths) {
         auto* task = new ThumbnailTask(filePath, maxSize, this);
         task->setAutoDelete(true);
-        
-        connect(this, &ThumbnailGenerator::thumbnailReady, this, [this](const QString&, const QPixmap&) {
-            QMutexLocker locker(&m_mutex);
-            m_completedBatch++;
-            emit batchProgress(m_completedBatch, m_totalBatch);
-            if (m_completedBatch >= m_totalBatch) {
-                emit batchFinished();
-            }
-        }, Qt::UniqueConnection);
-        
         m_pool.start(task);
     }
     

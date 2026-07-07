@@ -21,6 +21,7 @@ public:
     
 signals:
     void thumbnailReady(const QString& filePath, const QPixmap& thumbnail);
+    void metadataReady(const QString& filePath, int iso, double exposureTime, double aperture, int focalLength);
     void batchProgress(int current, int total);
     void batchFinished();
     
