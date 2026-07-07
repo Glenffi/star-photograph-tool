@@ -558,12 +558,15 @@ private:
             }
         });
 
-        // 文件变化 -> 更新按钮状态 & 参考帧列表
+        // 文件变化 -> 更新按钮状态 & 参考帧列表 & 智能推荐堆栈算法
         connect(m_projectPanel, &ProjectPanel::filesChanged, this, [this]() {
             int count = m_projectPanel->includedFilePaths().size();
             m_toolbar->enableProcess(count >= 2);
             if (count < 2) m_toolbar->enableExport(false);
             m_paramsPanel->updateRefFrameList(m_projectPanel->includedFilePaths());
+            if (count >= 2) {
+                m_paramsPanel->recommendStackMethod(count);
+            }
         });
 
         // 参考帧变化
@@ -688,6 +691,9 @@ private slots:
             QMessageBox::warning(this, "处理", "需要至少 2 张未排除的图像才能开始处理");
             return;
         }
+
+        // 保存当前参数设置
+        m_paramsPanel->saveCurrentSettings();
 
         QString refFrame = m_projectPanel->referenceFramePath();
         if (refFrame.isEmpty()) {
