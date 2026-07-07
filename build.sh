@@ -93,6 +93,29 @@ if [ ${#MISSING_DEPS[@]} -ne 0 ]; then
     exit 1
 fi
 
+# 解析命令行参数
+CLEAN_BUILD=false
+BUILD_ONLY=false
+for arg in "$@"; do
+    case "$arg" in
+        --clean)
+            CLEAN_BUILD=true
+            ;;
+        --build-only)
+            BUILD_ONLY=true
+            ;;
+        --help)
+            echo "用法: $0 [选项]"
+            echo ""
+            echo "选项:"
+            echo "  --clean       清理 build 目录后重新配置（完整重建）"
+            echo "  --build-only  仅编译，不启动应用"
+            echo "  --help        显示此帮助信息"
+            exit 0
+            ;;
+    esac
+done
+
 # 配置 Git 代理（用于推送到 GitHub）
 if [ -x "$(which scutil 2>/dev/null)" ]; then
     # macOS - 检测系统代理
@@ -109,9 +132,18 @@ fi
 # 创建并进入 build 目录
 echo ""
 echo "🔨 配置 CMake..."
-rm -rf "${BUILD_DIR}"
+
+if [ "$CLEAN_BUILD" = true ]; then
+    echo -e "${YELLOW}⚠️  清理 build 目录（完整重建）${NC}"
+    rm -rf "${BUILD_DIR}"
+fi
+
 mkdir -p "${BUILD_DIR}"
 cd "${BUILD_DIR}"
+
+if [ ! -f "CMakeCache.txt" ]; then
+    echo -e "${BLUE}首次配置 CMake...${NC}"
+fi
 
 cmake .. -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_PREFIX_PATH="${CMAKE_PREFIX_PATH}" \
@@ -138,6 +170,12 @@ if [ $? -ne 0 ]; then
 fi
 
 echo -e "${GREEN}✅ 编译成功${NC}"
+
+if [ "$BUILD_ONLY" = true ]; then
+    echo ""
+    echo -e "${BLUE}📦 仅编译模式，跳过启动应用${NC}"
+    exit 0
+fi
 
 # 查找可执行文件
 echo ""
