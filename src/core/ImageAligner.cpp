@@ -182,7 +182,8 @@ bool ImageAligner::ransacAffine(const std::vector<StarPoint>& refStars,
                                   AlignmentTransform& out) {
     if (matches.size() < 3) return false;
 
-    std::mt19937 rng(42);
+    std::random_device rd;
+    std::mt19937 rng(rd());
     std::uniform_int_distribution<int> dist(0, static_cast<int>(matches.size()) - 1);
 
     int bestInliers = 0;
@@ -190,14 +191,16 @@ bool ImageAligner::ransacAffine(const std::vector<StarPoint>& refStars,
     double threshold = 2.0; // 像素误差阈值
 
     for (int iter = 0; iter < 100; ++iter) {
-        // 随机采样3对
+        // 随机采样3对（无放回）
         std::vector<std::pair<int, int>> sample;
-        std::vector<int> idx(matches.size());
-        std::iota(idx.begin(), idx.end(), 0);
-        std::shuffle(idx.begin(), idx.end(), rng);
-
-        for (int i = 0; i < 3 && i < static_cast<int>(idx.size()); ++i) {
-            sample.push_back(matches[idx[i]]);
+        std::vector<int> used;
+        for (int s = 0; s < 3; ++s) {
+            int idx;
+            do {
+                idx = dist(rng);
+            } while (std::find(used.begin(), used.end(), idx) != used.end());
+            used.push_back(idx);
+            sample.push_back(matches[idx]);
         }
 
         AlignmentTransform t;
