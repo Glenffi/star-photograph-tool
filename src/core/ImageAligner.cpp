@@ -251,9 +251,14 @@ bool ImageAligner::applyTransform(const std::vector<uint16_t>& src, int w, int h
 
     for (int y = 0; y < h; ++y) {
         for (int x = 0; x < w; ++x) {
-            // 目标坐标 (x,y) 对应源坐标
-            double sx = t.a * x + t.b * y + t.c;
-            double sy = t.d * x + t.e * y + t.f;
+            // 目标坐标 (x,y) 对应源坐标：使用逆变换
+            double det = t.a * t.e - t.b * t.d;
+            if (std::abs(det) < 1e-12) {
+                dst[y * w + x] = 0;
+                continue;
+            }
+            double sx = (t.e * x - t.b * y + t.b * t.f - t.e * t.c) / det;
+            double sy = (-t.d * x + t.a * y + t.d * t.c - t.a * t.f) / det;
 
             int ix = static_cast<int>(std::floor(sx));
             int iy = static_cast<int>(std::floor(sy));
