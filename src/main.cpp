@@ -17,6 +17,10 @@
 #include <QStyleFactory>
 #include <QFileInfo>
 #include <QDir>
+#include <QDialog>
+#include <QLineEdit>
+#include <QComboBox>
+#include <QLabel>
 
 #include "ui/ProjectPanel.h"
 #include "ui/PreviewPanel.h"
@@ -235,7 +239,7 @@ private:
             statusBar()->showMessage("导出功能将在后续版本实现", 3000);
         });
         connect(m_toolbar, &Toolbar::settingsClicked, this, [this]() {
-            statusBar()->showMessage("设置功能将在后续版本实现", 3000);
+            onSettingsClicked();
         });
         connect(m_toolbar, &Toolbar::aboutClicked, this, &MainWindow::onAboutClicked);
 
@@ -335,6 +339,102 @@ private slots:
             "<hr>"
             "<p>全部代码开源，基于 MIT License</p>"
         );
+    }
+
+    void onSettingsClicked() {
+        auto* dialog = new QDialog(this);
+        dialog->setWindowTitle("设置");
+        dialog->setFixedSize(480, 320);
+        dialog->setStyleSheet(
+            "QDialog { background-color: #161B22; color: #E6EDF3; }"
+            "QLabel { color: #C9D1D9; background-color: transparent; }"
+            "QLineEdit { background-color: #21262D; color: #E6EDF3; "
+            "  border: 1px solid #30363D; border-radius: 4px; padding: 4px 8px; }"
+            "QPushButton { background-color: #21262D; color: #E6EDF3; "
+            "  border: 1px solid #30363D; border-radius: 4px; padding: 6px 16px; }"
+            "QPushButton:hover { background-color: #30363D; }"
+            "QComboBox { background-color: #21262D; color: #E6EDF3; "
+            "  border: 1px solid #30363D; border-radius: 4px; padding: 4px 8px; }"
+        );
+
+        auto* layout = new QVBoxLayout(dialog);
+        layout->setSpacing(16);
+        layout->setContentsMargins(20, 20, 20, 20);
+
+        auto* title = new QLabel("⚙️ 应用设置", dialog);
+        title->setStyleSheet("font-size: 16px; font-weight: bold; color: #E6EDF3;");
+        layout->addWidget(title);
+
+        // 输出目录
+        auto* outDirRow = new QHBoxLayout();
+        auto* outDirLabel = new QLabel("输出目录:", dialog);
+        auto* outDirEdit = new QLineEdit(QDir::homePath() + "/StarProcessor/Output", dialog);
+        outDirEdit->setReadOnly(true);
+        auto* outDirBtn = new QPushButton("📁", dialog);
+        outDirBtn->setFixedSize(28, 28);
+        connect(outDirBtn, &QPushButton::clicked, this, [outDirEdit]() {
+            QString dir = QFileDialog::getExistingDirectory(nullptr, "选择输出目录");
+            if (!dir.isEmpty()) outDirEdit->setText(dir);
+        });
+        outDirRow->addWidget(outDirLabel);
+        outDirRow->addWidget(outDirEdit, 1);
+        outDirRow->addWidget(outDirBtn);
+        layout->addLayout(outDirRow);
+
+        // 缓存目录
+        auto* cacheRow = new QHBoxLayout();
+        auto* cacheLabel = new QLabel("缓存目录:", dialog);
+        auto* cacheEdit = new QLineEdit(QDir::homePath() + "/StarProcessor/Cache", dialog);
+        cacheEdit->setReadOnly(true);
+        auto* cacheBtn = new QPushButton("📁", dialog);
+        cacheBtn->setFixedSize(28, 28);
+        connect(cacheBtn, &QPushButton::clicked, this, [cacheEdit]() {
+            QString dir = QFileDialog::getExistingDirectory(nullptr, "选择缓存目录");
+            if (!dir.isEmpty()) cacheEdit->setText(dir);
+        });
+        cacheRow->addWidget(cacheLabel);
+        cacheRow->addWidget(cacheEdit, 1);
+        cacheRow->addWidget(cacheBtn);
+        layout->addLayout(cacheRow);
+
+        // 最大内存使用
+        auto* memRow = new QHBoxLayout();
+        auto* memLabel = new QLabel("最大内存:", dialog);
+        auto* memCombo = new QComboBox(dialog);
+        memCombo->addItems({"2 GB", "4 GB", "8 GB", "16 GB", "自动"});
+        memCombo->setCurrentIndex(2);
+        memRow->addWidget(memLabel);
+        memRow->addWidget(memCombo);
+        memRow->addStretch();
+        layout->addLayout(memRow);
+
+        // 主题
+        auto* themeRow = new QHBoxLayout();
+        auto* themeLabel = new QLabel("主题:", dialog);
+        auto* themeCombo = new QComboBox(dialog);
+        themeCombo->addItems({"深色（默认）", "浅色", "跟随系统"});
+        themeRow->addWidget(themeLabel);
+        themeRow->addWidget(themeCombo);
+        themeRow->addStretch();
+        layout->addLayout(themeRow);
+
+        layout->addStretch();
+
+        // 底部按钮
+        auto* btnRow = new QHBoxLayout();
+        btnRow->addStretch();
+        auto* okBtn = new QPushButton("确定", dialog);
+        okBtn->setStyleSheet(
+            "QPushButton { background-color: #F0B90B; color: #0D1117; "
+            "  font-weight: bold; border: none; border-radius: 4px; padding: 6px 24px; }"
+            "QPushButton:hover { background-color: #F5C518; }"
+        );
+        connect(okBtn, &QPushButton::clicked, dialog, &QDialog::accept);
+        btnRow->addWidget(okBtn);
+        layout->addLayout(btnRow);
+
+        dialog->exec();
+        dialog->deleteLater();
     }
 
 private:

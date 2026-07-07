@@ -9,6 +9,8 @@
 #include <QPushButton>
 #include <QLabel>
 #include <QTimer>
+#include <QLineEdit>
+#include <QFileDialog>
 
 ParamsPanel::ParamsPanel(QWidget* parent)
     : QWidget(parent)
@@ -96,6 +98,14 @@ void ParamsPanel::setupUI() {
     algoRow->addWidget(algoLabel);
     m_stackAlgorithm = new QComboBox(m_stackGroup);
     m_stackAlgorithm->addItems({"Sigma Clipping", "Median", "Mean", "Kappa-Sigma", "Winsorized"});
+    m_stackAlgorithm->setToolTip(
+        QString::fromUtf8("选择堆栈降噪算法：\n"
+        "• Sigma Clipping：剔除偏离中值过远的像素，适合有飞机/卫星轨迹\n"
+        "• Median：取中位数，简单鲁棒，适合 ≤5 帧\n"
+        "• Mean：取平均值，信噪比最高但抗异常差\n"
+        "• Kappa-Sigma：迭代 Sigma Clipping，κ=2.5 为常用值\n"
+        "• Winsorized：用 MAD 替代标准差，更鲁棒，适合大帧数深空")
+    );
     m_stackAlgorithm->setStyleSheet(m_alignMethod->styleSheet());
     connect(m_stackAlgorithm, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &ParamsPanel::onComboChanged);
     algoRow->addWidget(m_stackAlgorithm, 1);
@@ -104,9 +114,14 @@ void ParamsPanel::setupUI() {
     auto* kappaRow = new QHBoxLayout();
     auto* kappaLabel = new QLabel(QString::fromUtf8("κ值:"), m_stackGroup);
     kappaLabel->setStyleSheet("font-size: 12px; color: #C9D1D9; background-color: transparent;");
+    kappaLabel->setToolTip(QString::fromUtf8("κ (kappa)：异常值剔除阈值系数\n"
+        "• 值越小，剔除越严格，可能误删微弱星点\n"
+        "• 值越大，保留越多，可能残留飞机轨迹\n"
+        "• 推荐值：2.0~3.0，深空常用 2.5"));
     kappaRow->addWidget(kappaLabel);
     m_kappaSlider = createSlider(10, 50, 25);
     m_kappaSlider->setFixedWidth(120);
+    m_kappaSlider->setToolTip(QString::fromUtf8("拖动调整 κ 值，值越小剔除越严格"));
     connect(m_kappaSlider, &QSlider::valueChanged, this, [this](int v) {
         m_kappaLabel->setText(QString::number(v / 10.0, 'f', 1));
     });
@@ -147,14 +162,27 @@ void ParamsPanel::setupUI() {
 
     containerLayout->addWidget(m_optimizeGroup);
 
-    // 缩星组（默认折叠）
-    m_starReduceGroup = createCollapsibleGroup(QString::fromUtf8("▶ 缩星"), false);
+    // 缩星组（始终展开，不可折叠）
+    m_starReduceGroup = new QWidget(this);
+    m_starReduceGroup->setStyleSheet(
+        "QWidget { background-color: #161B22; border: 1px solid #30363D; border-radius: 6px; }"
+    );
     auto* starLayout = new QVBoxLayout(m_starReduceGroup);
+    starLayout->setContentsMargins(12, 12, 12, 12);
     starLayout->setSpacing(8);
 
+    auto* starTitle = new QLabel(QString::fromUtf8("✨ 缩星"), m_starReduceGroup);
+    starTitle->setStyleSheet("font-size: 12px; font-weight: bold; color: #E6EDF3; background-color: transparent;");
+    starLayout->addWidget(starTitle);
+
+    auto* starDesc = new QLabel(QString::fromUtf8("缩小星点尺寸，突出星云细节"), m_starReduceGroup);
+    starDesc->setStyleSheet("font-size: 10px; color: #8B949E; background-color: transparent; padding-bottom: 4px;");
+    starLayout->addWidget(starDesc);
+
     auto* starRow = new QHBoxLayout();
-    m_starReduceCheck = new QCheckBox(QString::fromUtf8("启用"), m_starReduceGroup);
+    m_starReduceCheck = new QCheckBox(QString::fromUtf8("启用缩星"), m_starReduceGroup);
     m_starReduceCheck->setStyleSheet(m_dewarpCheck->styleSheet());
+    m_starReduceCheck->setToolTip(QString::fromUtf8("AI 自动检测星点并缩小尺寸\n关闭时直接输出原始星点"));
     connect(m_starReduceCheck, &QCheckBox::toggled, this, &ParamsPanel::onCheckChanged);
     starRow->addWidget(m_starReduceCheck);
     starLayout->addLayout(starRow);
@@ -162,10 +190,12 @@ void ParamsPanel::setupUI() {
     auto* strengthRow = new QHBoxLayout();
     auto* strengthLabel = new QLabel(QString::fromUtf8("强度:"), m_starReduceGroup);
     strengthLabel->setStyleSheet("font-size: 12px; color: #C9D1D9; background-color: transparent;");
+    strengthLabel->setToolTip(QString::fromUtf8("缩星强度：值越大星点越小\n推荐 30-70，过高会损失星点细节"));
     strengthRow->addWidget(strengthLabel);
     m_starReduceSlider = createSlider(0, 100, 50);
     m_starReduceSlider->setEnabled(false);
     m_starReduceSlider->setFixedWidth(120);
+    m_starReduceSlider->setToolTip(QString::fromUtf8("拖动调整缩星强度"));
     connect(m_starReduceSlider, &QSlider::valueChanged, this, &ParamsPanel::onSliderValueChanged);
     connect(m_starReduceSlider, &QSlider::sliderReleased, this, &ParamsPanel::onSliderReleased);
     strengthRow->addWidget(m_starReduceSlider);
@@ -173,18 +203,28 @@ void ParamsPanel::setupUI() {
 
     containerLayout->addWidget(m_starReduceGroup);
 
-    // 输出组（默认折叠）
-    m_outputGroup = createCollapsibleGroup(QString::fromUtf8("▶ 输出"), false);
+    // 输出组（始终展开，不可折叠）
+    m_outputGroup = new QWidget(this);
+    m_outputGroup->setStyleSheet(
+        "QWidget { background-color: #161B22; border: 1px solid #30363D; border-radius: 6px; }"
+    );
     auto* outputLayout = new QVBoxLayout(m_outputGroup);
+    outputLayout->setContentsMargins(12, 12, 12, 12);
     outputLayout->setSpacing(8);
+
+    auto* outTitle = new QLabel(QString::fromUtf8("💾 输出"), m_outputGroup);
+    outTitle->setStyleSheet("font-size: 12px; font-weight: bold; color: #E6EDF3; background-color: transparent;");
+    outputLayout->addWidget(outTitle);
 
     auto* formatRow = new QHBoxLayout();
     auto* formatLabel = new QLabel(QString::fromUtf8("格式:"), m_outputGroup);
     formatLabel->setStyleSheet("font-size: 12px; color: #C9D1D9; background-color: transparent;");
+    formatLabel->setToolTip(QString::fromUtf8("TIFF 16-bit：最高质量，保留完整动态范围\nTIFF 32-bit：浮点精度，专业后期首选\nPNG 16-bit：无损压缩，体积较小\nFITS：天文标准格式\nJPEG：仅用于预览分享"));
     formatRow->addWidget(formatLabel);
     m_outputFormat = new QComboBox(m_outputGroup);
     m_outputFormat->addItems({"TIFF 16-bit", "TIFF 32-bit", "PNG 16-bit", "FITS", "JPEG (预览)"});
     m_outputFormat->setStyleSheet(m_alignMethod->styleSheet());
+    m_outputFormat->setToolTip(QString::fromUtf8("输出图像格式，TIFF 16-bit 为推荐默认"));
     connect(m_outputFormat, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &ParamsPanel::onComboChanged);
     formatRow->addWidget(m_outputFormat, 1);
     outputLayout->addLayout(formatRow);
@@ -199,6 +239,32 @@ void ParamsPanel::setupUI() {
     connect(m_colorSpace, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &ParamsPanel::onComboChanged);
     colorRow->addWidget(m_colorSpace, 1);
     outputLayout->addLayout(colorRow);
+
+    // 输出路径选择
+    auto* pathRow = new QHBoxLayout();
+    auto* pathLabel = new QLabel(QString::fromUtf8("输出到:"), m_outputGroup);
+    pathLabel->setStyleSheet("font-size: 12px; color: #C9D1D9; background-color: transparent;");
+    pathRow->addWidget(pathLabel);
+    auto* pathEdit = new QLineEdit(QDir::homePath() + "/StarProcessor/Output", m_outputGroup);
+    pathEdit->setStyleSheet(
+        "QLineEdit { background-color: #21262D; color: #E6EDF3; "
+        "  border: 1px solid #30363D; border-radius: 4px; padding: 4px 8px; font-size: 11px; }"
+    );
+    pathEdit->setReadOnly(true);
+    pathRow->addWidget(pathEdit, 1);
+    auto* pathBtn = new QPushButton("📁", m_outputGroup);
+    pathBtn->setFixedSize(24, 24);
+    pathBtn->setStyleSheet(
+        "QPushButton { background-color: #21262D; color: #E6EDF3; "
+        "  border: 1px solid #30363D; border-radius: 4px; font-size: 11px; }"
+        "QPushButton:hover { background-color: #30363D; }"
+    );
+    connect(pathBtn, &QPushButton::clicked, this, [pathEdit]() {
+        QString dir = QFileDialog::getExistingDirectory(nullptr, QString::fromUtf8("选择输出目录"));
+        if (!dir.isEmpty()) pathEdit->setText(dir);
+    });
+    pathRow->addWidget(pathBtn);
+    outputLayout->addLayout(pathRow);
 
     containerLayout->addWidget(m_outputGroup);
 

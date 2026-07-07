@@ -53,12 +53,12 @@ private:
     QCheckBox* m_stretchCheck = nullptr;
 
     // 缩星组
-    QGroupBox* m_starReduceGroup = nullptr;
+    QWidget* m_starReduceGroup = nullptr;
     QCheckBox* m_starReduceCheck = nullptr;
     QSlider* m_starReduceSlider = nullptr;
 
     // 输出组
-    QGroupBox* m_outputGroup = nullptr;
+    QWidget* m_outputGroup = nullptr;
     QComboBox* m_outputFormat = nullptr;
     QComboBox* m_colorSpace = nullptr;
 
