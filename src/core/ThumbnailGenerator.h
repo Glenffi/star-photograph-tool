@@ -12,6 +12,7 @@ class ThumbnailGenerator : public QObject {
     Q_OBJECT
 public:
     explicit ThumbnailGenerator(QObject* parent = nullptr);
+    ~ThumbnailGenerator() override;
     
     void generateAsync(const QString& filePath, int maxSize);
     void generateBatch(const QStringList& filePaths, int maxSize);

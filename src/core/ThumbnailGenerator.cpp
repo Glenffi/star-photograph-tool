@@ -3,6 +3,7 @@
 #include <QImage>
 #include <QFileInfo>
 #include <QDebug>
+#include <QPointer>
 
 #include <QMetaObject>
 
@@ -18,9 +19,11 @@ public:
         
         if (!loader.loadRaw(m_filePath.toStdString(), imageData)) {
             qWarning() << "缩略图生成失败：无法加载 RAW" << m_filePath;
-            QMetaObject::invokeMethod(m_generator, [generator = m_generator, filePath = m_filePath]() {
-                emit generator->metadataReady(filePath, 0, 0.0, 0.0, 0);
-                emit generator->thumbnailReady(filePath, QPixmap());
+            QPointer<ThumbnailGenerator> safeGen(m_generator);
+            QMetaObject::invokeMethod(m_generator, [safeGen, filePath = m_filePath]() {
+                if (!safeGen) return;
+                emit safeGen->metadataReady(filePath, 0, 0.0, 0.0, 0);
+                emit safeGen->thumbnailReady(filePath, QPixmap());
             }, Qt::QueuedConnection);
             return;
         }
@@ -30,15 +33,18 @@ public:
         double exposureTime = imageData.exposureTime;
         double aperture = imageData.aperture;
         int focalLength = imageData.focalLength;
-        QMetaObject::invokeMethod(m_generator, [generator = m_generator, filePath = m_filePath, iso, exposureTime, aperture, focalLength]() {
-            emit generator->metadataReady(filePath, iso, exposureTime, aperture, focalLength);
+        QPointer<ThumbnailGenerator> safeGen(m_generator);
+        QMetaObject::invokeMethod(m_generator, [safeGen, filePath = m_filePath, iso, exposureTime, aperture, focalLength]() {
+            if (!safeGen) return;
+            emit safeGen->metadataReady(filePath, iso, exposureTime, aperture, focalLength);
         }, Qt::QueuedConnection);
         
         std::vector<uint8_t> thumbData;
         if (!loader.generateThumbnail(imageData, m_maxSize, thumbData)) {
             qWarning() << "缩略图生成失败：无法生成缩略图" << m_filePath;
-            QMetaObject::invokeMethod(m_generator, [generator = m_generator, filePath = m_filePath]() {
-                emit generator->thumbnailReady(filePath, QPixmap());
+            QMetaObject::invokeMethod(m_generator, [safeGen, filePath = m_filePath]() {
+                if (!safeGen) return;
+                emit safeGen->thumbnailReady(filePath, QPixmap());
             }, Qt::QueuedConnection);
             return;
         }
@@ -61,8 +67,9 @@ public:
         QImage imageOwned = image.copy();
         
         // 将 QPixmap 转换移到主线程执行
-        QMetaObject::invokeMethod(m_generator, [generator = m_generator, filePath = m_filePath, imageOwned]() {
-            emit generator->thumbnailReady(filePath, QPixmap::fromImage(imageOwned));
+        QMetaObject::invokeMethod(m_generator, [safeGen, filePath = m_filePath, imageOwned]() {
+            if (!safeGen) return;
+            emit safeGen->thumbnailReady(filePath, QPixmap::fromImage(imageOwned));
         }, Qt::QueuedConnection);
     }
     
@@ -91,6 +98,11 @@ ThumbnailGenerator::ThumbnailGenerator(QObject* parent)
             emit batchFinished();
         }
     });
+}
+
+ThumbnailGenerator::~ThumbnailGenerator() {
+    cancelAll();
+    m_pool.waitForDone();
 }
 
 void ThumbnailGenerator::generateAsync(const QString& filePath, int maxSize) {
