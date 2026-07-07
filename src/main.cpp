@@ -200,7 +200,6 @@ protected:
             m_errorString = "堆栈失败";
             return;
         }
-        m_stackedData = result;
         m_frameCount = static_cast<int>(alignedImages.size());
         emit progress(80);
 
@@ -226,6 +225,9 @@ protected:
             result = std::move(optimized);
             emit progress(90);
         }
+
+        // 回写自动优化后的结果到 m_stackedData
+        m_stackedData = std::move(result);
 
         // 6. 导出（根据参数）
         emit stageMessage("导出结果...");
