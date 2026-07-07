@@ -15,6 +15,9 @@
 #include <QPainter>
 #include <QGraphicsOpacityEffect>
 #include <QEnterEvent>
+#include <QDragEnterEvent>
+#include <QDropEvent>
+#include <QMimeData>
 
 // ==================== FileCard ====================
 
@@ -185,9 +188,13 @@ ProjectPanel::ProjectPanel(QWidget* parent)
     : QWidget(parent)
 {
     setupUI();
+    setAcceptDrops(true);
+
     m_thumbnailGen = new ThumbnailGenerator(this);
     connect(m_thumbnailGen, &ThumbnailGenerator::thumbnailReady,
             this, &ProjectPanel::onThumbnailReady);
+    connect(m_thumbnailGen, &ThumbnailGenerator::metadataReady,
+            this, &ProjectPanel::onMetadataReady);
 }
 
 ProjectPanel::~ProjectPanel() = default;
@@ -356,14 +363,8 @@ void ProjectPanel::addFiles(const QStringList& filePaths) {
         item.filePath = filePath;
         item.fileName = QFileInfo(filePath).fileName();
 
-        RawImageLoader loader;
-        RawImageLoader::ImageData imageData;
-        if (loader.loadRaw(filePath.toStdString(), imageData)) {
-            item.iso = imageData.iso;
-            item.exposureTime = imageData.exposureTime;
-            item.aperture = imageData.aperture;
-            item.focalLength = imageData.focalLength;
-        }
+        // 元数据提取已改为异步：由 ThumbnailGenerator 在 worker 线程加载
+        // 完成后通过 metadataReady 信号传回主线程
 
         m_fileItems.append(item);
         int index = m_fileItems.size() - 1;
@@ -512,6 +513,17 @@ void ProjectPanel::onThumbnailReady(const QString& filePath, const QPixmap& thum
     updateCard(idx);
 }
 
+void ProjectPanel::onMetadataReady(const QString& filePath, int iso, double exposureTime, double aperture, int focalLength) {
+    int idx = findIndexByPath(filePath);
+    if (idx < 0) return;
+    m_fileItems[idx].iso = iso;
+    m_fileItems[idx].exposureTime = exposureTime;
+    m_fileItems[idx].aperture = aperture;
+    m_fileItems[idx].focalLength = focalLength;
+    updateCard(idx);
+    updateBottomBar();
+}
+
 void ProjectPanel::onCustomContextMenu(const QPoint& pos) {
     Q_UNUSED(pos)
     // 通过卡片触发
@@ -567,7 +579,29 @@ void ProjectPanel::onRemoveFromList() {
 }
 
 void ProjectPanel::onImportClicked() {
-    // 占位：空状态导入按钮点击后通知主窗口刷新
-    // 实际文件导入由主窗口通过 Toolbar 按钮处理
-    emit filesChanged();
+    // 空状态按钮点击时通知主窗口打开导入对话框
+    emit filesDropped(QStringList());
+}
+
+void ProjectPanel::dragEnterEvent(QDragEnterEvent* event) {
+    if (event->mimeData()->hasUrls()) {
+        event->acceptProposedAction();
+    }
+}
+
+void ProjectPanel::dropEvent(QDropEvent* event) {
+    const QMimeData* mimeData = event->mimeData();
+    if (!mimeData->hasUrls()) return;
+
+    QStringList filePaths;
+    for (const QUrl& url : mimeData->urls()) {
+        if (url.isLocalFile()) {
+            filePaths.append(url.toLocalFile());
+        }
+    }
+
+    if (!filePaths.isEmpty()) {
+        addFiles(filePaths);
+        emit filesDropped(filePaths);
+    }
 }

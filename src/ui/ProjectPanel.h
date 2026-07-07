@@ -73,15 +73,21 @@ signals:
     void fileSelected(const QString& filePath);
     void requestMetadata(const QString& filePath);
     void filesChanged();
+    void filesDropped(const QStringList& filePaths);
 
 private slots:
     void onThumbnailReady(const QString& filePath, const QPixmap& thumbnail);
+    void onMetadataReady(const QString& filePath, int iso, double exposureTime, double aperture, int focalLength);
     void onCustomContextMenu(const QPoint& pos);
     void onExcludeSelected();
     void onSetReferenceFrame();
     void onViewMetadata();
     void onRemoveFromList();
     void onImportClicked();
+
+protected:
+    void dragEnterEvent(QDragEnterEvent* event) override;
+    void dropEvent(QDropEvent* event) override;
 
 private:
     void setupUI();
