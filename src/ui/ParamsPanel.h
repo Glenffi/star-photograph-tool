@@ -29,6 +29,8 @@ public:
     QString outputFormat() const;
     QString outputPath() const;
 
+    void updateRefFrameList(const QStringList& fileNames);
+
 signals:
     void paramsChanged();  // 参数发生任何变化时触发
 
@@ -44,6 +46,7 @@ private slots:
 
 private:
     void setupUI();
+    void loadPreset();
     QGroupBox* createCollapsibleGroup(const QString& title, bool expanded = true);
     QSlider* createSlider(int min, int max, int value, const QString& suffix = QString());
 

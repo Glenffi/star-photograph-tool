@@ -1,3 +1,4 @@
+#include <QSettings>
 #include <QApplication>
 #include <QMainWindow>
 #include <QWidget>
@@ -523,11 +524,12 @@ private:
             }
         });
 
-        // 文件变化 -> 更新按钮状态
+        // 文件变化 -> 更新按钮状态 & 参考帧列表
         connect(m_projectPanel, &ProjectPanel::filesChanged, this, [this]() {
             int count = m_projectPanel->includedFilePaths().size();
             m_toolbar->enableProcess(count >= 2);
             if (count < 2) m_toolbar->enableExport(false);
+            m_paramsPanel->updateRefFrameList(m_projectPanel->includedFilePaths());
         });
 
         // 参考帧变化
@@ -603,13 +605,31 @@ private slots:
     }
 
     void onViewMetadata(const QString& filePath) {
-        QMessageBox::information(
-            this,
-            "图像元数据",
-            QString("<b>文件路径：</b>%1<br><br>"
-                    "<i>完整元数据读取将在 P1 阶段实现</i>")
-                .arg(filePath)
-        );
+        RawImageLoader loader;
+        RawImageLoader::ImageData imageData;
+        if (!loader.loadRaw(filePath.toStdString(), imageData)) {
+            QMessageBox::warning(this, "元数据", "无法加载文件元数据");
+            return;
+        }
+        QString info = QString(
+            "<b>文件路径：</b>%1<br>"
+            "<b>相机型号：</b>%2<br>"
+            "<b>ISO：</b>%3<br>"
+            "<b>曝光时间：</b>%4<br>"
+            "<b>光圈：</b>%5<br>"
+            "<b>焦距：</b>%6 mm<br>"
+            "<b>尺寸：</b>%7×%8<br>"
+            "<b>时间戳：</b>%9"
+        ).arg(filePath)
+         .arg(QString::fromStdString(imageData.cameraModel))
+         .arg(imageData.iso)
+         .arg(imageData.exposureTime > 0 ? QString("1/%1s").arg(qRound(1.0 / imageData.exposureTime)) : "—")
+         .arg(imageData.aperture > 0 ? QString("f/%1").arg(imageData.aperture, 0, 'f', 1) : "—")
+         .arg(imageData.focalLength)
+         .arg(imageData.width)
+         .arg(imageData.height)
+         .arg(QString::fromStdString(imageData.timestamp));
+        QMessageBox::information(this, "图像元数据", info);
     }
 
     void onAboutClicked() {
@@ -763,7 +783,9 @@ private slots:
         // 输出目录
         auto* outDirRow = new QHBoxLayout();
         auto* outDirLabel = new QLabel("输出目录:", dialog);
-        auto* outDirEdit = new QLineEdit(QDir::homePath() + "/StarProcessor/Output", dialog);
+        QSettings settings("StarProcessor", "App");
+        QString defaultOutDir = settings.value("outputDir", QDir::homePath() + "/StarProcessor/Output").toString();
+        auto* outDirEdit = new QLineEdit(defaultOutDir, dialog);
         outDirEdit->setReadOnly(true);
         auto* outDirBtn = new QPushButton("📁", dialog);
         outDirBtn->setFixedSize(28, 28);
@@ -779,7 +801,8 @@ private slots:
         // 缓存目录
         auto* cacheRow = new QHBoxLayout();
         auto* cacheLabel = new QLabel("缓存目录:", dialog);
-        auto* cacheEdit = new QLineEdit(QDir::homePath() + "/StarProcessor/Cache", dialog);
+        QString defaultCacheDir = settings.value("cacheDir", QDir::homePath() + "/StarProcessor/Cache").toString();
+        auto* cacheEdit = new QLineEdit(defaultCacheDir, dialog);
         cacheEdit->setReadOnly(true);
         auto* cacheBtn = new QPushButton("📁", dialog);
         cacheBtn->setFixedSize(28, 28);
@@ -797,7 +820,7 @@ private slots:
         auto* memLabel = new QLabel("最大内存:", dialog);
         auto* memCombo = new QComboBox(dialog);
         memCombo->addItems({"2 GB", "4 GB", "8 GB", "16 GB", "自动"});
-        memCombo->setCurrentIndex(2);
+        memCombo->setCurrentIndex(settings.value("maxMemory", 2).toInt());
         memRow->addWidget(memLabel);
         memRow->addWidget(memCombo);
         memRow->addStretch();
@@ -808,6 +831,7 @@ private slots:
         auto* themeLabel = new QLabel("主题:", dialog);
         auto* themeCombo = new QComboBox(dialog);
         themeCombo->addItems({"深色（默认）", "浅色", "跟随系统"});
+        themeCombo->setCurrentIndex(settings.value("theme", 0).toInt());
         themeRow->addWidget(themeLabel);
         themeRow->addWidget(themeCombo);
         themeRow->addStretch();
@@ -824,7 +848,14 @@ private slots:
             "  font-weight: bold; border: none; border-radius: 4px; padding: 6px 24px; }"
             "QPushButton:hover { background-color: #F5C518; }"
         );
-        connect(okBtn, &QPushButton::clicked, dialog, &QDialog::accept);
+        connect(okBtn, &QPushButton::clicked, dialog, [dialog, outDirEdit, cacheEdit, memCombo, themeCombo]() {
+            QSettings s("StarProcessor", "App");
+            s.setValue("outputDir", outDirEdit->text());
+            s.setValue("cacheDir", cacheEdit->text());
+            s.setValue("maxMemory", memCombo->currentIndex());
+            s.setValue("theme", themeCombo->currentIndex());
+            dialog->accept();
+        });
         btnRow->addWidget(okBtn);
         layout->addLayout(btnRow);
 
@@ -832,7 +863,6 @@ private slots:
         dialog->deleteLater();
     }
 
-private:
 private:
     QLabel* m_mouseStatusLabel = nullptr;
     Toolbar* m_toolbar = nullptr;
