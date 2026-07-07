@@ -113,8 +113,8 @@ protected:
         }
 
         // 确定参考帧索引
-        int refIdx = 0;
-        for (int i = 0; i < loadedPaths.size(); ++i) {
+    std::size_t refIdx = 0;
+        for (std::size_t i = 0; i < loadedPaths.size(); ++i) {
             if (loadedPaths[i] == m_refFrame) {
                 refIdx = i;
                 break;
@@ -143,7 +143,7 @@ protected:
         std::vector<std::vector<uint16_t>> alignedImages;
         alignedImages.push_back(refImg.data); // 参考帧不需要变换
 
-        for (int i = 0; i < loadedImages.size(); ++i) {
+        for (std::size_t i = 0; i < loadedImages.size(); ++i) {
             if (m_cancelled.load()) return;
             if (i == refIdx) continue;
 

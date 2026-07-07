@@ -6,7 +6,7 @@
 bool ImageExporter::export16Bit(const std::vector<uint16_t>& image,
                                   int width, int height,
                                   const std::string& path,
-                                  Format format) {
+                                  Format /*format*/) {
     if (image.empty() || width <= 0 || height <= 0 || static_cast<int>(image.size()) != width * height) {
         std::cerr << "ImageExporter: 无效的图像数据" << std::endl;
         return false;
@@ -44,7 +44,7 @@ bool ImageExporter::export16Bit(const std::vector<uint16_t>& image,
 bool ImageExporter::exportRgb16(const std::vector<uint16_t>& rgb,
                                   int width, int height,
                                   const std::string& path,
-                                  Format format) {
+                                  Format /*format*/) {
     if (rgb.empty() || width <= 0 || height <= 0 || static_cast<int>(rgb.size()) != width * height * 3) {
         std::cerr << "ImageExporter: 无效的 RGB 图像数据" << std::endl;
         return false;

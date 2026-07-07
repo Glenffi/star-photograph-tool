@@ -2,7 +2,7 @@
 
 跨平台 RAW 图像处理软件，专注于星空摄影领域。
 
-> **当前阶段**：P0.2 — 基础设施与 UI 框架搭建。核心处理算法将在 P1 阶段实现。
+> **当前阶段**：P1 — 核心引擎。已实现 RAW 加载、星点检测、图像对齐、堆栈降噪与导出功能。
 
 ## 核心功能
 
@@ -39,13 +39,17 @@ StarProcessor/
 ├── src/
 │   ├── main.cpp                 # 主入口与 MainWindow
 │   ├── core/
-│   │   ├── RawImageLoader.h/cpp     # RAW 文件加载与解码
-│   │   └── ThumbnailGenerator.h/cpp # 异步缩略图生成
+│   │   ├── RawImageLoader.h/cpp       # RAW 文件加载与解码
+│   │   ├── ThumbnailGenerator.h/cpp   # 异步缩略图生成
+│   │   ├── StarDetector.h/cpp         # 星点检测与 2D 高斯拟合
+│   │   ├── ImageAligner.h/cpp         # 基于星点的图像对齐
+│   │   ├── StackingEngine.h/cpp       # 堆栈降噪（均值/中值）
+│   │   └── ImageExporter.h/cpp        # 16-bit TIFF 导出
 │   └── ui/
-│       ├── ProjectPanel.h/cpp       # 左侧面板：文件列表
-│       ├── PreviewPanel.h/cpp       # 中央面板：图像预览
-│       ├── ParamsPanel.h/cpp        # 右侧面板：处理参数
-│       └── Toolbar.h/cpp            # 顶部工具栏
+│       ├── ProjectPanel.h/cpp         # 左侧面板：文件列表
+│       ├── PreviewPanel.h/cpp         # 中央面板：图像预览
+│       ├── ParamsPanel.h/cpp          # 右侧面板：处理参数
+│       └── Toolbar.h/cpp              # 顶部工具栏
 ├── cmake/
 │   └── Info.plist.in            # macOS Bundle 配置
 ├── build.sh                     # 一键构建脚本（macOS）
@@ -101,11 +105,11 @@ cmake --build . --config Release
 .\Release\StarProcessor.exe
 ```
 
-> **注意**：当前 P0.2 阶段仅验证 UI 框架与 RAW 加载基础设施，核心处理算法尚未实现。
+> **注意**：当前 P1 阶段已实现核心处理链路（对齐 → 堆栈 → 导出），自动优化（去雾、曲线）与缩星功能将在后续版本迭代。
 
 ## 已知限制
 
-- **P0.2 阶段**：核心处理算法（对齐、堆栈、缩星）尚未实现，仅提供 UI 框架和 RAW 预览
+- **P1 阶段**：核心对齐、堆栈、导出已可用；自动优化（去雾、曲线调整）与缩星功能尚未实现
 - **Bayer 解码**：当前使用简单最近邻插值，质量低于专业 debayer 算法
 - **色彩管理**：输出色彩空间转换尚未集成，当前为 sRGB 预览
 - **AI 功能**：云端 AI 建议服务需单独部署后端（见 `ai-service/` 目录，后续发布）

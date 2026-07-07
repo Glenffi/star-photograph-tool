@@ -54,7 +54,7 @@ void StarDetector::gaussianBlur(const std::vector<uint16_t>& src, int w, int h,
     }
 }
 
-float StarDetector::estimateBackground(const std::vector<uint16_t>& image, int w, int h) {
+float StarDetector::estimateBackground(const std::vector<uint16_t>& image, int /*w*/, int /*h*/) {
     // 采样图像中的一部分像素来估计背景
     size_t sampleCount = std::min<size_t>(image.size(), 65536);
     size_t step = image.size() / sampleCount;
