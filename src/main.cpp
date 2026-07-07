@@ -671,7 +671,7 @@ private slots:
             "<h2>StarProcessor</h2>"
             "<p>为星空摄影师打造的跨平台 RAW 处理工具</p>"
             "<p><b>版本：</b>0.4.0</p>"
-            "<p><b>阶段：</b>P1 — 核心引擎</p>"
+            "<p><b>阶段：</b>P2 — 堆栈降噪与自动优化</p>"
             "<p><b>技术栈：</b>C++17 + Qt6 + CMake + LibRaw</p>"
             "<p><b>目标平台：</b>Windows + macOS</p>"
             "<hr>"
