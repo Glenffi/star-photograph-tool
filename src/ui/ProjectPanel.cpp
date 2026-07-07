@@ -69,7 +69,7 @@ FileCard::FileCard(const FileItem& item, QWidget* parent)
         }
     }
     // FWHM 占位，后续实现
-    metaParts.append(QString::fromUtf8("★4.2"));
+    metaParts.append(QString::fromUtf8("FWHM —"));
 
     m_metaLabel = new QLabel(this);
     m_metaLabel->setStyleSheet("font-size: 11px; color: #8B949E; background-color: transparent;");
@@ -105,7 +105,7 @@ void FileCard::updateFromItem(const FileItem& item) {
             metaParts.append(QString("1/%1s").arg(qRound(1.0 / item.exposureTime)));
         }
     }
-    metaParts.append(QString::fromUtf8("★4.2"));
+    metaParts.append(QString::fromUtf8("FWHM —"));
     m_metaLabel->setText(metaParts.join(" | "));
 
     updateStyle();

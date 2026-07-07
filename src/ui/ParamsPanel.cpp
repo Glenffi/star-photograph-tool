@@ -11,6 +11,8 @@
 #include <QTimer>
 #include <QLineEdit>
 #include <QFileDialog>
+#include <QFileInfo>
+#include <QSettings>
 
 ParamsPanel::ParamsPanel(QWidget* parent)
     : QWidget(parent)
@@ -539,4 +541,16 @@ QString ParamsPanel::outputFormat() const {
 
 QString ParamsPanel::outputPath() const {
     return m_outputPath ? m_outputPath->text() : (QDir::homePath() + "/StarProcessor/Output");
+}
+
+void ParamsPanel::updateRefFrameList(const QStringList& fileNames) {
+    if (!m_refFrame) return;
+    QString current = m_refFrame->currentText();
+    m_refFrame->clear();
+    m_refFrame->addItem(QString::fromUtf8("自动选择"));
+    for (const QString& name : fileNames) {
+        m_refFrame->addItem(QFileInfo(name).fileName());
+    }
+    int idx = m_refFrame->findText(current);
+    if (idx >= 0) m_refFrame->setCurrentIndex(idx);
 }
