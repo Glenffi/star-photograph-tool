@@ -149,7 +149,10 @@ void ParamsPanel::setupUI() {
         "• Winsorized：用 MAD 替代标准差，适合 >15 帧")
     );
     m_stackAlgorithm->setStyleSheet(m_alignMethod->styleSheet());
-    connect(m_stackAlgorithm, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &ParamsPanel::onComboChanged);
+    connect(m_stackAlgorithm, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this](int index) {
+        m_userChangedStackMethod = true;
+        onComboChanged(index);
+    });
     algoRow->addWidget(m_stackAlgorithm, 1);
     stackLayout->addLayout(algoRow);
 
@@ -536,6 +539,8 @@ void ParamsPanel::onSavePreset() {
     settings.setValue("starReduceEnabled", m_starReduceCheck->isChecked());
     settings.setValue("starReduceStrength", m_starReduceSlider->value());
     settings.setValue("outputFormat", m_outputFormat->currentIndex());
+    settings.setValue("colorSpace", m_colorSpace->currentIndex());
+    settings.setValue("outputPath", m_outputPath->text());
     settings.endArray();
 
     m_presetCombo->addItem(name);
@@ -574,6 +579,8 @@ void ParamsPanel::saveCurrentSettings() {
     settings.setValue("starReduceEnabled", m_starReduceCheck->isChecked());
     settings.setValue("starReduceStrength", m_starReduceSlider->value());
     settings.setValue("outputFormat", m_outputFormat->currentIndex());
+    settings.setValue("colorSpace", m_colorSpace->currentIndex());
+    settings.setValue("outputPath", m_outputPath->text());
     settings.setValue("lastPresetIndex", m_presetCombo->currentIndex());
 }
 
@@ -606,6 +613,8 @@ void ParamsPanel::loadPreset() {
     bool starReduce = settings.value("starReduceEnabled", false).toBool();
     int starReduceStrength = settings.value("starReduceStrength", 50).toInt();
     int outputFormat = settings.value("outputFormat", 0).toInt();
+    int colorSpace = settings.value("colorSpace", 0).toInt();
+    QString outputPath = settings.value("outputPath", QDir::homePath() + "/StarProcessor/Output").toString();
     int lastPresetIndex = settings.value("lastPresetIndex", 0).toInt();
 
     // 使用信号阻塞避免触发 paramsChanged
@@ -618,7 +627,8 @@ void ParamsPanel::loadPreset() {
     QSignalBlocker blocker7(m_starReduceCheck);
     QSignalBlocker blocker8(m_starReduceSlider);
     QSignalBlocker blocker9(m_outputFormat);
-    QSignalBlocker blocker10(m_presetCombo);
+    QSignalBlocker blocker10(m_colorSpace);
+    QSignalBlocker blocker11(m_presetCombo);
 
     m_alignMethod->setCurrentIndex(alignIndex);
     m_stackAlgorithm->setCurrentIndex(stackIndex);
@@ -631,6 +641,8 @@ void ParamsPanel::loadPreset() {
     m_starReduceCheck->setChecked(starReduce);
     m_starReduceSlider->setValue(starReduceStrength);
     m_outputFormat->setCurrentIndex(outputFormat);
+    m_colorSpace->setCurrentIndex(colorSpace);
+    m_outputPath->setText(outputPath);
 
     if (lastPresetIndex >= 0 && lastPresetIndex < m_presetCombo->count()) {
         m_presetCombo->setCurrentIndex(lastPresetIndex);
@@ -655,7 +667,8 @@ void ParamsPanel::onPresetChanged(int index) {
             settings.setArrayIndex(customIndex);
             Preset preset;
             preset.name = settings.value("name").toString();
-            preset.alignMethod = "star";
+            int alignIdx = settings.value("alignMethod", 0).toInt();
+            preset.alignMethod = alignIdx == 0 ? "star" : alignIdx == 1 ? "feature" : "manual";
             preset.stackMethod = settings.value("stackMethod", 0).toInt() == 0 ? "median" :
                                  settings.value("stackMethod", 0).toInt() == 1 ? "average" :
                                  settings.value("stackMethod", 0).toInt() == 2 ? "kappa-sigma" : "winsorized";

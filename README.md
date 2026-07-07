@@ -44,7 +44,10 @@ StarProcessor/
 │   │   ├── ThumbnailGenerator.h/cpp   # 异步缩略图生成
 │   │   ├── StarDetector.h/cpp         # 星点检测与 2D 高斯拟合
 │   │   ├── ImageAligner.h/cpp         # 基于星点的图像对齐
-│   │   ├── StackingEngine.h/cpp       # 堆栈降噪（均值/中值）
+│   │   ├── StackingEngine.h/cpp       # 堆栈降噪（均值/中值/Kappa-Sigma/Winsorized）
+│   │   ├── ImageExporter.h/cpp        # 16-bit TIFF / PNG 8-bit 导出
+│   │   ├── AutoOptimizeEngine.h/cpp   # 自动优化：Dark Channel Prior 去雾 + Arcsinh 曲线拉伸
+│   │   └── PresetManager.h/cpp        # 内置预设与用户预设持久化
 │   │   └── ImageExporter.h/cpp        # 16-bit TIFF 导出
 │   └── ui/
 │       ├── ProjectPanel.h/cpp         # 左侧面板：文件列表
