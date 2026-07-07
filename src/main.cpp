@@ -203,9 +203,13 @@ protected:
         QDir().mkpath(outPath);
 
         ImageExporter::Format fmt = ImageExporter::Tiff16;
-        if (m_params.outputFormat == "png16") fmt = ImageExporter::Png16;
+        QString outExt = ".tiff";
+        if (m_params.outputFormat == "png8") {
+            fmt = ImageExporter::Png16;
+            outExt = ".png";
+        }
 
-        QString outFile = outPath + "/" + outFileName + ".tiff";
+        QString outFile = outPath + "/" + outFileName + outExt;
         if (!ImageExporter::export16Bit(result, w, h, outFile.toStdString(), fmt)) {
             m_errorString = "导出失败";
             return;
@@ -710,11 +714,15 @@ private slots:
             if (outPath.isEmpty()) outPath = QDir::homePath() + "/StarProcessor/Output";
             QDir().mkpath(outPath);
 
-            QString fileName = QDateTime::currentDateTime().toString("yyyyMMdd_hhmmss") + "_stacked_export.tiff";
-            QString fullPath = outPath + "/" + fileName;
-
             ImageExporter::Format fmt = ImageExporter::Tiff16;
-            if (m_paramsPanel->outputFormat() == "png16") fmt = ImageExporter::Png16;
+            QString ext = ".tiff";
+            if (m_paramsPanel->outputFormat() == "png8") {
+                fmt = ImageExporter::Png16;
+                ext = ".png";
+            }
+
+            QString fileName = QDateTime::currentDateTime().toString("yyyyMMdd_hhmmss") + "_stacked_export" + ext;
+            QString fullPath = outPath + "/" + fileName;
 
             if (ImageExporter::export16Bit(m_worker->stackedData(), m_worker->stackedWidth(), m_worker->stackedHeight(),
                                             fullPath.toStdString(), fmt)) {

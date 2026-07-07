@@ -228,10 +228,10 @@ void ParamsPanel::setupUI() {
     auto* formatRow = new QHBoxLayout();
     auto* formatLabel = new QLabel(QString::fromUtf8("格式:"), m_outputGroup);
     formatLabel->setStyleSheet("font-size: 12px; color: #C9D1D9; background-color: transparent;");
-    formatLabel->setToolTip(QString::fromUtf8("TIFF 16-bit：最高质量，保留完整动态范围\nTIFF 32-bit：浮点精度，专业后期首选\nPNG 16-bit：无损压缩，体积较小\nFITS：天文标准格式\nJPEG：仅用于预览分享"));
+    formatLabel->setToolTip(QString::fromUtf8("TIFF 16-bit：最高质量，保留完整动态范围（推荐）\nPNG 8-bit：无损压缩，预览/分享首选"));
     formatRow->addWidget(formatLabel);
     m_outputFormat = new QComboBox(m_outputGroup);
-    m_outputFormat->addItems({"TIFF 16-bit", "TIFF 32-bit", "PNG 16-bit", "FITS", "JPEG (预览)"});
+    m_outputFormat->addItems({"TIFF 16-bit", "PNG 8-bit (预览)"});
     m_outputFormat->setStyleSheet(m_alignMethod->styleSheet());
     m_outputFormat->setToolTip(QString::fromUtf8("输出图像格式，TIFF 16-bit 为推荐默认"));
     connect(m_outputFormat, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &ParamsPanel::onComboChanged);
@@ -527,10 +527,7 @@ QString ParamsPanel::outputFormat() const {
     if (!m_outputFormat) return "tiff16";
     switch (m_outputFormat->currentIndex()) {
         case 0: return "tiff16";
-        case 1: return "tiff32";
-        case 2: return "png16";
-        case 3: return "fits";
-        case 4: return "jpeg";
+        case 1: return "png8";
         default: return "tiff16";
     }
 }
