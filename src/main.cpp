@@ -21,6 +21,9 @@
 #include <QLineEdit>
 #include <QComboBox>
 #include <QLabel>
+#include <QDragEnterEvent>
+#include <QDropEvent>
+#include <QMimeData>
 
 #include "ui/ProjectPanel.h"
 #include "ui/PreviewPanel.h"
@@ -34,6 +37,7 @@ public:
     MainWindow(QWidget* parent = nullptr) : QMainWindow(parent) {
         setWindowTitle("StarProcessor — 星空摄影师 RAW 处理工具");
         resize(1400, 900);
+        setAcceptDrops(true);
 
         setupCentralWidget();
         setupMenuBar();
@@ -42,6 +46,33 @@ public:
         setupConnections();
 
         statusBar()->showMessage("就绪 — 拖入 RAW 文件或点击导入开始");
+    }
+
+protected:
+    void dragEnterEvent(QDragEnterEvent* event) override {
+        if (event->mimeData()->hasUrls()) {
+            event->acceptProposedAction();
+        }
+    }
+
+    void dropEvent(QDropEvent* event) override {
+        const QMimeData* mimeData = event->mimeData();
+        if (!mimeData->hasUrls()) return;
+
+        QStringList filePaths;
+        for (const QUrl& url : mimeData->urls()) {
+            if (url.isLocalFile()) {
+                filePaths.append(url.toLocalFile());
+            }
+        }
+
+        if (!filePaths.isEmpty()) {
+            m_projectPanel->addFiles(filePaths);
+            statusBar()->showMessage(
+                QString("拖放导入 %1 个文件").arg(filePaths.size()),
+                5000
+            );
+        }
     }
 
 private:
@@ -256,6 +287,19 @@ private:
 
         // 预览区空状态导入按钮
         connect(m_previewPanel, &PreviewPanel::importRequested, this, &MainWindow::onImportClicked);
+
+        // 项目面板拖放导入
+        connect(m_projectPanel, &ProjectPanel::filesDropped, this, [this](const QStringList& paths) {
+            if (!paths.isEmpty()) {
+                statusBar()->showMessage(
+                    QString("拖放导入 %1 个文件").arg(paths.size()),
+                    5000
+                );
+            } else {
+                // 空状态按钮点击时 paths 为空，直接打开导入对话框
+                onImportClicked();
+            }
+        });
 
         // 鼠标像素信息
         connect(m_previewPanel, &PreviewPanel::mousePixelInfo, this, [](int x, int y, int r, int g, int b) {

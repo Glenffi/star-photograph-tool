@@ -165,8 +165,6 @@ void PreviewPanel::setupEmptyState() {
     connect(m_emptyImportBtn, &QPushButton::clicked, this, &PreviewPanel::importRequested);
     emptyLayout->addWidget(m_emptyImportBtn, 0, Qt::AlignCenter);
 
-    // 启用拖放接受（由主窗口处理）
-    setAcceptDrops(true);
 }
 
 void PreviewPanel::setupImageView() {
