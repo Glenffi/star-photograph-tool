@@ -195,17 +195,18 @@ bool AutoOptimizeEngine::stretchCurve(const std::vector<uint16_t>& src, int w, i
         return true;
     }
     
-    float stretchFactor = 65535.0f / (p99 - p1);
+    float stretchFactor = 1.0f / (p99 - p1);
     float maxVal = 65535.0f;
-    float asinhMax = std::asinh(stretchFactor * maxVal);
+    float asinhMax = std::asinh(maxVal * stretchFactor);
     
     dst.resize(w * h);
-    float softClipStart = p99;
+    float softClipStart = maxVal * 0.95f;
     float softClipRange = maxVal - softClipStart;
     
     for (int i = 0; i < w * h; ++i) {
         float input = static_cast<float>(src[i]);
-        float stretched = std::asinh(input * stretchFactor) / asinhMax * maxVal;
+        float shifted = std::max(0.0f, input - p1);
+        float stretched = std::asinh(shifted * stretchFactor) / asinhMax * maxVal;
         
         // Soft-clipping for highlights
         if (stretched > softClipStart && softClipRange > 0.0f) {
