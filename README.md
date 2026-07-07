@@ -28,7 +28,8 @@
 |------|------|---------|---------|
 | UI | Qt 6 | 6.2+ | LGPLv3 |
 | RAW 解码 | LibRaw | 0.21+ | LGPLv2.1/CDDL |
-| 图像处理 | OpenCV | 4.8+ | Apache-2.0 |
+| 图像处理（规划中） | OpenCV | — | Apache-2.0 |
+| 图像导出 | libtiff | — | BSD-2-Clause |
 | 构建 | CMake | 3.20+ | — |
 | AI 云端 | FastAPI + Docker | — | MIT/BSD |
 
@@ -78,7 +79,7 @@ StarProcessor/
 
 ```bash
 # 1. 安装依赖（需 Homebrew）
-brew install cmake qt@6 libraw
+brew install cmake qt@6 libraw libtiff
 
 # 2. 配置环境变量
 export PATH=/opt/homebrew/bin:$PATH
@@ -97,7 +98,7 @@ make -j$(sysctl -n hw.ncpu)
 
 ```powershell
 # 使用 vcpkg 安装 Qt6 和 LibRaw
-vcpkg install qtbase qtdeclarative libraw
+vcpkg install qtbase qtdeclarative libraw tiff
 
 mkdir build; cd build
 cmake .. -DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT\scripts\buildsystems\vcpkg.cmake -G "Visual Studio 17 2022"
