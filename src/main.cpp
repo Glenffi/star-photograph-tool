@@ -73,6 +73,7 @@ public:
     std::vector<uint16_t> stackedData() const { return m_stackedData; }
     int stackedWidth() const { return m_width; }
     int stackedHeight() const { return m_height; }
+    int stackedFrameCount() const { return m_frameCount; }
     QString errorString() const { return m_errorString; }
 
     void requestCancel() { m_cancelled.store(true); }
@@ -194,6 +195,7 @@ protected:
             return;
         }
         m_stackedData = result;
+        m_frameCount = static_cast<int>(alignedImages.size());
         emit progress(80);
 
         // 5. 导出（根据参数）
@@ -226,6 +228,7 @@ private:
     std::vector<uint16_t> m_stackedData;
     int m_width = 0;
     int m_height = 0;
+    int m_frameCount = 0;
     QString m_errorString;
     std::atomic<bool> m_cancelled{false};
 };
@@ -701,14 +704,26 @@ private slots:
             dialog->close();
             dialog->deleteLater();
             if (m_worker->errorString().isEmpty()) {
-                // 成功：预览堆栈结果
-                m_previewPanel->load16BitImage(m_worker->stackedData(), m_worker->stackedWidth(), m_worker->stackedHeight());
+                // 成功：缓存堆栈结果
+                m_cachedStackedData = m_worker->stackedData();
+                m_cachedWidth = m_worker->stackedWidth();
+                m_cachedHeight = m_worker->stackedHeight();
+                m_cachedFrameCount = m_worker->stackedFrameCount();
+
+                // 自动保存到缓存目录
+                QString cacheDir = QDir::homePath() + "/StarProcessor/Cache";
+                QDir().mkpath(cacheDir);
+                QString cacheFile = cacheDir + "/" + QDateTime::currentDateTime().toString("yyyyMMdd_hhmmss") + "_cached.tiff";
+                ImageExporter::export16Bit(m_cachedStackedData, m_cachedWidth, m_cachedHeight, cacheFile.toStdString());
+
+                m_previewPanel->load16BitImage(m_cachedStackedData, m_cachedWidth, m_cachedHeight);
                 m_toolbar->enableExport(true);
+                int frameCount = m_cachedFrameCount;
                 statusBar()->showMessage(
                     QString("处理完成 — %1×%2 已堆栈 %3 帧")
-                        .arg(m_worker->stackedWidth())
-                        .arg(m_worker->stackedHeight())
-                        .arg(m_worker->stackedData().empty() ? 0 : 1),
+                        .arg(m_cachedWidth)
+                        .arg(m_cachedHeight)
+                        .arg(frameCount),
                     5000
                 );
             } else {
@@ -729,30 +744,31 @@ private slots:
     }
 
     void onExportClicked() {
-        if (m_worker && !m_worker->stackedData().empty()) {
-            QString outPath = m_paramsPanel->outputPath();
-            if (outPath.isEmpty()) outPath = QDir::homePath() + "/StarProcessor/Output";
-            QDir().mkpath(outPath);
+        if (m_cachedStackedData.empty()) {
+            QMessageBox::warning(this, "导出", "没有可用的堆栈结果，请先完成处理");
+            return;
+        }
 
-            ImageExporter::Format fmt = ImageExporter::Tiff16;
-            QString ext = ".tiff";
-            if (m_paramsPanel->outputFormat() == "png8") {
-                fmt = ImageExporter::Png16;
-                ext = ".png";
-            }
+        QString outPath = m_paramsPanel->outputPath();
+        if (outPath.isEmpty()) outPath = QDir::homePath() + "/StarProcessor/Output";
+        QDir().mkpath(outPath);
 
-            QString fileName = QDateTime::currentDateTime().toString("yyyyMMdd_hhmmss") + "_stacked_export" + ext;
-            QString fullPath = outPath + "/" + fileName;
+        ImageExporter::Format fmt = ImageExporter::Tiff16;
+        QString ext = ".tiff";
+        if (m_paramsPanel->outputFormat() == "png8") {
+            fmt = ImageExporter::Png16;
+            ext = ".png";
+        }
 
-            if (ImageExporter::export16Bit(m_worker->stackedData(), m_worker->stackedWidth(), m_worker->stackedHeight(),
-                                            fullPath.toStdString(), fmt)) {
-                QMessageBox::information(this, "导出成功", QString("已导出到：%1").arg(fullPath));
-                statusBar()->showMessage(QString("已导出：%1").arg(fileName), 5000);
-            } else {
-                QMessageBox::warning(this, "导出失败", "无法导出图像");
-            }
+        QString fileName = QDateTime::currentDateTime().toString("yyyyMMdd_hhmmss") + "_stacked_export" + ext;
+        QString fullPath = outPath + "/" + fileName;
+
+        if (ImageExporter::export16Bit(m_cachedStackedData, m_cachedWidth, m_cachedHeight,
+                                        fullPath.toStdString(), fmt)) {
+            QMessageBox::information(this, "导出成功", QString("已导出到：%1").arg(fullPath));
+            statusBar()->showMessage(QString("已导出：%1").arg(fileName), 5000);
         } else {
-            QMessageBox::information(this, "导出", "没有可用的堆栈结果，请先执行处理");
+            QMessageBox::warning(this, "导出失败", "无法写入文件，请检查输出目录权限");
         }
     }
 
@@ -872,6 +888,12 @@ private:
     QWidget* m_stepBar = nullptr;
     QButtonGroup* m_stepGroup = nullptr;
     ProcessingWorker* m_worker = nullptr;
+
+    // 缓存最后一次堆栈结果（用于导出）
+    std::vector<uint16_t> m_cachedStackedData;
+    int m_cachedWidth = 0;
+    int m_cachedHeight = 0;
+    int m_cachedFrameCount = 0;
 };
 
 int main(int argc, char* argv[]) {
