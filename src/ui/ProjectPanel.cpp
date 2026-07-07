@@ -567,17 +567,7 @@ void ProjectPanel::onRemoveFromList() {
 }
 
 void ProjectPanel::onImportClicked() {
-    // 通过信号链通知主窗口打开导入对话框
-    // 这里我们可以直接发送一个信号，但更好的方式是让主窗口处理
-    // 由于 ProjectPanel 已经有 fileSelected 等信号，我们可以复用机制
-    // 或者让主窗口监听 Toolbar 的 importFilesClicked
-    // 实际上空状态按钮的点击应该由主窗口处理，这里我们直接发送 filesChanged
-    // 但更好的做法是新增一个信号... 由于要保持接口不变，我们用其他方式
-    // 在主窗口中，连接空状态按钮的 clicked 到 import 对话框
-    // 但空状态按钮是 ProjectPanel 私有的
-    // 方案：在 main.cpp 中，通过 findChild 或者直接不用这个按钮，由拖放处理
-    // 实际实现：我们直接让主窗口通过 Toolbar 按钮来导入，空状态按钮暂时用文件选择
-    // 由于 ProjectPanel 接口不能改变，我们在这里简单触发一个文件导入
-    // 但为了不破坏接口，我们只在主窗口中处理
+    // 占位：空状态导入按钮点击后通知主窗口刷新
+    // 实际文件导入由主窗口通过 Toolbar 按钮处理
     emit filesChanged();
 }
