@@ -15,6 +15,7 @@
 #include <QFileInfo>
 #include <QSettings>
 #include <QMessageBox>
+#include <QInputDialog>
 
 #include <QSignalBlocker>
 
@@ -497,6 +498,7 @@ void ParamsPanel::onCheckChanged(int state) {
 }
 
 void ParamsPanel::onRestoreDefaults() {
+    m_userChangedStackMethod = false;
     m_alignMethod->setCurrentIndex(0);
     m_refFrame->setCurrentIndex(0);
     m_stackAlgorithm->setCurrentIndex(0);
@@ -512,15 +514,161 @@ void ParamsPanel::onRestoreDefaults() {
 }
 
 void ParamsPanel::onSavePreset() {
-    emitParamsChanged();
+    bool ok;
+    QString name = QInputDialog::getText(this, QString::fromUtf8("保存预设"),
+                                          QString::fromUtf8("预设名称:"),
+                                          QLineEdit::Normal, QString(), &ok);
+    if (!ok || name.isEmpty()) return;
+
+    QSettings settings("StarProcessor", "App");
+    int count = settings.beginReadArray("customPresets");
+    settings.endArray();
+
+    settings.beginWriteArray("customPresets", count + 1);
+    settings.setArrayIndex(count);
+    settings.setValue("name", name);
+    settings.setValue("alignMethod", m_alignMethod->currentIndex());
+    settings.setValue("stackMethod", m_stackAlgorithm->currentIndex());
+    settings.setValue("kappaValue", m_kappaSlider->value());
+    settings.setValue("dewarpEnabled", m_dewarpCheck->isChecked());
+    settings.setValue("dewarpStrength", m_dewarpSlider->value());
+    settings.setValue("stretchEnabled", m_stretchCheck->isChecked());
+    settings.setValue("starReduceEnabled", m_starReduceCheck->isChecked());
+    settings.setValue("starReduceStrength", m_starReduceSlider->value());
+    settings.setValue("outputFormat", m_outputFormat->currentIndex());
+    settings.endArray();
+
+    m_presetCombo->addItem(name);
+    m_presetCombo->setCurrentIndex(m_presetCombo->count() - 1);
+
+    QMessageBox::information(this, QString::fromUtf8("保存预设"),
+                             QString::fromUtf8("预设 \"%1\" 已保存").arg(name));
+}
+
+void ParamsPanel::recommendStackMethod(int frameCount) {
+    if (m_userChangedStackMethod) return;
+
+    int recommendedIndex = 0;
+    if (frameCount <= 5) {
+        recommendedIndex = 0; // Median
+    } else if (frameCount <= 15) {
+        recommendedIndex = 2; // Kappa-Sigma
+    } else {
+        recommendedIndex = 3; // Winsorized
+    }
+
+    if (m_stackAlgorithm->currentIndex() != recommendedIndex) {
+        QSignalBlocker blocker(m_stackAlgorithm);
+        m_stackAlgorithm->setCurrentIndex(recommendedIndex);
+    }
+}
+
+void ParamsPanel::saveCurrentSettings() {
+    QSettings settings("StarProcessor", "App");
+    settings.setValue("alignMethod", m_alignMethod->currentIndex());
+    settings.setValue("stackMethod", m_stackAlgorithm->currentIndex());
+    settings.setValue("kappaValue", m_kappaSlider->value());
+    settings.setValue("dewarpEnabled", m_dewarpCheck->isChecked());
+    settings.setValue("dewarpStrength", m_dewarpSlider->value());
+    settings.setValue("stretchEnabled", m_stretchCheck->isChecked());
+    settings.setValue("starReduceEnabled", m_starReduceCheck->isChecked());
+    settings.setValue("starReduceStrength", m_starReduceSlider->value());
+    settings.setValue("outputFormat", m_outputFormat->currentIndex());
+    settings.setValue("lastPresetIndex", m_presetCombo->currentIndex());
+}
+
+void ParamsPanel::loadCustomPresets() {
+    QSettings settings("StarProcessor", "App");
+    int count = settings.beginReadArray("customPresets");
+    for (int i = 0; i < count; ++i) {
+        settings.setArrayIndex(i);
+        QString name = settings.value("name").toString();
+        if (!name.isEmpty()) {
+            m_presetCombo->addItem(name);
+        }
+    }
+    settings.endArray();
+}
+
+void ParamsPanel::loadPreset() {
+    QSettings settings("StarProcessor", "App");
+
+    // 加载自定义预设列表
+    loadCustomPresets();
+
+    // 加载上次使用的参数
+    int alignIndex = settings.value("alignMethod", 0).toInt();
+    int stackIndex = settings.value("stackMethod", 0).toInt();
+    int kappa = settings.value("kappaValue", 25).toInt();
+    bool dewarp = settings.value("dewarpEnabled", false).toBool();
+    int dewarpStrength = settings.value("dewarpStrength", 30).toInt();
+    bool stretch = settings.value("stretchEnabled", false).toBool();
+    bool starReduce = settings.value("starReduceEnabled", false).toBool();
+    int starReduceStrength = settings.value("starReduceStrength", 50).toInt();
+    int outputFormat = settings.value("outputFormat", 0).toInt();
+    int lastPresetIndex = settings.value("lastPresetIndex", 0).toInt();
+
+    // 使用信号阻塞避免触发 paramsChanged
+    QSignalBlocker blocker1(m_alignMethod);
+    QSignalBlocker blocker2(m_stackAlgorithm);
+    QSignalBlocker blocker3(m_kappaSlider);
+    QSignalBlocker blocker4(m_dewarpCheck);
+    QSignalBlocker blocker5(m_dewarpSlider);
+    QSignalBlocker blocker6(m_stretchCheck);
+    QSignalBlocker blocker7(m_starReduceCheck);
+    QSignalBlocker blocker8(m_starReduceSlider);
+    QSignalBlocker blocker9(m_outputFormat);
+    QSignalBlocker blocker10(m_presetCombo);
+
+    m_alignMethod->setCurrentIndex(alignIndex);
+    m_stackAlgorithm->setCurrentIndex(stackIndex);
+    m_kappaSlider->setValue(kappa);
+    m_kappaLabel->setText(QString::number(kappa / 10.0, 'f', 1));
+    m_dewarpCheck->setChecked(dewarp);
+    m_dewarpSlider->setValue(dewarpStrength);
+    m_dewarpSlider->setEnabled(dewarp);
+    m_stretchCheck->setChecked(stretch);
+    m_starReduceCheck->setChecked(starReduce);
+    m_starReduceSlider->setValue(starReduceStrength);
+    m_outputFormat->setCurrentIndex(outputFormat);
+
+    if (lastPresetIndex >= 0 && lastPresetIndex < m_presetCombo->count()) {
+        m_presetCombo->setCurrentIndex(lastPresetIndex);
+    }
 }
 
 void ParamsPanel::onPresetChanged(int index) {
     if (index <= 0) return;
 
-    auto presets = PresetManager::builtinPresets();
-    if (index - 1 < presets.size()) {
+    m_userChangedStackMethod = false; // 选择预设时重置，允许后续智能推荐
+
+    int builtinCount = PresetManager::builtinPresets().size();
+    if (index - 1 < builtinCount) {
+        auto presets = PresetManager::builtinPresets();
         applyPreset(presets[index - 1]);
+    } else {
+        // 自定义预设：从 QSettings 加载
+        int customIndex = index - 1 - builtinCount;
+        QSettings settings("StarProcessor", "App");
+        int count = settings.beginReadArray("customPresets");
+        if (customIndex < count) {
+            settings.setArrayIndex(customIndex);
+            Preset preset;
+            preset.name = settings.value("name").toString();
+            preset.alignMethod = "star";
+            preset.stackMethod = settings.value("stackMethod", 0).toInt() == 0 ? "median" :
+                                 settings.value("stackMethod", 0).toInt() == 1 ? "average" :
+                                 settings.value("stackMethod", 0).toInt() == 2 ? "kappa-sigma" : "winsorized";
+            preset.kappaValue = settings.value("kappaValue", 25).toInt() / 10.0;
+            preset.dewarpEnabled = settings.value("dewarpEnabled", false).toBool();
+            preset.dewarpStrength = settings.value("dewarpStrength", 30).toInt();
+            preset.stretchEnabled = settings.value("stretchEnabled", false).toBool();
+            preset.starReduceEnabled = settings.value("starReduceEnabled", false).toBool();
+            preset.starReduceStrength = settings.value("starReduceStrength", 50).toInt();
+            preset.outputFormat = settings.value("outputFormat", 0).toInt() == 0 ? "tiff16" : "png8";
+            applyPreset(preset);
+        }
+        settings.endArray();
     }
 }
 
@@ -563,10 +711,6 @@ void ParamsPanel::applyPreset(const Preset& preset) {
     else if (preset.outputFormat == "png8") m_outputFormat->setCurrentIndex(1);
 
     emitParamsChanged();
-}
-
-void ParamsPanel::loadPreset() {
-    // 占位：后续实现从 QSettings 加载预设
 }
 
 void ParamsPanel::emitParamsChanged() {

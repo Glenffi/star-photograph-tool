@@ -31,6 +31,8 @@ public:
     QString outputPath() const;
 
     void updateRefFrameList(const QStringList& fileNames);
+    void recommendStackMethod(int frameCount);
+    void saveCurrentSettings();
 
 signals:
     void paramsChanged();  // 参数发生任何变化时触发
@@ -50,6 +52,7 @@ private:
     void setupUI();
     void loadPreset();
     void applyPreset(const Preset& preset);
+    void loadCustomPresets();
     QGroupBox* createCollapsibleGroup(const QString& title, bool expanded = true);
     QSlider* createSlider(int min, int max, int value, const QString& suffix = QString());
 
@@ -90,4 +93,7 @@ private:
 
     // Debounce 定时器
     QTimer* m_debounceTimer = nullptr;
+    
+    // 用户是否手动修改过堆栈算法（避免智能推荐覆盖用户选择）
+    bool m_userChangedStackMethod = false;
 };
