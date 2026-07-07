@@ -33,6 +33,13 @@ bool RawImageLoader::loadRaw(const std::string& filePath, ImageData& out) {
     
     // 获取 black level 和最大有效值（用于后续归一化）
     unsigned blackLevel = processor.imgdata.color.black;
+    unsigned cblack[4] = {
+        static_cast<unsigned>(processor.imgdata.color.cblack[0]),
+        static_cast<unsigned>(processor.imgdata.color.cblack[1]),
+        static_cast<unsigned>(processor.imgdata.color.cblack[2]),
+        static_cast<unsigned>(processor.imgdata.color.cblack[3])
+    };
+    bool useCblack = (cblack[0] != 0 || cblack[1] != 0 || cblack[2] != 0 || cblack[3] != 0);
     unsigned dataMaximum = processor.imgdata.color.data_maximum;
     if (dataMaximum == 0) dataMaximum = 65535;
     if (blackLevel > dataMaximum) blackLevel = 0;
@@ -77,9 +84,11 @@ bool RawImageLoader::loadRaw(const std::string& filePath, ImageData& out) {
                 for (int x = 0; x < out.width; ++x) {
                     int srcIdx = (y + topMargin) * rawWidth + (x + leftMargin);
                     uint16_t val = processor.imgdata.rawdata.raw_image[srcIdx];
-                    // 应用 black level 校正并裁剪到有效范围
-                    if (val > blackLevel) val -= blackLevel; else val = 0;
-                    out.data[y * out.width + x] = val;
+                    // 应用 per-channel black level 校正
+                    int cidx = (((y + topMargin) & 1) * 2) + ((x + leftMargin) & 1);
+                    unsigned bl = useCblack ? cblack[cidx] : blackLevel;
+                    int corrected = static_cast<int>(val) - static_cast<int>(bl);
+                    out.data[y * out.width + x] = static_cast<uint16_t>(std::max(0, corrected));
                 }
             }
         } else {
@@ -98,8 +107,9 @@ bool RawImageLoader::loadRaw(const std::string& filePath, ImageData& out) {
                 int idx = y * out.width + x;
                 for (int c = 0; c < 3; ++c) {
                     uint16_t val = processor.imgdata.image[idx][c];
-                    if (val > blackLevel) val -= blackLevel; else val = 0;
-                    out.data[idx * 3 + c] = val;
+                    unsigned bl = useCblack ? cblack[c] : blackLevel;
+                    int corrected = static_cast<int>(val) - static_cast<int>(bl);
+                    out.data[idx * 3 + c] = static_cast<uint16_t>(std::max(0, corrected));
                 }
             }
         }
