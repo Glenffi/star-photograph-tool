@@ -54,7 +54,7 @@ void StarDetector::gaussianBlur(const std::vector<uint16_t>& src, int w, int h,
     }
 }
 
-float StarDetector::estimateBackground(const std::vector<uint16_t>& image, int /*w*/, int /*h*/) {
+std::pair<float, float> StarDetector::estimateBackground(const std::vector<uint16_t>& image, int /*w*/, int /*h*/) {
     // 采样图像中的一部分像素来估计背景
     size_t sampleCount = std::min<size_t>(image.size(), 65536);
     size_t step = image.size() / sampleCount;
@@ -68,7 +68,7 @@ float StarDetector::estimateBackground(const std::vector<uint16_t>& image, int /
 
     // 计算中值作为背景水平
     size_t n = samples.size();
-    if (n == 0) return 0.0f;
+    if (n == 0) return {0.0f, 0.0f};
 
     std::nth_element(samples.begin(), samples.begin() + n / 2, samples.end());
     float median = samples[n / 2];
@@ -82,8 +82,8 @@ float StarDetector::estimateBackground(const std::vector<uint16_t>& image, int /
     std::nth_element(absDev.begin(), absDev.begin() + n / 2, absDev.end());
     float mad = absDev[n / 2];
 
-    // 返回背景噪声水平（MAD * 1.4826 近似标准差）
-    return mad * 1.4826f;
+    // 返回背景中值和噪声水平（MAD * 1.4826 近似标准差）
+    return {median, mad * 1.4826f};
 }
 
 bool StarDetector::fit2DGaussian(const std::vector<uint16_t>& image, int w, int h,
@@ -191,8 +191,9 @@ bool StarDetector::detect(const std::vector<uint16_t>& image, int width, int hei
     std::vector<float> blurred;
     gaussianBlur(image, width, height, blurred, 1.5f);
 
-    // 2. 估计背景噪声（基于模糊图像，因为检测在 blurred 上进行）
+    // 2. 估计背景中值和噪声（基于模糊图像，因为检测在 blurred 上进行）
     float bgNoise = 0.0f;
+    float backgroundMedian = 0.0f;
     {
         size_t sampleCount = std::min<size_t>(blurred.size(), 65536);
         size_t step = blurred.size() / sampleCount;
@@ -206,6 +207,7 @@ bool StarDetector::detect(const std::vector<uint16_t>& image, int width, int hei
         if (n > 0) {
             std::nth_element(samples.begin(), samples.begin() + n / 2, samples.end());
             float median = samples[n / 2];
+            backgroundMedian = median;
             std::vector<float> absDev;
             absDev.reserve(n);
             for (float v : samples) {
@@ -216,7 +218,7 @@ bool StarDetector::detect(const std::vector<uint16_t>& image, int width, int hei
         }
     }
     if (bgNoise < 0.5f) bgNoise = 0.5f;
-    float threshold = static_cast<float>(thresholdSigma) * bgNoise;
+    float threshold = backgroundMedian + static_cast<float>(thresholdSigma) * bgNoise;
 
     // 3. 找局部最大值（3×3窗口）
     std::vector<std::pair<int, int>> candidates;

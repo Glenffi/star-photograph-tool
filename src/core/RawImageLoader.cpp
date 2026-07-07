@@ -80,15 +80,19 @@ bool RawImageLoader::loadRaw(const std::string& filePath, ImageData& out) {
             int topMargin = processor.imgdata.sizes.top_margin;
             int leftMargin = processor.imgdata.sizes.left_margin;
             
+            unsigned maxBl = useCblack ? std::max({cblack[0], cblack[1], cblack[2], cblack[3]}) : blackLevel;
+            unsigned white = dataMaximum > maxBl ? dataMaximum - maxBl : 65535;
             for (int y = 0; y < out.height; ++y) {
                 for (int x = 0; x < out.width; ++x) {
                     int srcIdx = (y + topMargin) * rawWidth + (x + leftMargin);
                     uint16_t val = processor.imgdata.rawdata.raw_image[srcIdx];
-                    // 应用 per-channel black level 校正
+                    // 应用 per-channel black level 校正并归一化到 16-bit
                     int cidx = (((y + topMargin) & 1) * 2) + ((x + leftMargin) & 1);
                     unsigned bl = useCblack ? cblack[cidx] : blackLevel;
-                    int corrected = static_cast<int>(val) - static_cast<int>(bl);
-                    out.data[y * out.width + x] = static_cast<uint16_t>(std::max(0, corrected));
+                    int corrected = std::max(0, static_cast<int>(val) - static_cast<int>(bl));
+                    unsigned long long scaled = static_cast<unsigned long long>(corrected) * 65535ULL / white;
+                    uint16_t normalized = static_cast<uint16_t>(std::min(scaled, 65535ULL));
+                    out.data[y * out.width + x] = normalized;
                 }
             }
         } else {
@@ -100,16 +104,19 @@ bool RawImageLoader::loadRaw(const std::string& filePath, ImageData& out) {
         out.channels = 3;
         out.bayerPattern = "";
         
-        // 复制 RGB 数据
+        // 复制 RGB 数据并归一化到 16-bit
         out.data.resize(out.width * out.height * 3);
+        unsigned white = dataMaximum > blackLevel ? dataMaximum - blackLevel : 65535;
         for (int y = 0; y < out.height; ++y) {
             for (int x = 0; x < out.width; ++x) {
                 int idx = y * out.width + x;
                 for (int c = 0; c < 3; ++c) {
                     uint16_t val = processor.imgdata.image[idx][c];
                     unsigned bl = useCblack ? cblack[c] : blackLevel;
-                    int corrected = static_cast<int>(val) - static_cast<int>(bl);
-                    out.data[idx * 3 + c] = static_cast<uint16_t>(std::max(0, corrected));
+                    int corrected = std::max(0, static_cast<int>(val) - static_cast<int>(bl));
+                    unsigned long long scaled = static_cast<unsigned long long>(corrected) * 65535ULL / white;
+                    uint16_t normalized = static_cast<uint16_t>(std::min(scaled, 65535ULL));
+                    out.data[idx * 3 + c] = normalized;
                 }
             }
         }

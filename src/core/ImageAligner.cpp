@@ -170,6 +170,83 @@ static bool solveAffine(const std::vector<StarPoint>& refStars,
     return true;
 }
 
+static bool solveAffineLeastSquares(
+    const std::vector<StarPoint>& refStars,
+    const std::vector<StarPoint>& srcStars,
+    const std::vector<std::pair<int, int>>& matches,
+    AlignmentTransform& out) {
+    if (matches.size() < 3) return false;
+
+    // 最小二乘求解 Ax = b
+    // 对每个匹配对 (ref_i, src_i):
+    //   ref.x = a * src.x + b * src.y + c
+    //   ref.y = d * src.x + e * src.y + f
+    // 构建正规方程 A^T A x = A^T b
+    // 其中 x = [a, b, c, d, e, f]^T
+    double AtA[6][6] = {};
+    double Atb[6] = {};
+
+    for (const auto& m : matches) {
+        const auto& ref = refStars[m.first];
+        const auto& src = srcStars[m.second];
+
+        double x = src.x;
+        double y = src.y;
+
+        // 第一行: ref.x = a*x + b*y + c
+        AtA[0][0] += x * x; AtA[0][1] += x * y; AtA[0][2] += x;
+        AtA[1][0] += x * y; AtA[1][1] += y * y; AtA[1][2] += y;
+        AtA[2][0] += x;     AtA[2][1] += y;     AtA[2][2] += 1.0;
+        Atb[0] += x * ref.x;
+        Atb[1] += y * ref.x;
+        Atb[2] += ref.x;
+
+        // 第二行: ref.y = d*x + e*y + f
+        AtA[3][3] += x * x; AtA[3][4] += x * y; AtA[3][5] += x;
+        AtA[4][3] += x * y; AtA[4][4] += y * y; AtA[4][5] += y;
+        AtA[5][3] += x;     AtA[5][4] += y;     AtA[5][5] += 1.0;
+        Atb[3] += x * ref.y;
+        Atb[4] += y * ref.y;
+        Atb[5] += ref.y;
+    }
+
+    // 高斯消元求解
+    for (int col = 0; col < 6; ++col) {
+        int pivot = col;
+        for (int row = col + 1; row < 6; ++row) {
+            if (std::abs(AtA[row][col]) > std::abs(AtA[pivot][col])) {
+                pivot = row;
+            }
+        }
+        if (std::abs(AtA[pivot][col]) < 1e-12) {
+            // A^T A 接近奇异或条件数差，回退到 3 点法
+            return solveAffine(refStars, srcStars, matches, out);
+        }
+
+        if (pivot != col) {
+            for (int j = col; j < 6; ++j) std::swap(AtA[col][j], AtA[pivot][j]);
+            std::swap(Atb[col], Atb[pivot]);
+        }
+
+        for (int row = col + 1; row < 6; ++row) {
+            double factor = AtA[row][col] / AtA[col][col];
+            for (int j = col; j < 6; ++j) AtA[row][j] -= factor * AtA[col][j];
+            Atb[row] -= factor * Atb[col];
+        }
+    }
+
+    double sol[6];
+    for (int i = 5; i >= 0; --i) {
+        double sum = Atb[i];
+        for (int j = i + 1; j < 6; ++j) sum -= AtA[i][j] * sol[j];
+        sol[i] = sum / AtA[i][i];
+    }
+
+    out.a = sol[0]; out.b = sol[1]; out.c = sol[2];
+    out.d = sol[3]; out.e = sol[4]; out.f = sol[5];
+    return true;
+}
+
 static bool isInlier(const StarPoint& ref, const StarPoint& src, const AlignmentTransform& t, double threshold) {
     double dx = t.a * src.x + t.b * src.y + t.c - ref.x;
     double dy = t.d * src.x + t.e * src.y + t.f - ref.y;
@@ -231,7 +308,7 @@ bool ImageAligner::ransacAffine(const std::vector<StarPoint>& refStars,
     }
 
     if (inlierMatches.size() >= 3) {
-        solveAffine(refStars, srcStars, inlierMatches, out);
+        solveAffineLeastSquares(refStars, srcStars, inlierMatches, out);
     } else {
         out = bestT;
     }

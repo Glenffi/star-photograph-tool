@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <vector>
+#include <utility>
 
 struct StarPoint {
     double x = 0.0;        // 亚像素中心坐标 X
@@ -36,7 +37,7 @@ public:
 private:
     void gaussianBlur(const std::vector<uint16_t>& src, int w, int h,
                       std::vector<float>& dst, float sigma);
-    float estimateBackground(const std::vector<uint16_t>& image, int w, int h);
+    std::pair<float, float> estimateBackground(const std::vector<uint16_t>& image, int w, int h);
     bool fit2DGaussian(const std::vector<uint16_t>& image, int w, int h,
                        int cx, int cy, int windowSize,
                        StarPoint& star);
