@@ -168,3 +168,11 @@ QPushButton* Toolbar::createActionButton(const QString& icon, const QString& tex
     }
     return btn;
 }
+
+void Toolbar::enableProcess(bool enabled) {
+    if (m_startProcessBtn) m_startProcessBtn->setEnabled(enabled);
+}
+
+void Toolbar::enableExport(bool enabled) {
+    if (m_exportResultBtn) m_exportResultBtn->setEnabled(enabled);
+}

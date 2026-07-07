@@ -255,6 +255,7 @@ void ParamsPanel::setupUI() {
     pathLabel->setStyleSheet("font-size: 12px; color: #C9D1D9; background-color: transparent;");
     pathRow->addWidget(pathLabel);
     auto* pathEdit = new QLineEdit(QDir::homePath() + "/StarProcessor/Output", m_outputGroup);
+    m_outputPath = pathEdit;
     pathEdit->setStyleSheet(
         "QLineEdit { background-color: #21262D; color: #E6EDF3; "
         "  border: 1px solid #30363D; border-radius: 4px; padding: 4px 8px; font-size: 11px; }"
@@ -268,9 +269,9 @@ void ParamsPanel::setupUI() {
         "  border: 1px solid #30363D; border-radius: 4px; font-size: 11px; }"
         "QPushButton:hover { background-color: #30363D; }"
     );
-    connect(pathBtn, &QPushButton::clicked, this, [pathEdit]() {
+    connect(pathBtn, &QPushButton::clicked, this, [this]() {
         QString dir = QFileDialog::getExistingDirectory(nullptr, QString::fromUtf8("选择输出目录"));
-        if (!dir.isEmpty()) pathEdit->setText(dir);
+        if (!dir.isEmpty()) m_outputPath->setText(dir);
     });
     pathRow->addWidget(pathBtn);
     outputLayout->addLayout(pathRow);
@@ -474,4 +475,66 @@ void ParamsPanel::onSavePreset() {
 
 void ParamsPanel::emitParamsChanged() {
     emit paramsChanged();
+}
+
+QString ParamsPanel::alignMethod() const {
+    if (!m_alignMethod) return "star";
+    switch (m_alignMethod->currentIndex()) {
+        case 0: return "star";
+        case 1: return "feature";
+        case 2: return "manual";
+        default: return "star";
+    }
+}
+
+QString ParamsPanel::stackMethod() const {
+    if (!m_stackAlgorithm) return "average";
+    QString text = m_stackAlgorithm->currentText();
+    if (text == "Sigma Clipping") return "average";
+    if (text == "Median") return "median";
+    if (text == "Mean") return "average";
+    if (text == "Kappa-Sigma") return "kappa-sigma";
+    if (text == "Winsorized") return "winsorized";
+    return "average";
+}
+
+double ParamsPanel::kappaValue() const {
+    if (!m_kappaSlider) return 2.5;
+    return m_kappaSlider->value() / 10.0;
+}
+
+bool ParamsPanel::dewarpEnabled() const {
+    return m_dewarpCheck ? m_dewarpCheck->isChecked() : false;
+}
+
+int ParamsPanel::dewarpStrength() const {
+    return m_dewarpSlider ? m_dewarpSlider->value() : 0;
+}
+
+bool ParamsPanel::stretchEnabled() const {
+    return m_stretchCheck ? m_stretchCheck->isChecked() : false;
+}
+
+bool ParamsPanel::starReduceEnabled() const {
+    return m_starReduceCheck ? m_starReduceCheck->isChecked() : false;
+}
+
+int ParamsPanel::starReduceStrength() const {
+    return m_starReduceSlider ? m_starReduceSlider->value() : 0;
+}
+
+QString ParamsPanel::outputFormat() const {
+    if (!m_outputFormat) return "tiff16";
+    switch (m_outputFormat->currentIndex()) {
+        case 0: return "tiff16";
+        case 1: return "tiff32";
+        case 2: return "png16";
+        case 3: return "fits";
+        case 4: return "jpeg";
+        default: return "tiff16";
+    }
+}
+
+QString ParamsPanel::outputPath() const {
+    return m_outputPath ? m_outputPath->text() : (QDir::homePath() + "/StarProcessor/Output");
 }

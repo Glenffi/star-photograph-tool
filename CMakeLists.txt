@@ -51,11 +51,41 @@ endif()
 message(STATUS "LibRaw 库: ${LibRaw_LIBRARY}")
 message(STATUS "LibRaw 头文件: ${LibRaw_INCLUDE_DIR}")
 
+# 查找 libtiff（用于图像导出）
+find_library(TIFF_LIBRARY
+    NAMES tiff
+    HINTS
+        /opt/homebrew/opt/libtiff/lib
+        /usr/local/opt/libtiff/lib
+        ${CMAKE_PREFIX_PATH}/lib
+)
+find_path(TIFF_INCLUDE_DIR
+    tiffio.h
+    HINTS
+        /opt/homebrew/opt/libtiff/include
+        /usr/local/opt/libtiff/include
+        ${CMAKE_PREFIX_PATH}/include
+)
+
+if(TIFF_LIBRARY)
+    message(STATUS "libtiff 库: ${TIFF_LIBRARY}")
+else()
+    message(WARNING "libtiff 库未找到，TIFF 导出功能可能不可用")
+endif()
+
+if(TIFF_INCLUDE_DIR)
+    message(STATUS "libtiff 头文件: ${TIFF_INCLUDE_DIR}")
+endif()
+
 # 定义源文件
 set(SOURCES
     src/main.cpp
     src/core/RawImageLoader.cpp
     src/core/ThumbnailGenerator.cpp
+    src/core/StarDetector.cpp
+    src/core/ImageAligner.cpp
+    src/core/StackingEngine.cpp
+    src/core/ImageExporter.cpp
     src/ui/ProjectPanel.cpp
     src/ui/PreviewPanel.cpp
     src/ui/Toolbar.cpp
@@ -65,6 +95,10 @@ set(SOURCES
 set(HEADERS
     src/core/RawImageLoader.h
     src/core/ThumbnailGenerator.h
+    src/core/StarDetector.h
+    src/core/ImageAligner.h
+    src/core/StackingEngine.h
+    src/core/ImageExporter.h
     src/ui/ProjectPanel.h
     src/ui/PreviewPanel.h
     src/ui/Toolbar.h
@@ -78,14 +112,16 @@ add_executable(${PROJECT_NAME} ${SOURCES} ${HEADERS})
 target_include_directories(${PROJECT_NAME} PRIVATE
     ${CMAKE_SOURCE_DIR}/src
     ${LibRaw_INCLUDE_DIR}
+    ${TIFF_INCLUDE_DIR}
 )
 
-# 链接 Qt 库和 LibRaw
+# 链接 Qt 库和 LibRaw、libtiff
 target_link_libraries(${PROJECT_NAME}
     Qt6::Core
     Qt6::Gui
     Qt6::Widgets
     ${LibRaw_LIBRARY}
+    ${TIFF_LIBRARY}
 )
 
 # macOS 特定设置

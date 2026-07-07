@@ -437,6 +437,29 @@ void ProjectPanel::setReferenceFrame(const QString& filePath) {
         updateCard(i);
     }
     updateBottomBar();
+    emit referenceFrameChanged();
+}
+
+void ProjectPanel::setReferenceFrame(int index) {
+    if (index < 0 || index >= m_fileItems.size()) return;
+    setReferenceFrame(m_fileItems[index].filePath);
+}
+
+QStringList ProjectPanel::includedFilePaths() const {
+    QStringList paths;
+    for (const auto& item : m_fileItems) {
+        if (!item.isExcluded) {
+            paths.append(item.filePath);
+        }
+    }
+    return paths;
+}
+
+QString ProjectPanel::referenceFramePath() const {
+    for (const auto& item : m_fileItems) {
+        if (item.isReferenceFrame) return item.filePath;
+    }
+    return QString();
 }
 
 QStringList ProjectPanel::filePaths() const {

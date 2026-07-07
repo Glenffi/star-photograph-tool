@@ -11,11 +11,23 @@ class QGroupBox;
 class QPushButton;
 class QLabel;
 class QTimer;
+class QLineEdit;
 
 class ParamsPanel : public QWidget {
     Q_OBJECT
 public:
     explicit ParamsPanel(QWidget* parent = nullptr);
+
+    QString alignMethod() const;
+    QString stackMethod() const;
+    double kappaValue() const;
+    bool dewarpEnabled() const;
+    int dewarpStrength() const;
+    bool stretchEnabled() const;
+    bool starReduceEnabled() const;
+    int starReduceStrength() const;
+    QString outputFormat() const;
+    QString outputPath() const;
 
 signals:
     void paramsChanged();  // 参数发生任何变化时触发
@@ -61,6 +73,7 @@ private:
     QWidget* m_outputGroup = nullptr;
     QComboBox* m_outputFormat = nullptr;
     QComboBox* m_colorSpace = nullptr;
+    QLineEdit* m_outputPath = nullptr;
 
     // 底部按钮
     QPushButton* m_restoreBtn = nullptr;

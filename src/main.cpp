@@ -24,11 +24,206 @@
 #include <QDragEnterEvent>
 #include <QDropEvent>
 #include <QMimeData>
+#include <QThread>
+#include <QProgressDialog>
+#include <QProgressBar>
+#include <QDateTime>
+#include <QDebug>
+#include <atomic>
 
 #include "ui/ProjectPanel.h"
 #include "ui/PreviewPanel.h"
 #include "ui/ParamsPanel.h"
 #include "ui/Toolbar.h"
+
+#include "core/RawImageLoader.h"
+#include "core/StarDetector.h"
+#include "core/ImageAligner.h"
+#include "core/StackingEngine.h"
+#include "core/ImageExporter.h"
+
+/**
+ * @brief 后台处理工作线程
+ */
+class ProcessingWorker : public QThread {
+    Q_OBJECT
+
+public:
+    struct Params {
+        QString alignMethod = "star";
+        QString stackMethod = "average";
+        double kappaValue = 2.5;
+        bool dewarpEnabled = false;
+        int dewarpStrength = 30;
+        bool stretchEnabled = false;
+        bool starReduceEnabled = false;
+        int starReduceStrength = 50;
+        QString outputFormat = "tiff16";
+        QString outputPath;
+    };
+
+    ProcessingWorker(const QStringList& files, const QString& refFrame, const Params& params, QObject* parent = nullptr)
+        : QThread(parent)
+        , m_files(files)
+        , m_refFrame(refFrame)
+        , m_params(params)
+    {}
+
+    std::vector<uint16_t> stackedData() const { return m_stackedData; }
+    int stackedWidth() const { return m_width; }
+    int stackedHeight() const { return m_height; }
+    QString errorString() const { return m_errorString; }
+
+    void requestCancel() { m_cancelled.store(true); }
+
+signals:
+    void progress(int value); // 0-100
+    void stageMessage(const QString& msg);
+
+protected:
+    void run() override {
+        m_cancelled.store(false);
+        m_errorString.clear();
+        emit progress(0);
+
+        // 1. 加载所有RAW文件
+        emit stageMessage("加载 RAW 文件...");
+        std::vector<RawImageLoader::ImageData> loadedImages;
+        std::vector<QString> loadedPaths;
+        RawImageLoader loader;
+
+        for (int i = 0; i < m_files.size(); ++i) {
+            if (m_cancelled.load()) return;
+
+            RawImageLoader::ImageData img;
+            if (!loader.loadRaw(m_files[i].toStdString(), img)) {
+                m_errorString = QString("无法加载: %1").arg(QFileInfo(m_files[i]).fileName());
+                return;
+            }
+            loadedImages.push_back(std::move(img));
+            loadedPaths.push_back(m_files[i]);
+
+            int p = static_cast<int>((i + 1) * 10.0 / m_files.size());
+            emit progress(p);
+        }
+
+        if (loadedImages.empty()) {
+            m_errorString = "没有成功加载任何图像";
+            return;
+        }
+
+        // 确定参考帧索引
+        int refIdx = 0;
+        for (int i = 0; i < loadedPaths.size(); ++i) {
+            if (loadedPaths[i] == m_refFrame) {
+                refIdx = i;
+                break;
+            }
+        }
+
+        const auto& refImg = loadedImages[refIdx];
+        int w = refImg.width;
+        int h = refImg.height;
+        m_width = w;
+        m_height = h;
+
+        // 2. 星点检测（参考帧）
+        emit stageMessage("参考帧星点检测...");
+        StarDetector detector;
+        std::vector<StarPoint> refStars;
+        if (!detector.detect(refImg.data, w, h, refStars, 5.0)) {
+            m_errorString = "参考帧星点检测失败";
+            return;
+        }
+        emit progress(20);
+
+        // 3. 对齐所有帧到参考帧
+        emit stageMessage("对齐图像...");
+        ImageAligner aligner;
+        std::vector<std::vector<uint16_t>> alignedImages;
+        alignedImages.push_back(refImg.data); // 参考帧不需要变换
+
+        for (int i = 0; i < loadedImages.size(); ++i) {
+            if (m_cancelled.load()) return;
+            if (i == refIdx) continue;
+
+            const auto& srcImg = loadedImages[i];
+            if (srcImg.width != w || srcImg.height != h) {
+                m_errorString = QString("图像尺寸不匹配: %1").arg(QFileInfo(loadedPaths[i]).fileName());
+                return;
+            }
+
+            std::vector<StarPoint> srcStars;
+            if (!detector.detect(srcImg.data, w, h, srcStars, 5.0)) {
+                qWarning() << "星点检测失败，跳过:" << loadedPaths[i];
+                continue;
+            }
+
+            AlignmentTransform transform;
+            if (!aligner.align(refStars, srcStars, transform)) {
+                qWarning() << "对齐失败，跳过:" << loadedPaths[i];
+                continue;
+            }
+
+            std::vector<uint16_t> aligned;
+            if (!aligner.applyTransform(srcImg.data, w, h, transform, aligned)) {
+                qWarning() << "变换应用失败，跳过:" << loadedPaths[i];
+                continue;
+            }
+
+            alignedImages.push_back(std::move(aligned));
+
+            int p = 20 + static_cast<int>((i + 1) * 30.0 / loadedImages.size());
+            emit progress(p);
+        }
+
+        if (alignedImages.size() < 2) {
+            m_errorString = "对齐后可用帧数不足（<2），无法堆栈";
+            return;
+        }
+        emit progress(55);
+
+        // 4. 堆栈
+        emit stageMessage("堆栈中...");
+        StackingEngine stacker;
+        StackingEngine::Method method = (m_params.stackMethod == "median") ? StackingEngine::Median : StackingEngine::Average;
+        std::vector<uint16_t> result;
+        if (!stacker.stack(alignedImages, w, h, method, result)) {
+            m_errorString = "堆栈失败";
+            return;
+        }
+        m_stackedData = result;
+        emit progress(80);
+
+        // 5. 导出（根据参数）
+        emit stageMessage("导出结果...");
+        QString outFileName = QDateTime::currentDateTime().toString("yyyyMMdd_hhmmss") + "_stacked";
+        QString outPath = m_params.outputPath;
+        if (outPath.isEmpty()) outPath = QDir::homePath() + "/StarProcessor/Output";
+        QDir().mkpath(outPath);
+
+        ImageExporter::Format fmt = ImageExporter::Tiff16;
+        if (m_params.outputFormat == "png16") fmt = ImageExporter::Png16;
+
+        QString outFile = outPath + "/" + outFileName + ".tiff";
+        if (!ImageExporter::export16Bit(result, w, h, outFile.toStdString(), fmt)) {
+            m_errorString = "导出失败";
+            return;
+        }
+        emit progress(100);
+        emit stageMessage("处理完成");
+    }
+
+private:
+    QStringList m_files;
+    QString m_refFrame;
+    Params m_params;
+    std::vector<uint16_t> m_stackedData;
+    int m_width = 0;
+    int m_height = 0;
+    QString m_errorString;
+    std::atomic<bool> m_cancelled{false};
+};
 
 class MainWindow : public QMainWindow {
     Q_OBJECT
@@ -46,6 +241,13 @@ public:
         setupConnections();
 
         statusBar()->showMessage("就绪 — 拖入 RAW 文件或点击导入开始");
+    }
+
+    ~MainWindow() {
+        if (m_worker && m_worker->isRunning()) {
+            m_worker->requestCancel();
+            m_worker->wait(3000);
+        }
     }
 
 protected:
@@ -185,6 +387,8 @@ private:
         connect(clearAction, &QAction::triggered, this, [this]() {
             m_projectPanel->clearFiles();
             m_previewPanel->clearImage();
+            m_toolbar->enableProcess(false);
+            m_toolbar->enableExport(false);
             statusBar()->showMessage("项目已清空", 3000);
         });
         fileMenu->addAction(clearAction);
@@ -226,6 +430,20 @@ private:
         connect(actualPixelsAction, &QAction::triggered, m_previewPanel, &PreviewPanel::resetZoom);
         viewMenu->addAction(actualPixelsAction);
 
+        // 处理菜单
+        auto* processMenu = menuBar()->addMenu("处理");
+        processMenu->setStyleSheet(menuStyleSheet());
+
+        auto* startAction = new QAction("开始处理", this);
+        startAction->setShortcut(QKeySequence("Ctrl+Return"));
+        connect(startAction, &QAction::triggered, this, &MainWindow::onProcessClicked);
+        processMenu->addAction(startAction);
+
+        auto* exportAction = new QAction("导出结果", this);
+        exportAction->setShortcut(QKeySequence("Ctrl+Shift+E"));
+        connect(exportAction, &QAction::triggered, this, &MainWindow::onExportClicked);
+        processMenu->addAction(exportAction);
+
         // 帮助菜单
         auto* helpMenu = menuBar()->addMenu("帮助");
         helpMenu->setStyleSheet(menuStyleSheet());
@@ -261,14 +479,12 @@ private:
         connect(m_toolbar, &Toolbar::clearProjectClicked, this, [this]() {
             m_projectPanel->clearFiles();
             m_previewPanel->clearImage();
+            m_toolbar->enableProcess(false);
+            m_toolbar->enableExport(false);
             statusBar()->showMessage("项目已清空", 3000);
         });
-        connect(m_toolbar, &Toolbar::startProcessClicked, this, [this]() {
-            statusBar()->showMessage("处理功能将在后续版本实现", 3000);
-        });
-        connect(m_toolbar, &Toolbar::exportResultClicked, this, [this]() {
-            statusBar()->showMessage("导出功能将在后续版本实现", 3000);
-        });
+        connect(m_toolbar, &Toolbar::startProcessClicked, this, &MainWindow::onProcessClicked);
+        connect(m_toolbar, &Toolbar::exportResultClicked, this, &MainWindow::onExportClicked);
         connect(m_toolbar, &Toolbar::settingsClicked, this, [this]() {
             onSettingsClicked();
         });
@@ -296,15 +512,25 @@ private:
                     5000
                 );
             } else {
-                // 空状态按钮点击时 paths 为空，直接打开导入对话框
                 onImportClicked();
             }
+        });
+
+        // 文件变化 -> 更新按钮状态
+        connect(m_projectPanel, &ProjectPanel::filesChanged, this, [this]() {
+            int count = m_projectPanel->includedFilePaths().size();
+            m_toolbar->enableProcess(count >= 2);
+            if (count < 2) m_toolbar->enableExport(false);
+        });
+
+        // 参考帧变化
+        connect(m_projectPanel, &ProjectPanel::referenceFrameChanged, this, [this]() {
+            statusBar()->showMessage("参考帧已更新", 2000);
         });
 
         // 鼠标像素信息
         connect(m_previewPanel, &PreviewPanel::mousePixelInfo, this, [](int x, int y, int r, int g, int b) {
             Q_UNUSED(x) Q_UNUSED(y) Q_UNUSED(r) Q_UNUSED(g) Q_UNUSED(b)
-            // 已在 PreviewPanel 内部处理显示
         });
 
         // 参数变化
@@ -377,12 +603,117 @@ private slots:
             "<h2>StarProcessor</h2>"
             "<p>为星空摄影师打造的跨平台 RAW 处理工具</p>"
             "<p><b>版本：</b>0.2.0</p>"
-            "<p><b>阶段：</b>P0 — 基础设施</p>"
+            "<p><b>阶段：</b>P1 — 核心处理</p>"
             "<p><b>技术栈：</b>C++17 + Qt6 + CMake + LibRaw</p>"
             "<p><b>目标平台：</b>Windows + macOS</p>"
             "<hr>"
             "<p>全部代码开源，基于 MIT License</p>"
         );
+    }
+
+    void onProcessClicked() {
+        // 1. 收集文件
+        auto files = m_projectPanel->includedFilePaths();
+        if (files.size() < 2) {
+            QMessageBox::warning(this, "处理", "需要至少 2 张未排除的图像才能开始处理");
+            return;
+        }
+
+        QString refFrame = m_projectPanel->referenceFramePath();
+        if (refFrame.isEmpty()) {
+            // 自动选择第一个为参考帧
+            refFrame = files.first();
+            m_projectPanel->setReferenceFrame(refFrame);
+        }
+
+        // 2. 构建参数
+        ProcessingWorker::Params params;
+        params.alignMethod = m_paramsPanel->alignMethod();
+        params.stackMethod = m_paramsPanel->stackMethod();
+        params.kappaValue = m_paramsPanel->kappaValue();
+        params.dewarpEnabled = m_paramsPanel->dewarpEnabled();
+        params.dewarpStrength = m_paramsPanel->dewarpStrength();
+        params.stretchEnabled = m_paramsPanel->stretchEnabled();
+        params.starReduceEnabled = m_paramsPanel->starReduceEnabled();
+        params.starReduceStrength = m_paramsPanel->starReduceStrength();
+        params.outputFormat = m_paramsPanel->outputFormat();
+        params.outputPath = m_paramsPanel->outputPath();
+
+        // 3. 创建进度对话框
+        auto* dialog = new QProgressDialog(this);
+        dialog->setWindowTitle("处理中...");
+        dialog->setLabelText("初始化...");
+        dialog->setRange(0, 100);
+        dialog->setValue(0);
+        dialog->setMinimumDuration(0);
+        dialog->setCancelButtonText("取消");
+        dialog->setStyleSheet(
+            "QProgressDialog { background-color: #161B22; color: #E6EDF3; }"
+            "QLabel { color: #E6EDF3; }"
+            "QProgressBar { border: 1px solid #30363D; background-color: #21262D; color: #E6EDF3; }"
+            "QProgressBar::chunk { background-color: #F0B90B; }"
+            "QPushButton { background-color: #21262D; color: #E6EDF3; border: 1px solid #30363D; }"
+        );
+
+        // 4. 创建后台线程
+        m_worker = new ProcessingWorker(files, refFrame, params, this);
+        connect(m_worker, &ProcessingWorker::progress, dialog, &QProgressDialog::setValue);
+        connect(m_worker, &ProcessingWorker::stageMessage, dialog, [dialog](const QString& msg) {
+            dialog->setLabelText(msg);
+        });
+        connect(m_worker, &ProcessingWorker::finished, this, [this, dialog]() {
+            dialog->close();
+            dialog->deleteLater();
+            if (m_worker->errorString().isEmpty()) {
+                // 成功：预览堆栈结果
+                m_previewPanel->load16BitImage(m_worker->stackedData(), m_worker->stackedWidth(), m_worker->stackedHeight());
+                m_toolbar->enableExport(true);
+                statusBar()->showMessage(
+                    QString("处理完成 — %1×%2 已堆栈 %3 帧")
+                        .arg(m_worker->stackedWidth())
+                        .arg(m_worker->stackedHeight())
+                        .arg(m_worker->stackedData().empty() ? 0 : 1),
+                    5000
+                );
+            } else {
+                QMessageBox::warning(this, "处理失败", m_worker->errorString());
+                statusBar()->showMessage("处理失败", 3000);
+            }
+            m_worker->deleteLater();
+            m_worker = nullptr;
+        });
+        connect(dialog, &QProgressDialog::canceled, this, [this]() {
+            if (m_worker) {
+                m_worker->requestCancel();
+                statusBar()->showMessage("处理已取消", 3000);
+            }
+        });
+
+        m_worker->start();
+    }
+
+    void onExportClicked() {
+        if (m_worker && !m_worker->stackedData().empty()) {
+            QString outPath = m_paramsPanel->outputPath();
+            if (outPath.isEmpty()) outPath = QDir::homePath() + "/StarProcessor/Output";
+            QDir().mkpath(outPath);
+
+            QString fileName = QDateTime::currentDateTime().toString("yyyyMMdd_hhmmss") + "_stacked_export.tiff";
+            QString fullPath = outPath + "/" + fileName;
+
+            ImageExporter::Format fmt = ImageExporter::Tiff16;
+            if (m_paramsPanel->outputFormat() == "png16") fmt = ImageExporter::Png16;
+
+            if (ImageExporter::export16Bit(m_worker->stackedData(), m_worker->stackedWidth(), m_worker->stackedHeight(),
+                                            fullPath.toStdString(), fmt)) {
+                QMessageBox::information(this, "导出成功", QString("已导出到：%1").arg(fullPath));
+                statusBar()->showMessage(QString("已导出：%1").arg(fileName), 5000);
+            } else {
+                QMessageBox::warning(this, "导出失败", "无法导出图像");
+            }
+        } else {
+            QMessageBox::information(this, "导出", "没有可用的堆栈结果，请先执行处理");
+        }
     }
 
     void onSettingsClicked() {
@@ -488,6 +819,7 @@ private:
     ParamsPanel* m_paramsPanel = nullptr;
     QWidget* m_stepBar = nullptr;
     QButtonGroup* m_stepGroup = nullptr;
+    ProcessingWorker* m_worker = nullptr;
 };
 
 int main(int argc, char* argv[]) {

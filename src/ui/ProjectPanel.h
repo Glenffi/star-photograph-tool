@@ -65,15 +65,20 @@ public:
     void clearFiles();
     void removeSelected();
     void setReferenceFrame(const QString& filePath);
+    void setReferenceFrame(int index);
 
     QStringList filePaths() const;
+    QStringList includedFilePaths() const;  // 未排除的文件
     QString currentFilePath() const;
+    QString referenceFramePath() const;
 
 signals:
     void fileSelected(const QString& filePath);
     void requestMetadata(const QString& filePath);
     void filesChanged();
     void filesDropped(const QStringList& filePaths);
+    void referenceFrameChanged();
+    void requestProcess();
 
 private slots:
     void onThumbnailReady(const QString& filePath, const QPixmap& thumbnail);

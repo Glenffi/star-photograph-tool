@@ -273,6 +273,51 @@ void PreviewPanel::loadImage(const QImage& image) {
     updateZoomDisplay();
 }
 
+void PreviewPanel::load16BitImage(const std::vector<uint16_t>& data, int w, int h) {
+    if (data.empty() || w <= 0 || h <= 0) {
+        clearImage();
+        return;
+    }
+
+    // 找到最大值用于归一化
+    uint16_t maxVal = 0;
+    for (uint16_t v : data) {
+        if (v > maxVal) maxVal = v;
+    }
+    if (maxVal < 256) maxVal = 255;
+    if (maxVal == 0) maxVal = 1;
+
+    // Arcsinh tone mapping
+    QImage image(w, h, QImage::Format_RGB888);
+    float scale = 255.0f / static_cast<float>(maxVal);
+    for (int y = 0; y < h; ++y) {
+        for (int x = 0; x < w; ++x) {
+            uint16_t val = data[y * w + x];
+            float normalized = val * scale;
+            // Arcsinh stretch: asinh(nonlinear) * factor
+            float stretched = std::asinh(normalized * 0.05f) * 40.0f;
+            int v = static_cast<int>(std::clamp(stretched, 0.0f, 255.0f));
+            image.setPixelColor(x, y, QColor(v, v, v));
+        }
+    }
+
+    m_currentImage = image;
+    m_beforeImage = image;
+    m_afterImage = image;
+    m_currentFilePath.clear();
+    m_imageFileName = QString::fromUtf8("堆栈结果");
+    m_imageIso = 0;
+    m_imageExposure = 0.0;
+    m_imageFocalLength = 0;
+
+    m_emptyState->setVisible(false);
+    m_scrollArea->setVisible(true);
+
+    updateImageDisplay();
+    onFitView();
+    updateZoomDisplay();
+}
+
 void PreviewPanel::clearImage() {
     m_currentImage = QImage();
     m_beforeImage = QImage();

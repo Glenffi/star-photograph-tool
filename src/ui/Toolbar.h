@@ -9,6 +9,8 @@ class Toolbar : public QWidget {
     Q_OBJECT
 public:
     explicit Toolbar(QWidget* parent = nullptr);
+    void enableProcess(bool enabled);
+    void enableExport(bool enabled);
 
 signals:
     void importFilesClicked();
