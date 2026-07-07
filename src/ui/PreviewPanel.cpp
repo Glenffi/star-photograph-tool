@@ -487,7 +487,7 @@ void PreviewPanel::mouseMoveEvent(QMouseEvent* event) {
 
     // 鼠标像素信息
     if (!m_currentImage.isNull() && m_scrollArea->isVisible()) {
-        QPoint labelPos = m_imageLabel->mapFromParent(mapFromParent(event->pos()));
+        QPoint labelPos = m_imageLabel->mapFrom(this, event->pos());
         int x = int(labelPos.x() / m_zoom);
         int y = int(labelPos.y() / m_zoom);
 
@@ -499,6 +499,8 @@ void PreviewPanel::mouseMoveEvent(QMouseEvent* event) {
                     .arg(x).arg(y)
                     .arg(qRed(pixel)).arg(qGreen(pixel)).arg(qBlue(pixel))
             );
+        } else {
+            m_mouseInfo->setText(QString::fromUtf8("鼠标: — | RGB: —"));
         }
     }
 

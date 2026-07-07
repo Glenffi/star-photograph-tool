@@ -457,6 +457,9 @@ private:
         statusBar()->setStyleSheet(
             "QStatusBar { background-color: #161B22; color: #8B949E; border-top: 1px solid #30363D; }"
         );
+        m_mouseStatusLabel = new QLabel(this);
+        m_mouseStatusLabel->setStyleSheet("color: #8B949E; padding: 0 8px; font-size: 11px;");
+        statusBar()->addPermanentWidget(m_mouseStatusLabel);
     }
 
     void setupStepBar() {
@@ -528,7 +531,16 @@ private:
             statusBar()->showMessage("参考帧已更新", 2000);
         });
 
-        // 鼠标像素信息
+        // 鼠标像素信息 -> 状态栏永久显示
+        connect(m_previewPanel, &PreviewPanel::mousePixelInfo, this, [this](int x, int y, int r, int g, int b) {
+            if (m_mouseStatusLabel) {
+                m_mouseStatusLabel->setText(
+                    QString("坐标: (%1, %2) | RGB: (%3, %4, %5)").arg(x).arg(y).arg(r).arg(g).arg(b)
+                );
+            }
+        });
+
+        // 参数变化
         connect(m_previewPanel, &PreviewPanel::mousePixelInfo, this, [](int x, int y, int r, int g, int b) {
             Q_UNUSED(x) Q_UNUSED(y) Q_UNUSED(r) Q_UNUSED(g) Q_UNUSED(b)
         });
@@ -813,6 +825,8 @@ private slots:
     }
 
 private:
+private:
+    QLabel* m_mouseStatusLabel = nullptr;
     Toolbar* m_toolbar = nullptr;
     ProjectPanel* m_projectPanel = nullptr;
     PreviewPanel* m_previewPanel = nullptr;
