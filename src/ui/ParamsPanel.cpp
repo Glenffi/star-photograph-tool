@@ -13,6 +13,7 @@
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QSettings>
+#include <QMessageBox>
 
 ParamsPanel::ParamsPanel(QWidget* parent)
     : QWidget(parent)
@@ -65,7 +66,11 @@ void ParamsPanel::setupUI() {
     methodLabel->setStyleSheet("font-size: 12px; color: #C9D1D9; background-color: transparent;");
     methodRow->addWidget(methodLabel);
     m_alignMethod = new QComboBox(m_alignGroup);
-    m_alignMethod->addItems({"星点对齐", "特征点匹配", "手动对齐"});
+    m_alignMethod->addItem("星点对齐 (已实现)");
+    m_alignMethod->addItem("特征点匹配 (后续版本)");
+    m_alignMethod->addItem("手动对齐 (后续版本)");
+    m_alignMethod->setItemData(1, 0, Qt::UserRole - 1); // 禁用未实现项
+    m_alignMethod->setItemData(2, 0, Qt::UserRole - 1);
     m_alignMethod->setStyleSheet(
         "QComboBox { background-color: #21262D; color: #E6EDF3; border: 1px solid #30363D; "
         "border-radius: 4px; padding: 4px 8px; font-size: 12px; }"
@@ -73,7 +78,12 @@ void ParamsPanel::setupUI() {
         "QComboBox QAbstractItemView { background-color: #21262D; color: #E6EDF3; "
         "border: 1px solid #30363D; selection-background-color: #30363D; }"
     );
-    connect(m_alignMethod, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &ParamsPanel::onComboChanged);
+    connect(m_alignMethod, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this](int index) {
+        if (index > 0) {
+            m_alignMethod->setCurrentIndex(0);
+            QMessageBox::information(this, "提示", "该对齐方式将在后续版本实现");
+        }
+    });
     methodRow->addWidget(m_alignMethod, 1);
     alignLayout->addLayout(methodRow);
 
@@ -104,17 +114,25 @@ void ParamsPanel::setupUI() {
     algoLabel->setStyleSheet("font-size: 12px; color: #C9D1D9; background-color: transparent;");
     algoRow->addWidget(algoLabel);
     m_stackAlgorithm = new QComboBox(m_stackGroup);
-    m_stackAlgorithm->addItems({"Sigma Clipping", "Median", "Mean", "Kappa-Sigma", "Winsorized"});
+    m_stackAlgorithm->addItems({"Median (已实现)", "Mean (已实现)", "Sigma Clipping (后续版本)", "Kappa-Sigma (后续版本)", "Winsorized (后续版本)"});
+    m_stackAlgorithm->setItemData(2, 0, Qt::UserRole - 1); // 禁用未实现项
+    m_stackAlgorithm->setItemData(3, 0, Qt::UserRole - 1);
+    m_stackAlgorithm->setItemData(4, 0, Qt::UserRole - 1);
     m_stackAlgorithm->setToolTip(
         QString::fromUtf8("选择堆栈降噪算法：\n"
-        "• Sigma Clipping：剔除偏离中值过远的像素，适合有飞机/卫星轨迹\n"
-        "• Median：取中位数，简单鲁棒，适合 ≤5 帧\n"
-        "• Mean：取平均值，信噪比最高但抗异常差\n"
-        "• Kappa-Sigma：迭代 Sigma Clipping，κ=2.5 为常用值\n"
-        "• Winsorized：用 MAD 替代标准差，更鲁棒，适合大帧数深空")
+        "• Median：取中位数，简单鲁棒，适合 ≤5 帧 (已实现)\n"
+        "• Mean：取平均值，信噪比最高但抗异常差 (已实现)\n"
+        "• Sigma Clipping：剔除偏离中值过远的像素 (后续版本)\n"
+        "• Kappa-Sigma：迭代 Sigma Clipping (后续版本)\n"
+        "• Winsorized：用 MAD 替代标准差 (后续版本)")
     );
     m_stackAlgorithm->setStyleSheet(m_alignMethod->styleSheet());
-    connect(m_stackAlgorithm, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &ParamsPanel::onComboChanged);
+    connect(m_stackAlgorithm, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this](int index) {
+        if (index > 1) {
+            m_stackAlgorithm->setCurrentIndex(0);
+            QMessageBox::information(this, "提示", "该堆栈算法将在后续版本实现");
+        }
+    });
     algoRow->addWidget(m_stackAlgorithm, 1);
     stackLayout->addLayout(algoRow);
 
