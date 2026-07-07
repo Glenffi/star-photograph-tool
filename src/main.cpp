@@ -208,7 +208,7 @@ protected:
         ImageExporter::Format fmt = ImageExporter::Tiff16;
         QString outExt = ".tiff";
         if (m_params.outputFormat == "png8") {
-            fmt = ImageExporter::Png16;
+            fmt = ImageExporter::Png8;
             outExt = ".png";
         }
 
@@ -714,7 +714,9 @@ private slots:
                 QString cacheDir = QDir::homePath() + "/StarProcessor/Cache";
                 QDir().mkpath(cacheDir);
                 QString cacheFile = cacheDir + "/" + QDateTime::currentDateTime().toString("yyyyMMdd_hhmmss") + "_cached.tiff";
-                ImageExporter::export16Bit(m_cachedStackedData, m_cachedWidth, m_cachedHeight, cacheFile.toStdString());
+                if (!ImageExporter::export16Bit(m_cachedStackedData, m_cachedWidth, m_cachedHeight, cacheFile.toStdString())) {
+                    qWarning() << "缓存 TIFF 写入失败:" << cacheFile;
+                }
 
                 m_previewPanel->load16BitImage(m_cachedStackedData, m_cachedWidth, m_cachedHeight);
                 m_toolbar->enableExport(true);
@@ -756,7 +758,7 @@ private slots:
         ImageExporter::Format fmt = ImageExporter::Tiff16;
         QString ext = ".tiff";
         if (m_paramsPanel->outputFormat() == "png8") {
-            fmt = ImageExporter::Png16;
+            fmt = ImageExporter::Png8;
             ext = ".png";
         }
 

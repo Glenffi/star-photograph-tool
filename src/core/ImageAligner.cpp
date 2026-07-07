@@ -308,7 +308,10 @@ bool ImageAligner::ransacAffine(const std::vector<StarPoint>& refStars,
     }
 
     if (inlierMatches.size() >= 3) {
-        solveAffineLeastSquares(refStars, srcStars, inlierMatches, out);
+        if (!solveAffineLeastSquares(refStars, srcStars, inlierMatches, out)) {
+            // least squares 失败（接近奇异），回退到 bestT
+            out = bestT;
+        }
     } else {
         out = bestT;
     }

@@ -78,7 +78,7 @@ static bool exportTiffRgb16(const std::vector<uint16_t>& rgb, int width, int hei
 #endif
 }
 
-static bool exportPng16Bit(const std::vector<uint16_t>& image, int width, int height, const std::string& path) {
+static bool exportPng8Bit(const std::vector<uint16_t>& image, int width, int height, const std::string& path) {
     QImage qimg(width, height, QImage::Format_Grayscale8);
     for (int y = 0; y < height; ++y) {
         for (int x = 0; x < width; ++x) {
@@ -116,7 +116,7 @@ bool ImageExporter::export16Bit(const std::vector<uint16_t>& image,
     if (format == Tiff16) {
         return exportTiff16Bit(image, width, height, path);
     } else {
-        return exportPng16Bit(image, width, height, path);
+        return exportPng8Bit(image, width, height, path);
     }
 }
 

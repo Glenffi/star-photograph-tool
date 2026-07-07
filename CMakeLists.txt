@@ -72,17 +72,14 @@ else()
             /usr/local/opt/libtiff/include
             ${CMAKE_PREFIX_PATH}/include
     )
-    if(TIFF_LIBRARY)
-        message(STATUS "libtiff 库: ${TIFF_LIBRARY}")
-    else()
-        message(FATAL_ERROR "libtiff 未找到。TIFF 16-bit 导出是 P1 必需功能，请安装 libtiff。\n"
-            "macOS: brew install libtiff\n"
-            "Windows: vcpkg install tiff\n"
-            "Linux: apt-get install libtiff-dev")
-    endif()
-    if(TIFF_INCLUDE_DIR)
-        message(STATUS "libtiff 头文件: ${TIFF_INCLUDE_DIR}")
-    endif()
+if(NOT TIFF_LIBRARY OR NOT TIFF_INCLUDE_DIR)
+    message(FATAL_ERROR "libtiff 未找到（库或头文件缺失）。TIFF 16-bit 导出是 P1 必需功能，请安装 libtiff。\n"
+        "macOS: brew install libtiff\n"
+        "Windows: vcpkg install tiff\n"
+        "Linux: apt-get install libtiff-dev")
+endif()
+message(STATUS "libtiff 库: ${TIFF_LIBRARY}")
+message(STATUS "libtiff 头文件: ${TIFF_INCLUDE_DIR}")
 endif()
 
 # 定义源文件

@@ -7,13 +7,13 @@
 /**
  * @brief 图像导出器
  *
- * 支持 TIFF 16-bit 和 PNG 16-bit 导出。
+ * 支持 TIFF 16-bit 和 PNG 8-bit 预览导出。
  */
 class ImageExporter {
 public:
     enum Format {
         Tiff16,
-        Png16
+        Png8
     };
 
     /**
