@@ -191,9 +191,31 @@ bool StarDetector::detect(const std::vector<uint16_t>& image, int width, int hei
     std::vector<float> blurred;
     gaussianBlur(image, width, height, blurred, 1.5f);
 
-    // 2. 估计背景噪声
-    float bgNoise = estimateBackground(image, width, height);
-    if (bgNoise < 1.0f) bgNoise = 1.0f;
+    // 2. 估计背景噪声（基于模糊图像，因为检测在 blurred 上进行）
+    float bgNoise = 0.0f;
+    {
+        size_t sampleCount = std::min<size_t>(blurred.size(), 65536);
+        size_t step = blurred.size() / sampleCount;
+        if (step == 0) step = 1;
+        std::vector<float> samples;
+        samples.reserve(sampleCount);
+        for (size_t i = 0; i < blurred.size(); i += step) {
+            samples.push_back(blurred[i]);
+        }
+        size_t n = samples.size();
+        if (n > 0) {
+            std::nth_element(samples.begin(), samples.begin() + n / 2, samples.end());
+            float median = samples[n / 2];
+            std::vector<float> absDev;
+            absDev.reserve(n);
+            for (float v : samples) {
+                absDev.push_back(std::abs(v - median));
+            }
+            std::nth_element(absDev.begin(), absDev.begin() + n / 2, absDev.end());
+            bgNoise = absDev[n / 2] * 1.4826f;
+        }
+    }
+    if (bgNoise < 0.5f) bgNoise = 0.5f;
     float threshold = static_cast<float>(thresholdSigma) * bgNoise;
 
     // 3. 找局部最大值（3×3窗口）
