@@ -31,6 +31,12 @@ bool RawImageLoader::loadRaw(const std::string& filePath, ImageData& out) {
     out.width = processor.imgdata.sizes.width;
     out.height = processor.imgdata.sizes.height;
     
+    // 获取 black level 和最大有效值（用于后续归一化）
+    unsigned blackLevel = processor.imgdata.color.black;
+    unsigned dataMaximum = processor.imgdata.color.data_maximum;
+    if (dataMaximum == 0) dataMaximum = 65535;
+    if (blackLevel > dataMaximum) blackLevel = 0;
+    
     // 判断是否为 Bayer 模式
     if (processor.imgdata.idata.filters != 0) {
         // Bayer CFA 数据
@@ -70,7 +76,10 @@ bool RawImageLoader::loadRaw(const std::string& filePath, ImageData& out) {
             for (int y = 0; y < out.height; ++y) {
                 for (int x = 0; x < out.width; ++x) {
                     int srcIdx = (y + topMargin) * rawWidth + (x + leftMargin);
-                    out.data[y * out.width + x] = processor.imgdata.rawdata.raw_image[srcIdx];
+                    uint16_t val = processor.imgdata.rawdata.raw_image[srcIdx];
+                    // 应用 black level 校正并裁剪到有效范围
+                    if (val > blackLevel) val -= blackLevel; else val = 0;
+                    out.data[y * out.width + x] = val;
                 }
             }
         } else {
@@ -87,9 +96,11 @@ bool RawImageLoader::loadRaw(const std::string& filePath, ImageData& out) {
         for (int y = 0; y < out.height; ++y) {
             for (int x = 0; x < out.width; ++x) {
                 int idx = y * out.width + x;
-                out.data[idx * 3 + 0] = processor.imgdata.image[idx][0]; // R
-                out.data[idx * 3 + 1] = processor.imgdata.image[idx][1]; // G
-                out.data[idx * 3 + 2] = processor.imgdata.image[idx][2]; // B
+                for (int c = 0; c < 3; ++c) {
+                    uint16_t val = processor.imgdata.image[idx][c];
+                    if (val > blackLevel) val -= blackLevel; else val = 0;
+                    out.data[idx * 3 + c] = val;
+                }
             }
         }
     }
@@ -125,61 +136,87 @@ bool RawImageLoader::decodeToRgb(const ImageData& bayer, std::vector<uint16_t>& 
     
     rgb.resize(bayer.width * bayer.height * 3);
     
-    // 简单的 Bayer 解码（最近邻插值）
-    // 支持 RGGB, BGGR, GRBG, GBRG
+    // 根据 Bayer 模式预计算每个位置的颜色
+    // 0=R, 1=G, 2=B
+    uint8_t colorMap[4];
+    if (bayer.bayerPattern == "RGGB") {
+        colorMap[0] = 0; colorMap[1] = 1; colorMap[2] = 1; colorMap[3] = 2;
+    } else if (bayer.bayerPattern == "BGGR") {
+        colorMap[0] = 2; colorMap[1] = 1; colorMap[2] = 1; colorMap[3] = 0;
+    } else if (bayer.bayerPattern == "GRBG") {
+        colorMap[0] = 1; colorMap[1] = 0; colorMap[2] = 2; colorMap[3] = 1;
+    } else if (bayer.bayerPattern == "GBRG") {
+        colorMap[0] = 1; colorMap[1] = 2; colorMap[2] = 0; colorMap[3] = 1;
+    } else {
+        // 不支持的模式，回退到简单复制
+        for (size_t i = 0; i < bayer.data.size(); ++i) {
+            rgb[i * 3 + 0] = bayer.data[i];
+            rgb[i * 3 + 1] = bayer.data[i];
+            rgb[i * 3 + 2] = bayer.data[i];
+        }
+        return true;
+    }
+    
+    auto getColorAt = [&](int x, int y) -> uint8_t {
+        return colorMap[((y & 1) * 2) + (x & 1)];
+    };
+    
+    auto pixelAt = [&](int x, int y) -> uint16_t {
+        return bayer.data[y * bayer.width + x];
+    };
+    
     for (int y = 0; y < bayer.height; ++y) {
         for (int x = 0; x < bayer.width; ++x) {
             int idx = y * bayer.width + x;
-            uint16_t r = 0, g = 0, b = 0;
+            uint8_t color = getColorAt(x, y);
             
-            // 判断当前像素位置的颜色
-            int rowParity = y % 2;
-            int colParity = x % 2;
-            
-            if (bayer.bayerPattern == "RGGB") {
-                if (rowParity == 0 && colParity == 0) {
-                    // R 位置
-                    r = bayer.data[idx];
-                    g = (y > 0 ? bayer.data[(y-1)*bayer.width+x] : bayer.data[y*bayer.width+x]) / 2 +
-                        (y < bayer.height-1 ? bayer.data[(y+1)*bayer.width+x] : bayer.data[y*bayer.width+x]) / 2;
-                    b = (x > 0 && y > 0 ? bayer.data[(y-1)*bayer.width+(x-1)] : bayer.data[idx]) / 4 +
-                        (x < bayer.width-1 && y > 0 ? bayer.data[(y-1)*bayer.width+(x+1)] : bayer.data[idx]) / 4 +
-                        (x > 0 && y < bayer.height-1 ? bayer.data[(y+1)*bayer.width+(x-1)] : bayer.data[idx]) / 4 +
-                        (x < bayer.width-1 && y < bayer.height-1 ? bayer.data[(y+1)*bayer.width+(x+1)] : bayer.data[idx]) / 4;
-                } else if (rowParity == 0 && colParity == 1) {
-                    // G 位置 (第一行)
-                    g = bayer.data[idx];
-                    r = (x > 0 ? bayer.data[y*bayer.width+(x-1)] : bayer.data[idx]) / 2 +
-                        (x < bayer.width-1 ? bayer.data[y*bayer.width+(x+1)] : bayer.data[idx]) / 2;
-                    b = (y > 0 ? bayer.data[(y-1)*bayer.width+x] : bayer.data[idx]) / 2 +
-                        (y < bayer.height-1 ? bayer.data[(y+1)*bayer.width+x] : bayer.data[idx]) / 2;
-                } else if (rowParity == 1 && colParity == 0) {
-                    // G 位置 (第二行)
-                    g = bayer.data[idx];
-                    r = (y > 0 ? bayer.data[(y-1)*bayer.width+x] : bayer.data[idx]) / 2 +
-                        (y < bayer.height-1 ? bayer.data[(y+1)*bayer.width+x] : bayer.data[idx]) / 2;
-                    b = (x > 0 ? bayer.data[y*bayer.width+(x-1)] : bayer.data[idx]) / 2 +
-                        (x < bayer.width-1 ? bayer.data[y*bayer.width+(x+1)] : bayer.data[idx]) / 2;
-                } else {
-                    // B 位置
-                    b = bayer.data[idx];
-                    g = (y > 0 ? bayer.data[(y-1)*bayer.width+x] : bayer.data[y*bayer.width+x]) / 2 +
-                        (y < bayer.height-1 ? bayer.data[(y+1)*bayer.width+x] : bayer.data[y*bayer.width+x]) / 2;
-                    r = (x > 0 && y > 0 ? bayer.data[(y-1)*bayer.width+(x-1)] : bayer.data[idx]) / 4 +
-                        (x < bayer.width-1 && y > 0 ? bayer.data[(y-1)*bayer.width+(x+1)] : bayer.data[idx]) / 4 +
-                        (x > 0 && y < bayer.height-1 ? bayer.data[(y+1)*bayer.width+(x-1)] : bayer.data[idx]) / 4 +
-                        (x < bayer.width-1 && y < bayer.height-1 ? bayer.data[(y+1)*bayer.width+(x+1)] : bayer.data[idx]) / 4;
+            if (color == 0) { // R 位置
+                rgb[idx * 3 + 0] = pixelAt(x, y);
+                uint32_t gSum = 0, gCount = 0;
+                if (x > 0) { gSum += pixelAt(x - 1, y); gCount++; }
+                if (x + 1 < bayer.width) { gSum += pixelAt(x + 1, y); gCount++; }
+                if (y > 0) { gSum += pixelAt(x, y - 1); gCount++; }
+                if (y + 1 < bayer.height) { gSum += pixelAt(x, y + 1); gCount++; }
+                rgb[idx * 3 + 1] = gCount > 0 ? gSum / gCount : pixelAt(x, y);
+                
+                uint32_t bSum = 0, bCount = 0;
+                if (x > 0 && y > 0) { bSum += pixelAt(x - 1, y - 1); bCount++; }
+                if (x + 1 < bayer.width && y > 0) { bSum += pixelAt(x + 1, y - 1); bCount++; }
+                if (x > 0 && y + 1 < bayer.height) { bSum += pixelAt(x - 1, y + 1); bCount++; }
+                if (x + 1 < bayer.width && y + 1 < bayer.height) { bSum += pixelAt(x + 1, y + 1); bCount++; }
+                rgb[idx * 3 + 2] = bCount > 0 ? bSum / bCount : pixelAt(x, y);
+            } else if (color == 2) { // B 位置
+                rgb[idx * 3 + 2] = pixelAt(x, y);
+                uint32_t gSum = 0, gCount = 0;
+                if (x > 0) { gSum += pixelAt(x - 1, y); gCount++; }
+                if (x + 1 < bayer.width) { gSum += pixelAt(x + 1, y); gCount++; }
+                if (y > 0) { gSum += pixelAt(x, y - 1); gCount++; }
+                if (y + 1 < bayer.height) { gSum += pixelAt(x, y + 1); gCount++; }
+                rgb[idx * 3 + 1] = gCount > 0 ? gSum / gCount : pixelAt(x, y);
+                
+                uint32_t rSum = 0, rCount = 0;
+                if (x > 0 && y > 0) { rSum += pixelAt(x - 1, y - 1); rCount++; }
+                if (x + 1 < bayer.width && y > 0) { rSum += pixelAt(x + 1, y - 1); rCount++; }
+                if (x > 0 && y + 1 < bayer.height) { rSum += pixelAt(x - 1, y + 1); rCount++; }
+                if (x + 1 < bayer.width && y + 1 < bayer.height) { rSum += pixelAt(x + 1, y + 1); rCount++; }
+                rgb[idx * 3 + 0] = rCount > 0 ? rSum / rCount : pixelAt(x, y);
+            } else { // G 位置
+                rgb[idx * 3 + 1] = pixelAt(x, y);
+                uint32_t rSum = 0, rCount = 0;
+                uint32_t bSum = 0, bCount = 0;
+                for (int dy = -1; dy <= 1; ++dy) {
+                    for (int dx = -1; dx <= 1; ++dx) {
+                        if (dx == 0 && dy == 0) continue;
+                        int nx = x + dx, ny = y + dy;
+                        if (nx < 0 || nx >= bayer.width || ny < 0 || ny >= bayer.height) continue;
+                        uint8_t nc = getColorAt(nx, ny);
+                        if (nc == 0) { rSum += pixelAt(nx, ny); rCount++; }
+                        else if (nc == 2) { bSum += pixelAt(nx, ny); bCount++; }
+                    }
                 }
-            } else {
-                // 其他 Bayer 模式暂时简化处理
-                r = bayer.data[idx];
-                g = bayer.data[idx];
-                b = bayer.data[idx];
+                rgb[idx * 3 + 0] = rCount > 0 ? rSum / rCount : pixelAt(x, y);
+                rgb[idx * 3 + 2] = bCount > 0 ? bSum / bCount : pixelAt(x, y);
             }
-            
-            rgb[idx * 3 + 0] = r;
-            rgb[idx * 3 + 1] = g;
-            rgb[idx * 3 + 2] = b;
         }
     }
     
@@ -228,16 +265,30 @@ bool RawImageLoader::generateThumbnail(const ImageData& raw, int maxSize, std::v
             }
         }
     } else {
-        // Bayer 数据，简单灰度化
-        // 找到 Bayer 中每个 2x2 块的平均值
+        // Bayer 数据，使用 2x2 块平均灰度化以减少摩尔纹
         for (int y = 0; y < thumbHeight; ++y) {
             for (int x = 0; x < thumbWidth; ++x) {
                 int srcX = x * raw.width / thumbWidth;
                 int srcY = y * raw.height / thumbHeight;
                 
-                // 简单采样（避免 demosaic 开销）
-                int srcIdx = srcY * raw.width + srcX;
-                uint8_t gray = scale16to8(raw.data[srcIdx]);
+                // 对齐到 2x2 Bayer 块边界，确保颜色覆盖均匀
+                srcX = (srcX / 2) * 2;
+                srcY = (srcY / 2) * 2;
+                
+                // 取 2x2 块的平均值（覆盖 R, G, G, B）
+                uint32_t sum = 0;
+                int count = 0;
+                for (int dy = 0; dy < 2; ++dy) {
+                    for (int dx = 0; dx < 2; ++dx) {
+                        int px = srcX + dx;
+                        int py = srcY + dy;
+                        if (px < raw.width && py < raw.height) {
+                            sum += raw.data[py * raw.width + px];
+                            count++;
+                        }
+                    }
+                }
+                uint8_t gray = count > 0 ? scale16to8(static_cast<uint16_t>(sum / count)) : 0;
                 
                 int dstIdx = (y * thumbWidth + x) * 3;
                 thumb[dstIdx + 0] = gray;
