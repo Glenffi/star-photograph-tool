@@ -21,16 +21,23 @@ endif()
 # 查找 Qt6 组件
 find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets)
 
-# 查找 LibRaw（brew 安装路径）
+# 查找 LibRaw（支持跨平台）
+# 优先级：1) 环境变量 LIBRAW_ROOT  2) 常见包管理器路径  3) 系统默认路径
 find_library(LibRaw_LIBRARY 
     NAMES raw libraw
-    PATHS /opt/homebrew/opt/libraw/lib
-    NO_DEFAULT_PATH
+    HINTS
+        $ENV{LIBRAW_ROOT}/lib
+        /opt/homebrew/opt/libraw/lib
+        /usr/local/opt/libraw/lib
+        ${CMAKE_PREFIX_PATH}/lib
 )
 find_path(LibRaw_INCLUDE_DIR 
     libraw/libraw.h
-    PATHS /opt/homebrew/opt/libraw/include
-    NO_DEFAULT_PATH
+    HINTS
+        $ENV{LIBRAW_ROOT}/include
+        /opt/homebrew/opt/libraw/include
+        /usr/local/opt/libraw/include
+        ${CMAKE_PREFIX_PATH}/include
 )
 
 if(NOT LibRaw_LIBRARY)

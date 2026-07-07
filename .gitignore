@@ -13,6 +13,7 @@ qrc_*.cpp
 ui_*.h
 *.pro.user
 *.pro.user.*
+*.user
 
 # 编译产物
 *.o
