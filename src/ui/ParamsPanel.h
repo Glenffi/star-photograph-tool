@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QWidget>
+#include "core/PresetManager.h"
 
 class QScrollArea;
 class QVBoxLayout;
@@ -42,13 +43,18 @@ private slots:
     void onCheckChanged(int state);
     void onRestoreDefaults();
     void onSavePreset();
+    void onPresetChanged(int index);
     void emitParamsChanged();
 
 private:
     void setupUI();
     void loadPreset();
+    void applyPreset(const Preset& preset);
     QGroupBox* createCollapsibleGroup(const QString& title, bool expanded = true);
     QSlider* createSlider(int min, int max, int value, const QString& suffix = QString());
+
+    // 预设
+    QComboBox* m_presetCombo = nullptr;
 
     // 对齐组
     QGroupBox* m_alignGroup = nullptr;

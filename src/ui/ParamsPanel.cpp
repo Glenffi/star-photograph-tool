@@ -1,4 +1,5 @@
 #include "ParamsPanel.h"
+#include "core/PresetManager.h"
 #include <QScrollArea>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -14,6 +15,8 @@
 #include <QFileInfo>
 #include <QSettings>
 #include <QMessageBox>
+
+#include <QSignalBlocker>
 
 ParamsPanel::ParamsPanel(QWidget* parent)
     : QWidget(parent)
@@ -55,6 +58,28 @@ void ParamsPanel::setupUI() {
     auto* containerLayout = new QVBoxLayout(container);
     containerLayout->setContentsMargins(12, 12, 12, 12);
     containerLayout->setSpacing(8);
+
+    // 预设选择
+    auto* presetRow = new QHBoxLayout();
+    auto* presetLabel = new QLabel(QString::fromUtf8("预设:"), container);
+    presetLabel->setStyleSheet("font-size: 12px; color: #C9D1D9; background-color: transparent;");
+    presetRow->addWidget(presetLabel);
+    m_presetCombo = new QComboBox(container);
+    m_presetCombo->addItem(QString::fromUtf8("自定义"));
+    m_presetCombo->addItem(QString::fromUtf8("银河广角"));
+    m_presetCombo->addItem(QString::fromUtf8("深空天体"));
+    m_presetCombo->addItem(QString::fromUtf8("单帧降噪"));
+    m_presetCombo->addItem(QString::fromUtf8("延时序列"));
+    m_presetCombo->setStyleSheet(
+        "QComboBox { background-color: #21262D; color: #E6EDF3; border: 1px solid #30363D; "
+        "border-radius: 4px; padding: 4px 8px; font-size: 12px; }"
+        "QComboBox::drop-down { border: none; }"
+        "QComboBox QAbstractItemView { background-color: #21262D; color: #E6EDF3; "
+        "border: 1px solid #30363D; selection-background-color: #30363D; }"
+    );
+    connect(m_presetCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &ParamsPanel::onPresetChanged);
+    presetRow->addWidget(m_presetCombo, 1);
+    containerLayout->addLayout(presetRow);
 
     // 对齐组（默认展开）
     m_alignGroup = createCollapsibleGroup(QString::fromUtf8("▼ 对齐"), true);
@@ -114,25 +139,16 @@ void ParamsPanel::setupUI() {
     algoLabel->setStyleSheet("font-size: 12px; color: #C9D1D9; background-color: transparent;");
     algoRow->addWidget(algoLabel);
     m_stackAlgorithm = new QComboBox(m_stackGroup);
-    m_stackAlgorithm->addItems({"Median (已实现)", "Mean (已实现)", "Sigma Clipping (后续版本)", "Kappa-Sigma (后续版本)", "Winsorized (后续版本)"});
-    m_stackAlgorithm->setItemData(2, 0, Qt::UserRole - 1); // 禁用未实现项
-    m_stackAlgorithm->setItemData(3, 0, Qt::UserRole - 1);
-    m_stackAlgorithm->setItemData(4, 0, Qt::UserRole - 1);
+    m_stackAlgorithm->addItems({"Median", "Mean", "Kappa-Sigma", "Winsorized"});
     m_stackAlgorithm->setToolTip(
         QString::fromUtf8("选择堆栈降噪算法：\n"
-        "• Median：取中位数，简单鲁棒，适合 ≤5 帧 (已实现)\n"
-        "• Mean：取平均值，信噪比最高但抗异常差 (已实现)\n"
-        "• Sigma Clipping：剔除偏离中值过远的像素 (后续版本)\n"
-        "• Kappa-Sigma：迭代 Sigma Clipping (后续版本)\n"
-        "• Winsorized：用 MAD 替代标准差 (后续版本)")
+        "• Median：取中位数，简单鲁棒，适合 ≤5 帧\n"
+        "• Mean：取平均值，信噪比最高但抗异常差\n"
+        "• Kappa-Sigma：迭代剔除异常值，适合 6-15 帧\n"
+        "• Winsorized：用 MAD 替代标准差，适合 >15 帧")
     );
     m_stackAlgorithm->setStyleSheet(m_alignMethod->styleSheet());
-    connect(m_stackAlgorithm, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this](int index) {
-        if (index > 1) {
-            m_stackAlgorithm->setCurrentIndex(0);
-            QMessageBox::information(this, "提示", "该堆栈算法将在后续版本实现");
-        }
-    });
+    connect(m_stackAlgorithm, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &ParamsPanel::onComboChanged);
     algoRow->addWidget(m_stackAlgorithm, 1);
     stackLayout->addLayout(algoRow);
 
@@ -170,9 +186,9 @@ void ParamsPanel::setupUI() {
     optimizeLayout->setSpacing(8);
 
     auto* dewarpRow = new QHBoxLayout();
-    m_dewarpCheck = new QCheckBox(QString::fromUtf8("去雾（后续版本）"), m_optimizeGroup);
-    m_dewarpCheck->setEnabled(false);
-    m_dewarpCheck->setToolTip(QString::fromUtf8("去雾功能将在后续版本实现"));
+    m_dewarpCheck = new QCheckBox(QString::fromUtf8("去雾"), m_optimizeGroup);
+    m_dewarpCheck->setEnabled(true);
+    m_dewarpCheck->setToolTip(QString::fromUtf8("Dark Channel Prior 去雾，改善大气光污染"));
     m_dewarpCheck->setStyleSheet(
         "QCheckBox { font-size: 12px; color: #C9D1D9; background-color: transparent; }"
         "QCheckBox::indicator { width: 14px; height: 14px; }"
@@ -180,16 +196,16 @@ void ParamsPanel::setupUI() {
     connect(m_dewarpCheck, &QCheckBox::toggled, this, &ParamsPanel::onCheckChanged);
     dewarpRow->addWidget(m_dewarpCheck);
     m_dewarpSlider = createSlider(0, 100, 30);
-    m_dewarpSlider->setEnabled(false);
+    m_dewarpSlider->setEnabled(true);
     m_dewarpSlider->setFixedWidth(100);
     connect(m_dewarpSlider, &QSlider::valueChanged, this, &ParamsPanel::onSliderValueChanged);
     connect(m_dewarpSlider, &QSlider::sliderReleased, this, &ParamsPanel::onSliderReleased);
     dewarpRow->addWidget(m_dewarpSlider);
     optimizeLayout->addLayout(dewarpRow);
 
-    m_stretchCheck = new QCheckBox(QString::fromUtf8("曲线拉伸（后续版本）"), m_optimizeGroup);
-    m_stretchCheck->setEnabled(false);
-    m_stretchCheck->setToolTip(QString::fromUtf8("曲线拉伸功能将在后续版本实现"));
+    m_stretchCheck = new QCheckBox(QString::fromUtf8("曲线拉伸"), m_optimizeGroup);
+    m_stretchCheck->setEnabled(true);
+    m_stretchCheck->setToolTip(QString::fromUtf8("Arcsinh 曲线拉伸，增强暗部细节"));
     m_stretchCheck->setStyleSheet(m_dewarpCheck->styleSheet());
     connect(m_stretchCheck, &QCheckBox::toggled, this, &ParamsPanel::onCheckChanged);
     optimizeLayout->addWidget(m_stretchCheck);
@@ -496,7 +512,56 @@ void ParamsPanel::onRestoreDefaults() {
 }
 
 void ParamsPanel::onSavePreset() {
-    // 占位：后续实现预设保存
+    emitParamsChanged();
+}
+
+void ParamsPanel::onPresetChanged(int index) {
+    if (index <= 0) return;
+
+    auto presets = PresetManager::builtinPresets();
+    if (index - 1 < presets.size()) {
+        applyPreset(presets[index - 1]);
+    }
+}
+
+void ParamsPanel::applyPreset(const Preset& preset) {
+    // Block signals to avoid recursive emits
+    QSignalBlocker blocker1(m_alignMethod);
+    QSignalBlocker blocker2(m_stackAlgorithm);
+    QSignalBlocker blocker3(m_kappaSlider);
+    QSignalBlocker blocker4(m_dewarpCheck);
+    QSignalBlocker blocker5(m_dewarpSlider);
+    QSignalBlocker blocker6(m_stretchCheck);
+    QSignalBlocker blocker7(m_outputFormat);
+
+    // Align method
+    if (preset.alignMethod == "star") m_alignMethod->setCurrentIndex(0);
+    else if (preset.alignMethod == "feature") m_alignMethod->setCurrentIndex(1);
+    else if (preset.alignMethod == "manual") m_alignMethod->setCurrentIndex(2);
+
+    // Stack method
+    if (preset.stackMethod == "median") m_stackAlgorithm->setCurrentIndex(0);
+    else if (preset.stackMethod == "average") m_stackAlgorithm->setCurrentIndex(1);
+    else if (preset.stackMethod == "kappa-sigma") m_stackAlgorithm->setCurrentIndex(2);
+    else if (preset.stackMethod == "winsorized") m_stackAlgorithm->setCurrentIndex(3);
+
+    // Kappa
+    int kappaInt = static_cast<int>(preset.kappaValue * 10 + 0.5);
+    m_kappaSlider->setValue(kappaInt);
+    m_kappaLabel->setText(QString::number(preset.kappaValue, 'f', 1));
+
+    // Dewarp
+    m_dewarpCheck->setChecked(preset.dewarpEnabled);
+    m_dewarpSlider->setValue(preset.dewarpStrength);
+    m_dewarpSlider->setEnabled(preset.dewarpEnabled);
+
+    // Stretch
+    m_stretchCheck->setChecked(preset.stretchEnabled);
+
+    // Output format
+    if (preset.outputFormat == "tiff16") m_outputFormat->setCurrentIndex(0);
+    else if (preset.outputFormat == "png8") m_outputFormat->setCurrentIndex(1);
+
     emitParamsChanged();
 }
 
@@ -521,11 +586,11 @@ QString ParamsPanel::alignMethod() const {
 QString ParamsPanel::stackMethod() const {
     if (!m_stackAlgorithm) return "average";
     int index = m_stackAlgorithm->currentIndex();
-    // 0: Median (已实现)
-    // 1: Mean (已实现)
-    // 2+: 未实现，选择时已被回退到 0 或 1
+    // 0: Median, 1: Mean, 2: Kappa-Sigma, 3: Winsorized
     if (index == 0) return "median";
     if (index == 1) return "average";
+    if (index == 2) return "kappa-sigma";
+    if (index == 3) return "winsorized";
     return "average";
 }
 

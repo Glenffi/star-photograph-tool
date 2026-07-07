@@ -42,6 +42,8 @@
 #include "core/ImageAligner.h"
 #include "core/StackingEngine.h"
 #include "core/ImageExporter.h"
+#include "core/AutoOptimizeEngine.h"
+#include "core/PresetManager.h"
 
 /**
  * @brief 后台处理工作线程
@@ -188,9 +190,13 @@ protected:
         // 4. 堆栈
         emit stageMessage("堆栈中...");
         StackingEngine stacker;
-        StackingEngine::Method method = (m_params.stackMethod == "median") ? StackingEngine::Median : StackingEngine::Average;
+        StackingEngine::Method method = StackingEngine::Average;
+        if (m_params.stackMethod == "median") method = StackingEngine::Median;
+        else if (m_params.stackMethod == "average") method = StackingEngine::Average;
+        else if (m_params.stackMethod == "kappa-sigma") method = StackingEngine::KappaSigma;
+        else if (m_params.stackMethod == "winsorized") method = StackingEngine::Winsorized;
         std::vector<uint16_t> result;
-        if (!stacker.stack(alignedImages, w, h, method, result)) {
+        if (!stacker.stack(alignedImages, w, h, method, m_params.kappaValue, result)) {
             m_errorString = "堆栈失败";
             return;
         }
@@ -198,7 +204,30 @@ protected:
         m_frameCount = static_cast<int>(alignedImages.size());
         emit progress(80);
 
-        // 5. 导出（根据参数）
+        // 5. 自动优化（如果启用）
+        if (m_params.dewarpEnabled || m_params.stretchEnabled) {
+            emit stageMessage("自动优化...");
+            std::vector<uint16_t> optimized = result;
+            
+            if (m_params.dewarpEnabled) {
+                std::vector<uint16_t> temp;
+                if (AutoOptimizeEngine::dehaze(optimized, w, h, m_params.dewarpStrength, temp)) {
+                    optimized = std::move(temp);
+                }
+            }
+            
+            if (m_params.stretchEnabled) {
+                std::vector<uint16_t> temp;
+                if (AutoOptimizeEngine::stretchCurve(optimized, w, h, temp)) {
+                    optimized = std::move(temp);
+                }
+            }
+            
+            result = std::move(optimized);
+            emit progress(90);
+        }
+
+        // 6. 导出（根据参数）
         emit stageMessage("导出结果...");
         QString outFileName = QDateTime::currentDateTime().toString("yyyyMMdd_hhmmss") + "_stacked";
         QString outPath = m_params.outputPath;
