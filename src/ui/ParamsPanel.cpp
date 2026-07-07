@@ -170,7 +170,9 @@ void ParamsPanel::setupUI() {
     optimizeLayout->setSpacing(8);
 
     auto* dewarpRow = new QHBoxLayout();
-    m_dewarpCheck = new QCheckBox(QString::fromUtf8("去雾"), m_optimizeGroup);
+    m_dewarpCheck = new QCheckBox(QString::fromUtf8("去雾（后续版本）"), m_optimizeGroup);
+    m_dewarpCheck->setEnabled(false);
+    m_dewarpCheck->setToolTip(QString::fromUtf8("去雾功能将在后续版本实现"));
     m_dewarpCheck->setStyleSheet(
         "QCheckBox { font-size: 12px; color: #C9D1D9; background-color: transparent; }"
         "QCheckBox::indicator { width: 14px; height: 14px; }"
@@ -185,7 +187,9 @@ void ParamsPanel::setupUI() {
     dewarpRow->addWidget(m_dewarpSlider);
     optimizeLayout->addLayout(dewarpRow);
 
-    m_stretchCheck = new QCheckBox(QString::fromUtf8("曲线拉伸"), m_optimizeGroup);
+    m_stretchCheck = new QCheckBox(QString::fromUtf8("曲线拉伸（后续版本）"), m_optimizeGroup);
+    m_stretchCheck->setEnabled(false);
+    m_stretchCheck->setToolTip(QString::fromUtf8("曲线拉伸功能将在后续版本实现"));
     m_stretchCheck->setStyleSheet(m_dewarpCheck->styleSheet());
     connect(m_stretchCheck, &QCheckBox::toggled, this, &ParamsPanel::onCheckChanged);
     optimizeLayout->addWidget(m_stretchCheck);
@@ -210,7 +214,9 @@ void ParamsPanel::setupUI() {
     starLayout->addWidget(starDesc);
 
     auto* starRow = new QHBoxLayout();
-    m_starReduceCheck = new QCheckBox(QString::fromUtf8("启用缩星"), m_starReduceGroup);
+    m_starReduceCheck = new QCheckBox(QString::fromUtf8("启用缩星（后续版本）"), m_starReduceGroup);
+    m_starReduceCheck->setEnabled(false);
+    m_starReduceCheck->setToolTip(QString::fromUtf8("缩星功能将在后续版本实现"));
     m_starReduceCheck->setStyleSheet(m_dewarpCheck->styleSheet());
     m_starReduceCheck->setToolTip(QString::fromUtf8("AI 自动检测星点并缩小尺寸\n关闭时直接输出原始星点"));
     connect(m_starReduceCheck, &QCheckBox::toggled, this, &ParamsPanel::onCheckChanged);
