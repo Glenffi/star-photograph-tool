@@ -92,6 +92,10 @@ void ParamsPanel::setupUI() {
     auto* stackLayout = new QVBoxLayout(m_stackGroup);
     stackLayout->setSpacing(8);
 
+    auto* stackDesc = new QLabel(QString::fromUtf8("多张图像叠加对齐，提升信噪比并剔除异常像素"), m_stackGroup);
+    stackDesc->setStyleSheet("font-size: 10px; color: #8B949E; background-color: transparent; padding-bottom: 4px;");
+    stackLayout->addWidget(stackDesc);
+
     auto* algoRow = new QHBoxLayout();
     auto* algoLabel = new QLabel(QString::fromUtf8("算法:"), m_stackGroup);
     algoLabel->setStyleSheet("font-size: 12px; color: #C9D1D9; background-color: transparent;");
@@ -131,6 +135,11 @@ void ParamsPanel::setupUI() {
     m_kappaLabel->setStyleSheet("font-size: 12px; color: #8B949E; background-color: transparent; min-width: 24px;");
     kappaRow->addWidget(m_kappaLabel);
     stackLayout->addLayout(kappaRow);
+
+    auto* stackHint = new QLabel(QString::fromUtf8("ℹ️ Sigma Clipping: 剔除偏离中值过远的像素，适合有飞机/卫星轨迹的情况\nℹ️ κ=2.5: 异常值剔除阈值，值越小剔除越严格"), m_stackGroup);
+    stackHint->setStyleSheet("font-size: 10px; color: #58A6FF; background-color: transparent; padding-top: 4px;");
+    stackHint->setWordWrap(true);
+    stackLayout->addWidget(stackHint);
 
     containerLayout->addWidget(m_stackGroup);
 
