@@ -502,10 +502,13 @@ void ParamsPanel::onCheckChanged(int state) {
 
 void ParamsPanel::onRestoreDefaults() {
     m_userChangedStackMethod = false;
-    m_alignMethod->setCurrentIndex(0);
-    m_refFrame->setCurrentIndex(0);
-    m_stackAlgorithm->setCurrentIndex(0);
-    m_kappaSlider->setValue(25);
+    {
+        QSignalBlocker blocker(m_stackAlgorithm); // 阻塞信号，避免触发 m_userChangedStackMethod = true
+        m_alignMethod->setCurrentIndex(0);
+        m_refFrame->setCurrentIndex(0);
+        m_stackAlgorithm->setCurrentIndex(0);
+        m_kappaSlider->setValue(25);
+    }
     m_dewarpCheck->setChecked(false);
     m_dewarpSlider->setValue(30);
     m_stretchCheck->setChecked(false);
@@ -680,6 +683,13 @@ void ParamsPanel::onPresetChanged(int index) {
             preset.starReduceStrength = settings.value("starReduceStrength", 50).toInt();
             preset.outputFormat = settings.value("outputFormat", 0).toInt() == 0 ? "tiff16" : "png8";
             applyPreset(preset);
+
+            // 恢复自定义预设中保存的 colorSpace 和 outputPath
+            int cs = settings.value("colorSpace", 0).toInt();
+            QSignalBlocker csBlocker(m_colorSpace);
+            m_colorSpace->setCurrentIndex(cs);
+            QString op = settings.value("outputPath", QDir::homePath() + "/StarProcessor/Output").toString();
+            m_outputPath->setText(op);
         }
         settings.endArray();
     }

@@ -48,7 +48,6 @@ StarProcessor/
 │   │   ├── ImageExporter.h/cpp        # 16-bit TIFF / PNG 8-bit 导出
 │   │   ├── AutoOptimizeEngine.h/cpp   # 自动优化：Dark Channel Prior 去雾 + Arcsinh 曲线拉伸
 │   │   └── PresetManager.h/cpp        # 内置预设与用户预设持久化
-│   │   └── ImageExporter.h/cpp        # 16-bit TIFF 导出
 │   └── ui/
 │       ├── ProjectPanel.h/cpp         # 左侧面板：文件列表
 │       ├── PreviewPanel.h/cpp         # 中央面板：图像预览
