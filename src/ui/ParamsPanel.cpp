@@ -799,6 +799,12 @@ QString ParamsPanel::outputPath() const {
     return m_outputPath ? m_outputPath->text() : (QDir::homePath() + "/StarProcessor/Output");
 }
 
+void ParamsPanel::setOutputPath(const QString& path) {
+    if (m_outputPath) {
+        m_outputPath->setText(path);
+    }
+}
+
 void ParamsPanel::updateRefFrameList(const QStringList& fileNames) {
     if (!m_refFrame) return;
     QString current = m_refFrame->currentText();

@@ -33,6 +33,7 @@ public:
     void updateRefFrameList(const QStringList& fileNames);
     void recommendStackMethod(int frameCount);
     void saveCurrentSettings();
+    void setOutputPath(const QString& path);
 
 signals:
     void paramsChanged();  // 参数发生任何变化时触发

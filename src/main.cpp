@@ -839,7 +839,7 @@ private slots:
         auto* outDirRow = new QHBoxLayout();
         auto* outDirLabel = new QLabel("输出目录:", dialog);
         QSettings settings("StarProcessor", "App");
-        QString defaultOutDir = settings.value("outputDir", QDir::homePath() + "/StarProcessor/Output").toString();
+        QString defaultOutDir = settings.value("outputPath", QDir::homePath() + "/StarProcessor/Output").toString();
         auto* outDirEdit = new QLineEdit(defaultOutDir, dialog);
         outDirEdit->setReadOnly(true);
         auto* outDirBtn = new QPushButton("📁", dialog);
@@ -903,12 +903,16 @@ private slots:
             "  font-weight: bold; border: none; border-radius: 4px; padding: 6px 24px; }"
             "QPushButton:hover { background-color: #F5C518; }"
         );
-        connect(okBtn, &QPushButton::clicked, dialog, [dialog, outDirEdit, cacheEdit, memCombo, themeCombo]() {
+        connect(okBtn, &QPushButton::clicked, dialog, [this, dialog, outDirEdit, cacheEdit, memCombo, themeCombo]() {
             QSettings s("StarProcessor", "App");
-            s.setValue("outputDir", outDirEdit->text());
+            s.setValue("outputPath", outDirEdit->text());
             s.setValue("cacheDir", cacheEdit->text());
             s.setValue("maxMemory", memCombo->currentIndex());
             s.setValue("theme", themeCombo->currentIndex());
+            // 同步更新参数面板的输出路径（无需重启即生效）
+            if (m_paramsPanel) {
+                m_paramsPanel->setOutputPath(outDirEdit->text());
+            }
             dialog->accept();
         });
         btnRow->addWidget(okBtn);
