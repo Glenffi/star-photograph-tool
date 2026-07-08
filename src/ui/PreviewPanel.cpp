@@ -10,6 +10,7 @@
 #include <QScrollBar>
 #include <QFileInfo>
 #include <QDebug>
+#include <QPainter>
 #include <algorithm>
 
 PreviewPanel::PreviewPanel(QWidget* parent)
@@ -422,6 +423,15 @@ void PreviewPanel::applyZoom() {
     if (w > 0 && h > 0) {
         pixmap = pixmap.scaled(w, h, Qt::KeepAspectRatio, Qt::SmoothTransformation);
     }
+
+    // 叠加蒙版
+    if (m_maskOverlayVisible && !m_maskOverlay.isNull()) {
+        QPainter painter(&pixmap);
+        QImage scaledMask = m_maskOverlay.scaled(pixmap.size(), Qt::KeepAspectRatio, Qt::SmoothTransformation);
+        painter.drawImage(0, 0, scaledMask);
+        painter.end();
+    }
+
     m_imageLabel->setPixmap(pixmap);
     m_imageLabel->setFixedSize(pixmap.size());
 }
@@ -607,6 +617,34 @@ void PreviewPanel::setAfterImage(const QImage& image) {
 
 QImage PreviewPanel::currentImage() const {
     return m_currentImage;
+}
+
+void PreviewPanel::setMaskOverlay(const std::vector<uint8_t>& mask, int w, int h) {
+    if (w <= 0 || h <= 0 || mask.size() != static_cast<size_t>(w * h)) return;
+
+    m_maskOverlay = QImage(w, h, QImage::Format_ARGB32);
+    m_maskOverlay.fill(Qt::transparent);
+
+    for (int y = 0; y < h; ++y) {
+        for (int x = 0; x < w; ++x) {
+            uint8_t val = mask[y * w + x];
+            if (val > 128) {
+                // 天空：蓝色 #4488FF @ 30% alpha
+                m_maskOverlay.setPixelColor(x, y, QColor(68, 136, 255, 77));
+            } else {
+                // 地景：绿色 #44FF88 @ 30% alpha
+                m_maskOverlay.setPixelColor(x, y, QColor(68, 255, 136, 77));
+            }
+        }
+    }
+    m_maskOverlayVisible = true;
+    updateImageDisplay();
+}
+
+void PreviewPanel::clearMaskOverlay() {
+    m_maskOverlay = QImage();
+    m_maskOverlayVisible = false;
+    updateImageDisplay();
 }
 
 QString PreviewPanel::formatExposureTime(double seconds) const {

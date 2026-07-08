@@ -2,6 +2,7 @@
 
 #include <QWidget>
 #include "core/PresetManager.h"
+#include "core/SkyGroundMask.h"
 
 class QScrollArea;
 class QVBoxLayout;
@@ -35,8 +36,15 @@ public:
     void saveCurrentSettings();
     void setOutputPath(const QString& path);
 
+    bool skyGroundSeparationEnabled() const;
+    SkyGroundMask::Mode skyGroundMode() const;
+    QString userMaskPath() const;
+    int featherRadius() const;
+    void setMaskPreview(const std::vector<uint8_t>& mask, int w, int h);
+
 signals:
     void paramsChanged();  // 参数发生任何变化时触发
+    void maskPreviewRequested(); // 用户点击"检测地景"时发射
 
 private slots:
     void onGroupToggled(bool checked);
@@ -91,6 +99,15 @@ private:
     // 底部按钮
     QPushButton* m_restoreBtn = nullptr;
     QPushButton* m_savePresetBtn = nullptr;
+
+    // 天地分离组
+    QCheckBox* m_skyGroundCheck = nullptr;
+    QComboBox* m_skyGroundMode = nullptr;
+    QPushButton* m_detectMaskBtn = nullptr;
+    QPushButton* m_importMaskBtn = nullptr;
+    QLabel* m_maskPathLabel = nullptr;
+    QSlider* m_featherSlider = nullptr;
+    QString m_userMaskPath;
 
     // Debounce 定时器
     QTimer* m_debounceTimer = nullptr;

@@ -88,6 +88,7 @@ set(SOURCES
     src/core/RawImageLoader.cpp
     src/core/ThumbnailGenerator.cpp
     src/core/StarDetector.cpp
+    src/core/SkyGroundMask.cpp
     src/core/ImageAligner.cpp
     src/core/StackingEngine.cpp
     src/core/ImageExporter.cpp
@@ -103,6 +104,7 @@ set(HEADERS
     src/core/RawImageLoader.h
     src/core/ThumbnailGenerator.h
     src/core/StarDetector.h
+    src/core/SkyGroundMask.h
     src/core/ImageAligner.h
     src/core/StackingEngine.h
     src/core/ImageExporter.h

@@ -28,6 +28,9 @@ public:
     void setBeforeImage(const QImage& image);
     void setAfterImage(const QImage& image);
 
+    void setMaskOverlay(const std::vector<uint8_t>& mask, int w, int h);
+    void clearMaskOverlay();
+
     QImage currentImage() const;
 
 signals:
@@ -101,4 +104,8 @@ private:
     double m_imageExposure = 0.0;
     int m_imageFocalLength = 0;
     QString m_imageFileName;
+
+    // 蒙版叠加
+    QImage m_maskOverlay;
+    bool m_maskOverlayVisible = false;
 };

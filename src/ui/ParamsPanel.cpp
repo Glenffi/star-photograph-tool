@@ -177,6 +177,89 @@ void ParamsPanel::setupUI() {
     kappaRow->addWidget(m_kappaLabel);
     stackLayout->addLayout(kappaRow);
 
+    // 天地分离
+    auto* skyGroundRow = new QHBoxLayout();
+    m_skyGroundCheck = new QCheckBox(QString::fromUtf8("天地分离"), m_stackGroup);
+    m_skyGroundCheck->setToolTip(QString::fromUtf8("不带赤道仪时，天空对齐星点，地景保持固定，避免地景拖影"));
+    m_skyGroundCheck->setStyleSheet(m_dewarpCheck->styleSheet());
+    connect(m_skyGroundCheck, &QCheckBox::toggled, this, &ParamsPanel::onCheckChanged);
+    connect(m_skyGroundCheck, &QCheckBox::toggled, this, [this](bool checked) {
+        m_skyGroundMode->setEnabled(checked);
+        m_detectMaskBtn->setEnabled(checked);
+        m_importMaskBtn->setEnabled(checked);
+        m_featherSlider->setEnabled(checked);
+    });
+    skyGroundRow->addWidget(m_skyGroundCheck);
+    stackLayout->addLayout(skyGroundRow);
+
+    // 模式选择
+    auto* modeRow = new QHBoxLayout();
+    m_skyGroundMode = new QComboBox(m_stackGroup);
+    m_skyGroundMode->addItems({"自动检测", "用户蒙版"});
+    m_skyGroundMode->setEnabled(false);
+    m_skyGroundMode->setStyleSheet(m_alignMethod->styleSheet());
+    connect(m_skyGroundMode, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this](int index) {
+        m_detectMaskBtn->setVisible(index == 0);
+        m_importMaskBtn->setVisible(index == 1);
+        m_maskPathLabel->setVisible(index == 1 && !m_userMaskPath.isEmpty());
+    });
+    modeRow->addWidget(new QLabel(QString::fromUtf8("模式:")));
+    modeRow->addWidget(m_skyGroundMode, 1);
+    stackLayout->addLayout(modeRow);
+
+    // 按钮行
+    auto* btnRow = new QHBoxLayout();
+    m_detectMaskBtn = new QPushButton(QString::fromUtf8("检测地景"), m_stackGroup);
+    m_detectMaskBtn->setVisible(false);
+    m_detectMaskBtn->setStyleSheet(
+        "QPushButton {"
+        "  background-color: #21262D;"
+        "  color: #E6EDF3;"
+        "  border: 1px solid #30363D;"
+        "  border-radius: 4px;"
+        "  padding: 4px 12px;"
+        "  font-size: 11px;"
+        "}"
+        "QPushButton:hover {"
+        "  background-color: #30363D;"
+        "  border: 1px solid #484F58;"
+        "}"
+    );
+    connect(m_detectMaskBtn, &QPushButton::clicked, this, &ParamsPanel::maskPreviewRequested);
+    btnRow->addWidget(m_detectMaskBtn);
+
+    m_importMaskBtn = new QPushButton(QString::fromUtf8("导入蒙版..."), m_stackGroup);
+    m_importMaskBtn->setVisible(false);
+    m_importMaskBtn->setStyleSheet(m_detectMaskBtn->styleSheet());
+    connect(m_importMaskBtn, &QPushButton::clicked, this, [this]() {
+        QString path = QFileDialog::getOpenFileName(this, QString::fromUtf8("选择蒙版"),
+                                                    QString(), "Images (*.png *.jpg *.bmp)");
+        if (!path.isEmpty()) {
+            m_userMaskPath = path;
+            m_maskPathLabel->setText(QFileInfo(path).fileName());
+            m_maskPathLabel->setVisible(true);
+        }
+    });
+    btnRow->addWidget(m_importMaskBtn);
+    stackLayout->addLayout(btnRow);
+
+    m_maskPathLabel = new QLabel(m_stackGroup);
+    m_maskPathLabel->setVisible(false);
+    m_maskPathLabel->setStyleSheet("font-size: 10px; color: #8B949E;");
+    stackLayout->addWidget(m_maskPathLabel);
+
+    // 羽化宽度
+    auto* featherRow = new QHBoxLayout();
+    m_featherSlider = createSlider(0, 50, 20);
+    m_featherSlider->setEnabled(false);
+    m_featherSlider->setFixedWidth(120);
+    connect(m_featherSlider, &QSlider::valueChanged, this, &ParamsPanel::onSliderValueChanged);
+    connect(m_featherSlider, &QSlider::sliderReleased, this, &ParamsPanel::onSliderReleased);
+    featherRow->addWidget(new QLabel(QString::fromUtf8("羽化:")));
+    featherRow->addWidget(m_featherSlider);
+    featherRow->addWidget(new QLabel("px"));
+    stackLayout->addLayout(featherRow);
+
     auto* stackHint = new QLabel(QString::fromUtf8("ℹ️ Sigma Clipping: 剔除偏离中值过远的像素，适合有飞机/卫星轨迹的情况\nℹ️ κ=2.5: 异常值剔除阈值，值越小剔除越严格"), m_stackGroup);
     stackHint->setStyleSheet("font-size: 10px; color: #58A6FF; background-color: transparent; padding-top: 4px;");
     stackHint->setWordWrap(true);
@@ -516,6 +599,13 @@ void ParamsPanel::onRestoreDefaults() {
     m_starReduceSlider->setValue(50);
     m_outputFormat->setCurrentIndex(0);
     m_colorSpace->setCurrentIndex(0);
+    // 重置天地分离
+    m_skyGroundCheck->setChecked(false);
+    m_skyGroundMode->setCurrentIndex(0);
+    m_featherSlider->setValue(20);
+    m_userMaskPath.clear();
+    m_maskPathLabel->clear();
+    m_maskPathLabel->setVisible(false);
     emitParamsChanged();
 }
 
@@ -544,6 +634,10 @@ void ParamsPanel::onSavePreset() {
     settings.setValue("outputFormat", m_outputFormat->currentIndex());
     settings.setValue("colorSpace", m_colorSpace->currentIndex());
     settings.setValue("outputPath", m_outputPath->text());
+    settings.setValue("skyGroundSepEnabled", m_skyGroundCheck->isChecked());
+    settings.setValue("skyGroundMode", m_skyGroundMode->currentIndex());
+    settings.setValue("userMaskPath", m_userMaskPath);
+    settings.setValue("featherRadius", m_featherSlider->value());
     settings.endArray();
 
     m_presetCombo->addItem(name);
@@ -585,6 +679,11 @@ void ParamsPanel::saveCurrentSettings() {
     settings.setValue("colorSpace", m_colorSpace->currentIndex());
     settings.setValue("outputPath", m_outputPath->text());
     settings.setValue("lastPresetIndex", m_presetCombo->currentIndex());
+    // 天地分离参数
+    settings.setValue("skyGroundSepEnabled", m_skyGroundCheck->isChecked());
+    settings.setValue("skyGroundMode", m_skyGroundMode->currentIndex());
+    settings.setValue("userMaskPath", m_userMaskPath);
+    settings.setValue("featherRadius", m_featherSlider->value());
 }
 
 void ParamsPanel::loadCustomPresets() {
@@ -620,6 +719,12 @@ void ParamsPanel::loadPreset() {
     QString outputPath = settings.value("outputPath", QDir::homePath() + "/StarProcessor/Output").toString();
     int lastPresetIndex = settings.value("lastPresetIndex", 0).toInt();
 
+    // 天地分离参数
+    bool skyGroundSep = settings.value("skyGroundSepEnabled", false).toBool();
+    int skyGroundModeIdx = settings.value("skyGroundMode", 0).toInt();
+    QString userMaskPath = settings.value("userMaskPath", QString()).toString();
+    int featherRadius = settings.value("featherRadius", 20).toInt();
+
     // 使用信号阻塞避免触发 paramsChanged
     QSignalBlocker blocker1(m_alignMethod);
     QSignalBlocker blocker2(m_stackAlgorithm);
@@ -632,6 +737,9 @@ void ParamsPanel::loadPreset() {
     QSignalBlocker blocker9(m_outputFormat);
     QSignalBlocker blocker10(m_colorSpace);
     QSignalBlocker blocker11(m_presetCombo);
+    QSignalBlocker blocker12(m_skyGroundCheck);
+    QSignalBlocker blocker13(m_skyGroundMode);
+    QSignalBlocker blocker14(m_featherSlider);
 
     m_alignMethod->setCurrentIndex(alignIndex);
     m_stackAlgorithm->setCurrentIndex(stackIndex);
@@ -646,6 +754,22 @@ void ParamsPanel::loadPreset() {
     m_outputFormat->setCurrentIndex(outputFormat);
     m_colorSpace->setCurrentIndex(colorSpace);
     m_outputPath->setText(outputPath);
+
+    // 天地分离
+    m_skyGroundCheck->setChecked(skyGroundSep);
+    m_skyGroundMode->setCurrentIndex(skyGroundModeIdx);
+    m_userMaskPath = userMaskPath;
+    if (!m_userMaskPath.isEmpty()) {
+        m_maskPathLabel->setText(QFileInfo(m_userMaskPath).fileName());
+    }
+    m_maskPathLabel->setVisible(skyGroundModeIdx == 1 && !m_userMaskPath.isEmpty());
+    m_featherSlider->setValue(featherRadius);
+    m_skyGroundMode->setEnabled(skyGroundSep);
+    m_detectMaskBtn->setEnabled(skyGroundSep);
+    m_detectMaskBtn->setVisible(skyGroundModeIdx == 0);
+    m_importMaskBtn->setEnabled(skyGroundSep);
+    m_importMaskBtn->setVisible(skyGroundModeIdx == 1);
+    m_featherSlider->setEnabled(skyGroundSep);
 
     if (lastPresetIndex >= 0 && lastPresetIndex < m_presetCombo->count()) {
         m_presetCombo->setCurrentIndex(lastPresetIndex);
@@ -684,12 +808,35 @@ void ParamsPanel::onPresetChanged(int index) {
             preset.outputFormat = settings.value("outputFormat", 0).toInt() == 0 ? "tiff16" : "png8";
             applyPreset(preset);
 
-            // 恢复自定义预设中保存的 colorSpace 和 outputPath
+            // 恢复自定义预设中保存的其他参数
             int cs = settings.value("colorSpace", 0).toInt();
             QSignalBlocker csBlocker(m_colorSpace);
             m_colorSpace->setCurrentIndex(cs);
             QString op = settings.value("outputPath", QDir::homePath() + "/StarProcessor/Output").toString();
             m_outputPath->setText(op);
+
+            // 天地分离参数
+            bool sgs = settings.value("skyGroundSepEnabled", false).toBool();
+            int sgm = settings.value("skyGroundMode", 0).toInt();
+            QString ump = settings.value("userMaskPath", QString()).toString();
+            int fr = settings.value("featherRadius", 20).toInt();
+            QSignalBlocker sgBlocker1(m_skyGroundCheck);
+            QSignalBlocker sgBlocker2(m_skyGroundMode);
+            QSignalBlocker sgBlocker3(m_featherSlider);
+            m_skyGroundCheck->setChecked(sgs);
+            m_skyGroundMode->setCurrentIndex(sgm);
+            m_userMaskPath = ump;
+            if (!m_userMaskPath.isEmpty()) {
+                m_maskPathLabel->setText(QFileInfo(m_userMaskPath).fileName());
+            }
+            m_maskPathLabel->setVisible(sgm == 1 && !m_userMaskPath.isEmpty());
+            m_featherSlider->setValue(fr);
+            m_skyGroundMode->setEnabled(sgs);
+            m_detectMaskBtn->setEnabled(sgs);
+            m_detectMaskBtn->setVisible(sgm == 0);
+            m_importMaskBtn->setEnabled(sgs);
+            m_importMaskBtn->setVisible(sgm == 1);
+            m_featherSlider->setEnabled(sgs);
         }
         settings.endArray();
     }
@@ -815,4 +962,26 @@ void ParamsPanel::updateRefFrameList(const QStringList& fileNames) {
     }
     int idx = m_refFrame->findText(current);
     if (idx >= 0) m_refFrame->setCurrentIndex(idx);
+}
+
+bool ParamsPanel::skyGroundSeparationEnabled() const {
+    return m_skyGroundCheck ? m_skyGroundCheck->isChecked() : false;
+}
+
+SkyGroundMask::Mode ParamsPanel::skyGroundMode() const {
+    if (!m_skyGroundMode) return SkyGroundMask::AutoDetect;
+    return m_skyGroundMode->currentIndex() == 0 ? SkyGroundMask::AutoDetect : SkyGroundMask::UserMask;
+}
+
+QString ParamsPanel::userMaskPath() const {
+    return m_userMaskPath;
+}
+
+int ParamsPanel::featherRadius() const {
+    return m_featherSlider ? m_featherSlider->value() : 20;
+}
+
+void ParamsPanel::setMaskPreview(const std::vector<uint8_t>& mask, int w, int h) {
+    Q_UNUSED(mask) Q_UNUSED(w) Q_UNUSED(h)
+    // 蒙版预览由 PreviewPanel 处理，此处仅作接口预留
 }

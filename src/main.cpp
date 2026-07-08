@@ -32,6 +32,7 @@
 #include <QDebug>
 #include <atomic>
 
+#include "core/SkyGroundMask.h"
 #include "ui/ProjectPanel.h"
 #include "ui/PreviewPanel.h"
 #include "ui/ParamsPanel.h"
@@ -63,6 +64,10 @@ public:
         int starReduceStrength = 50;
         QString outputFormat = "tiff16";
         QString outputPath;
+        bool skyGroundSepEnabled = false;
+        SkyGroundMask::Mode skyGroundMode = SkyGroundMask::AutoDetect;
+        QString userMaskPath;
+        int featherRadius = 20;
     };
 
     ProcessingWorker(const QStringList& files, const QString& refFrame, const Params& params, QObject* parent = nullptr)
@@ -196,9 +201,41 @@ protected:
         else if (m_params.stackMethod == "kappa-sigma") method = StackingEngine::KappaSigma;
         else if (m_params.stackMethod == "winsorized") method = StackingEngine::Winsorized;
         std::vector<uint16_t> result;
-        if (!stacker.stack(alignedImages, w, h, method, m_params.kappaValue, result)) {
-            m_errorString = "堆栈失败";
-            return;
+        if (m_params.skyGroundSepEnabled) {
+            // 天地分离堆栈
+            emit stageMessage("生成天地蒙版...");
+            std::vector<uint8_t> mask;
+            if (m_params.skyGroundMode == SkyGroundMask::AutoDetect) {
+                // 用参考帧生成蒙版
+                if (!SkyGroundMask::autoDetect(refImg.data, w, h, mask)) {
+                    m_errorString = "天地蒙版自动检测失败";
+                    return;
+                }
+            } else {
+                if (!SkyGroundMask::loadUserMask(m_params.userMaskPath.toStdString(), w, h, mask)) {
+                    m_errorString = "无法加载用户蒙版";
+                    return;
+                }
+            }
+            SkyGroundMask::feather(mask, w, h, m_params.featherRadius);
+
+            emit stageMessage("天地分离堆栈...");
+            // 收集原始图像（未对齐的）用于地景堆栈
+            std::vector<std::vector<uint16_t>> originalImages;
+            for (const auto& img : loadedImages) {
+                originalImages.push_back(img.data);
+            }
+
+            if (!stacker.stackWithMask(alignedImages, originalImages, w, h, method, m_params.kappaValue, mask, result)) {
+                m_errorString = "天地分离堆栈失败";
+                return;
+            }
+        } else {
+            // 原有全图堆栈逻辑
+            if (!stacker.stack(alignedImages, w, h, method, m_params.kappaValue, result)) {
+                m_errorString = "堆栈失败";
+                return;
+            }
         }
         m_frameCount = static_cast<int>(alignedImages.size());
         emit progress(80);
@@ -592,6 +629,34 @@ private:
         connect(m_paramsPanel, &ParamsPanel::paramsChanged, this, [this]() {
             statusBar()->showMessage("参数已更新", 2000);
         });
+
+        // 天地分离蒙版预览请求
+        connect(m_paramsPanel, &ParamsPanel::maskPreviewRequested, this, [this]() {
+            QString currentFile = m_projectPanel->currentFilePath();
+            if (currentFile.isEmpty()) {
+                QMessageBox::information(this, "提示", "请先选择一张图像用于检测");
+                return;
+            }
+
+            RawImageLoader loader;
+            RawImageLoader::ImageData img;
+            if (!loader.loadRaw(currentFile.toStdString(), img)) {
+                QMessageBox::warning(this, "错误", "无法加载图像");
+                return;
+            }
+
+            std::vector<uint8_t> mask;
+            if (!SkyGroundMask::autoDetect(img.data, img.width, img.height, mask)) {
+                QMessageBox::warning(this, "错误", "地景检测失败");
+                return;
+            }
+
+            int feather = m_paramsPanel->featherRadius();
+            SkyGroundMask::feather(mask, img.width, img.height, feather);
+
+            m_previewPanel->setMaskOverlay(mask, img.width, img.height);
+            statusBar()->showMessage("地景检测完成，蓝色=天空，绿色=地景", 5000);
+        });
     }
 
     QString menuStyleSheet() const {
@@ -714,6 +779,10 @@ private slots:
         params.starReduceStrength = m_paramsPanel->starReduceStrength();
         params.outputFormat = m_paramsPanel->outputFormat();
         params.outputPath = m_paramsPanel->outputPath();
+        params.skyGroundSepEnabled = m_paramsPanel->skyGroundSeparationEnabled();
+        params.skyGroundMode = m_paramsPanel->skyGroundMode();
+        params.userMaskPath = m_paramsPanel->userMaskPath();
+        params.featherRadius = m_paramsPanel->featherRadius();
 
         // 3. 创建进度对话框
         auto* dialog = new QProgressDialog(this);
