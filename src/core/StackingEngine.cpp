@@ -44,7 +44,6 @@ StackingEngine::Method StackingEngine::recommendMethod(int frameCount) {
 
 void StackingEngine::stackAverage(const std::vector<std::vector<uint16_t>>& images,
                                     int w, int h, std::vector<uint16_t>& result) {
-    int n = static_cast<int>(images.size());
     result.resize(w * h);
 
     for (int y = 0; y < h; ++y) {
