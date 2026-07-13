@@ -166,7 +166,7 @@ void SkyGroundMask::computeGradient(const std::vector<uint16_t>& image, int w, i
 }
 
 // ---------------------------------------------------------------------------
-// 2. 局部亮度方差（50×50 窗口）
+// 2. 局部亮度方差（50×50 窗口）— 使用积分图加速
 // ---------------------------------------------------------------------------
 void SkyGroundMask::computeVariance(const std::vector<uint16_t>& image, int w, int h,
                                     std::vector<float>& variance)
@@ -175,26 +175,38 @@ void SkyGroundMask::computeVariance(const std::vector<uint16_t>& image, int w, i
     const int win = 50;
     const int half = win / 2;
 
+    // Build integral images: sum and sum of squares
+    std::vector<double> integral(w * h);
+    std::vector<double> integralSq(w * h);
     for (int y = 0; y < h; ++y) {
         for (int x = 0; x < w; ++x) {
-            double sum = 0.0;
-            double sumSq = 0.0;
-            int count = 0;
+            double v = static_cast<double>(image[y * w + x]);
+            double vSq = v * v;
+            double sum = v;
+            double sumSq = vSq;
+            if (x > 0) { sum += integral[y * w + (x - 1)]; sumSq += integralSq[y * w + (x - 1)]; }
+            if (y > 0) { sum += integral[(y - 1) * w + x]; sumSq += integralSq[(y - 1) * w + x]; }
+            if (x > 0 && y > 0) { sum -= integral[(y - 1) * w + (x - 1)]; sumSq -= integralSq[(y - 1) * w + (x - 1)]; }
+            integral[y * w + x] = sum;
+            integralSq[y * w + x] = sumSq;
+        }
+    }
 
+    // Query window sums using integral image
+    for (int y = 0; y < h; ++y) {
+        for (int x = 0; x < w; ++x) {
             int y0 = std::max(0, y - half);
             int y1 = std::min(h - 1, y + half);
             int x0 = std::max(0, x - half);
             int x1 = std::min(w - 1, x + half);
 
-            for (int yy = y0; yy <= y1; ++yy) {
-                for (int xx = x0; xx <= x1; ++xx) {
-                    double v = static_cast<double>(image[yy * w + xx]);
-                    sum += v;
-                    sumSq += v * v;
-                    ++count;
-                }
-            }
+            double sum = integral[y1 * w + x1];
+            double sumSq = integralSq[y1 * w + x1];
+            if (x0 > 0) { sum -= integral[y1 * w + (x0 - 1)]; sumSq -= integralSq[y1 * w + (x0 - 1)]; }
+            if (y0 > 0) { sum -= integral[(y0 - 1) * w + x1]; sumSq -= integralSq[(y0 - 1) * w + x1]; }
+            if (x0 > 0 && y0 > 0) { sum += integral[(y0 - 1) * w + (x0 - 1)]; sumSq += integralSq[(y0 - 1) * w + (x0 - 1)]; }
 
+            int count = (y1 - y0 + 1) * (x1 - x0 + 1);
             if (count > 1) {
                 double mean = sum / count;
                 double meanSq = sumSq / count;
@@ -349,7 +361,7 @@ void SkyGroundMask::feather(std::vector<uint8_t>& mask, int width, int height,
 // 7. 自动检测
 // ---------------------------------------------------------------------------
 bool SkyGroundMask::autoDetect(const std::vector<uint16_t>& image, int width, int height,
-                               std::vector<uint8_t>& mask)
+                               std::vector<uint8_t>& mask, int featherRadius)
 {
     if (image.empty() || width <= 0 || height <= 0)
         return false;
@@ -398,13 +410,22 @@ bool SkyGroundMask::autoDetect(const std::vector<uint16_t>& image, int width, in
     // 6. 形态学闭运算
     morphologicalClose(smallMask, smallW, smallH);
 
-    // 7. 高斯模糊 σ=3（羽化边缘）
-    std::vector<uint8_t> blurredMask;
-    gaussianBlurMask(smallMask, smallW, smallH, blurredMask, 3.0f);
+    // 7. 羽化（在小图上做，避免全图高斯模糊的性能开销）
+    if (featherRadius > 0) {
+        int smallFeather = std::max(1, featherRadius / 4);
+        std::vector<uint8_t> blurredMask;
+        gaussianBlurMask(smallMask, smallW, smallH, blurredMask, static_cast<float>(smallFeather));
+        smallMask = std::move(blurredMask);
+    } else {
+        // 默认轻微羽化 σ=3
+        std::vector<uint8_t> blurredMask;
+        gaussianBlurMask(smallMask, smallW, smallH, blurredMask, 3.0f);
+        smallMask = std::move(blurredMask);
+    }
 
     // 8. 缩放回原始尺寸（双线性插值）
     std::vector<uint8_t> fullMask;
-    resizeMask(blurredMask, smallW, smallH, fullMask, width, height);
+    resizeMask(smallMask, smallW, smallH, fullMask, width, height);
 
     mask = std::move(fullMask);
     return true;

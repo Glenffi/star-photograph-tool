@@ -29,7 +29,7 @@ public:
      * @return true 成功
      */
     static bool autoDetect(const std::vector<uint16_t>& image, int width, int height,
-                           std::vector<uint8_t>& mask);
+                           std::vector<uint8_t>& mask, int featherRadius = 0);
 
     /**
      * @brief 加载用户蒙版

@@ -183,11 +183,8 @@ void ParamsPanel::setupUI() {
     m_skyGroundCheck->setToolTip(QString::fromUtf8("不带赤道仪时，天空对齐星点，地景保持固定，避免地景拖影"));
     m_skyGroundCheck->setStyleSheet(m_dewarpCheck->styleSheet());
     connect(m_skyGroundCheck, &QCheckBox::toggled, this, &ParamsPanel::onCheckChanged);
-    connect(m_skyGroundCheck, &QCheckBox::toggled, this, [this](bool checked) {
-        m_skyGroundMode->setEnabled(checked);
-        m_detectMaskBtn->setEnabled(checked);
-        m_importMaskBtn->setEnabled(checked);
-        m_featherSlider->setEnabled(checked);
+    connect(m_skyGroundCheck, &QCheckBox::toggled, this, [this]() {
+        updateSkyGroundControls();
     });
     skyGroundRow->addWidget(m_skyGroundCheck);
     stackLayout->addLayout(skyGroundRow);
@@ -199,9 +196,9 @@ void ParamsPanel::setupUI() {
     m_skyGroundMode->setEnabled(false);
     m_skyGroundMode->setStyleSheet(m_alignMethod->styleSheet());
     connect(m_skyGroundMode, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this](int index) {
-        m_detectMaskBtn->setVisible(index == 0);
-        m_importMaskBtn->setVisible(index == 1);
-        m_maskPathLabel->setVisible(index == 1 && !m_userMaskPath.isEmpty());
+        Q_UNUSED(index)
+        updateSkyGroundControls();
+        emitParamsChanged();
     });
     modeRow->addWidget(new QLabel(QString::fromUtf8("模式:")));
     modeRow->addWidget(m_skyGroundMode, 1);
@@ -477,6 +474,28 @@ void ParamsPanel::setupUI() {
     connect(m_starReduceCheck, &QCheckBox::toggled, this, [this](bool checked) {
         m_starReduceSlider->setEnabled(checked);
     });
+}
+
+void ParamsPanel::updateSkyGroundControls() {
+    bool enabled = m_skyGroundCheck ? m_skyGroundCheck->isChecked() : false;
+    int mode = m_skyGroundMode ? m_skyGroundMode->currentIndex() : 0;
+    if (m_skyGroundMode) {
+        m_skyGroundMode->setEnabled(enabled);
+    }
+    if (m_detectMaskBtn) {
+        m_detectMaskBtn->setEnabled(enabled);
+        m_detectMaskBtn->setVisible(enabled && mode == 0);
+    }
+    if (m_importMaskBtn) {
+        m_importMaskBtn->setEnabled(enabled);
+        m_importMaskBtn->setVisible(enabled && mode == 1);
+    }
+    if (m_maskPathLabel) {
+        m_maskPathLabel->setVisible(enabled && mode == 1 && !m_userMaskPath.isEmpty());
+    }
+    if (m_featherSlider) {
+        m_featherSlider->setEnabled(enabled);
+    }
 }
 
 QGroupBox* ParamsPanel::createCollapsibleGroup(const QString& title, bool expanded) {
@@ -762,14 +781,8 @@ void ParamsPanel::loadPreset() {
     if (!m_userMaskPath.isEmpty()) {
         m_maskPathLabel->setText(QFileInfo(m_userMaskPath).fileName());
     }
-    m_maskPathLabel->setVisible(skyGroundModeIdx == 1 && !m_userMaskPath.isEmpty());
     m_featherSlider->setValue(featherRadius);
-    m_skyGroundMode->setEnabled(skyGroundSep);
-    m_detectMaskBtn->setEnabled(skyGroundSep);
-    m_detectMaskBtn->setVisible(skyGroundModeIdx == 0);
-    m_importMaskBtn->setEnabled(skyGroundSep);
-    m_importMaskBtn->setVisible(skyGroundModeIdx == 1);
-    m_featherSlider->setEnabled(skyGroundSep);
+    updateSkyGroundControls();
 
     if (lastPresetIndex >= 0 && lastPresetIndex < m_presetCombo->count()) {
         m_presetCombo->setCurrentIndex(lastPresetIndex);
@@ -829,14 +842,8 @@ void ParamsPanel::onPresetChanged(int index) {
             if (!m_userMaskPath.isEmpty()) {
                 m_maskPathLabel->setText(QFileInfo(m_userMaskPath).fileName());
             }
-            m_maskPathLabel->setVisible(sgm == 1 && !m_userMaskPath.isEmpty());
             m_featherSlider->setValue(fr);
-            m_skyGroundMode->setEnabled(sgs);
-            m_detectMaskBtn->setEnabled(sgs);
-            m_detectMaskBtn->setVisible(sgm == 0);
-            m_importMaskBtn->setEnabled(sgs);
-            m_importMaskBtn->setVisible(sgm == 1);
-            m_featherSlider->setEnabled(sgs);
+            updateSkyGroundControls();
         }
         settings.endArray();
     }
@@ -984,4 +991,8 @@ int ParamsPanel::featherRadius() const {
 void ParamsPanel::setMaskPreview(const std::vector<uint8_t>& mask, int w, int h) {
     Q_UNUSED(mask) Q_UNUSED(w) Q_UNUSED(h)
     // 蒙版预览由 PreviewPanel 处理，此处仅作接口预留
+}
+
+void ParamsPanel::setDetectMaskEnabled(bool enabled) {
+    if (m_detectMaskBtn) m_detectMaskBtn->setEnabled(enabled);
 }

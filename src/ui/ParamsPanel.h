@@ -41,6 +41,7 @@ public:
     QString userMaskPath() const;
     int featherRadius() const;
     void setMaskPreview(const std::vector<uint8_t>& mask, int w, int h);
+    void setDetectMaskEnabled(bool enabled);
 
 signals:
     void paramsChanged();  // 参数发生任何变化时触发
@@ -64,6 +65,8 @@ private:
     void loadCustomPresets();
     QGroupBox* createCollapsibleGroup(const QString& title, bool expanded = true);
     QSlider* createSlider(int min, int max, int value, const QString& suffix = QString());
+
+    void updateSkyGroundControls();
 
     // 预设
     QComboBox* m_presetCombo = nullptr;

@@ -319,6 +319,57 @@ void PreviewPanel::load16BitImage(const std::vector<uint16_t>& data, int w, int 
     updateZoomDisplay();
 }
 
+void PreviewPanel::loadRgb16BitImage(const std::vector<uint16_t>& rgb, int w, int h) {
+    if (rgb.empty() || w <= 0 || h <= 0 || static_cast<int>(rgb.size()) != w * h * 3) {
+        clearImage();
+        return;
+    }
+
+    // 找到最大值用于归一化
+    uint16_t maxVal = 0;
+    for (uint16_t v : rgb) {
+        if (v > maxVal) maxVal = v;
+    }
+    if (maxVal < 256) maxVal = 255;
+    if (maxVal == 0) maxVal = 1;
+
+    // Arcsinh tone mapping for RGB
+    QImage image(w, h, QImage::Format_RGB888);
+    float scale = 255.0f / static_cast<float>(maxVal);
+    for (int y = 0; y < h; ++y) {
+        for (int x = 0; x < w; ++x) {
+            int idx = (y * w + x) * 3;
+            float r = rgb[idx + 0] * scale;
+            float g = rgb[idx + 1] * scale;
+            float b = rgb[idx + 2] * scale;
+            // Arcsinh stretch
+            r = std::asinh(r * 0.05f) * 40.0f;
+            g = std::asinh(g * 0.05f) * 40.0f;
+            b = std::asinh(b * 0.05f) * 40.0f;
+            int ri = static_cast<int>(std::clamp(r, 0.0f, 255.0f));
+            int gi = static_cast<int>(std::clamp(g, 0.0f, 255.0f));
+            int bi = static_cast<int>(std::clamp(b, 0.0f, 255.0f));
+            image.setPixelColor(x, y, QColor(ri, gi, bi));
+        }
+    }
+
+    m_currentImage = image;
+    m_beforeImage = image;
+    m_afterImage = image;
+    m_currentFilePath.clear();
+    m_imageFileName = QString::fromUtf8("堆栈结果");
+    m_imageIso = 0;
+    m_imageExposure = 0.0;
+    m_imageFocalLength = 0;
+
+    m_emptyState->setVisible(false);
+    m_scrollArea->setVisible(true);
+
+    updateImageDisplay();
+    onFitView();
+    updateZoomDisplay();
+}
+
 void PreviewPanel::clearImage() {
     m_currentImage = QImage();
     m_beforeImage = QImage();
@@ -628,13 +679,12 @@ void PreviewPanel::setMaskOverlay(const std::vector<uint8_t>& mask, int w, int h
     for (int y = 0; y < h; ++y) {
         for (int x = 0; x < w; ++x) {
             uint8_t val = mask[y * w + x];
-            if (val > 128) {
-                // 天空：蓝色 #4488FF @ 30% alpha
-                m_maskOverlay.setPixelColor(x, y, QColor(68, 136, 255, 77));
-            } else {
-                // 地景：绿色 #44FF88 @ 30% alpha
-                m_maskOverlay.setPixelColor(x, y, QColor(68, 255, 136, 77));
-            }
+            float a = val / 255.0f;
+            // 天空(255)=蓝色(68,136,255)，地景(0)=绿色(68,255,136)
+            int r = 68;
+            int g = static_cast<int>(255 + a * (136 - 255));
+            int b = static_cast<int>(136 + a * (255 - 136));
+            m_maskOverlay.setPixelColor(x, y, QColor(r, g, b, 77));
         }
     }
     m_maskOverlayVisible = true;

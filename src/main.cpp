@@ -95,9 +95,118 @@ protected:
         m_errorString.clear();
         emit progress(0);
 
-        // 1. 加载所有RAW文件
+        // Helper: extract luminance from RGB data
+        auto extractLuminance = [](const std::vector<uint16_t>& rgb, int w, int h) -> std::vector<uint16_t> {
+            std::vector<uint16_t> lum(w * h);
+            for (int i = 0; i < w * h; ++i) {
+                uint32_t r = rgb[i * 3 + 0];
+                uint32_t g = rgb[i * 3 + 1];
+                uint32_t b = rgb[i * 3 + 2];
+                lum[i] = static_cast<uint16_t>((r * 299 + g * 587 + b * 114) / 1000);
+            }
+            return lum;
+        };
+
+        // Helper: split RGB into separate channels
+        auto splitChannels = [](const std::vector<uint16_t>& rgb, int w, int h) {
+            std::vector<uint16_t> rch(w * h);
+            std::vector<uint16_t> gch(w * h);
+            std::vector<uint16_t> bch(w * h);
+            for (int i = 0; i < w * h; ++i) {
+                rch[i] = rgb[i * 3 + 0];
+                gch[i] = rgb[i * 3 + 1];
+                bch[i] = rgb[i * 3 + 2];
+            }
+            return std::make_tuple(std::move(rch), std::move(gch), std::move(bch));
+        };
+
+        // Helper: merge channels into RGB
+        auto mergeChannels = [](const std::vector<uint16_t>& rch,
+                                const std::vector<uint16_t>& gch,
+                                const std::vector<uint16_t>& bch, int w, int h) {
+            std::vector<uint16_t> rgb(w * h * 3);
+            for (int i = 0; i < w * h; ++i) {
+                rgb[i * 3 + 0] = rch[i];
+                rgb[i * 3 + 1] = gch[i];
+                rgb[i * 3 + 2] = bch[i];
+            }
+            return rgb;
+        };
+
+        // Helper: stack RGB images using per-channel stacking
+        auto stackRgb = [&](StackingEngine& stacker,
+                            const std::vector<std::vector<uint16_t>>& rgbImages,
+                            int w, int h,
+                            StackingEngine::Method method,
+                            double kappa,
+                            std::vector<uint16_t>& outRgb) -> bool {
+            int n = static_cast<int>(rgbImages.size());
+            if (n == 0) return false;
+
+            // Split all images into channels
+            std::vector<std::vector<uint16_t>> rImages, gImages, bImages;
+            rImages.reserve(n);
+            gImages.reserve(n);
+            bImages.reserve(n);
+            for (const auto& rgb : rgbImages) {
+                auto [rch, gch, bch] = splitChannels(rgb, w, h);
+                rImages.push_back(std::move(rch));
+                gImages.push_back(std::move(gch));
+                bImages.push_back(std::move(bch));
+            }
+
+            std::vector<uint16_t> rStack, gStack, bStack;
+            if (!stacker.stack(rImages, w, h, method, kappa, rStack)) return false;
+            if (!stacker.stack(gImages, w, h, method, kappa, gStack)) return false;
+            if (!stacker.stack(bImages, w, h, method, kappa, bStack)) return false;
+
+            outRgb = mergeChannels(rStack, gStack, bStack, w, h);
+            return true;
+        };
+
+        // Helper: stackWithMask RGB images using per-channel stacking
+        auto stackWithMaskRgb = [&](StackingEngine& stacker,
+                                    const std::vector<std::vector<uint16_t>>& alignedRgb,
+                                    const std::vector<std::vector<uint16_t>>& originalRgb,
+                                    int w, int h,
+                                    StackingEngine::Method method,
+                                    double kappa,
+                                    const std::vector<uint8_t>& mask,
+                                    std::vector<uint16_t>& outRgb) -> bool {
+            int n = static_cast<int>(alignedRgb.size());
+            if (n == 0) return false;
+
+            // Split aligned images into channels
+            std::vector<std::vector<uint16_t>> rAligned, gAligned, bAligned;
+            std::vector<std::vector<uint16_t>> rOriginal, gOriginal, bOriginal;
+            rAligned.reserve(n); gAligned.reserve(n); bAligned.reserve(n);
+            rOriginal.reserve(n); gOriginal.reserve(n); bOriginal.reserve(n);
+
+            for (int i = 0; i < n; ++i) {
+                auto [ra, ga, ba] = splitChannels(alignedRgb[i], w, h);
+                rAligned.push_back(std::move(ra));
+                gAligned.push_back(std::move(ga));
+                bAligned.push_back(std::move(ba));
+
+                auto [ro, go, bo] = splitChannels(originalRgb[i], w, h);
+                rOriginal.push_back(std::move(ro));
+                gOriginal.push_back(std::move(go));
+                bOriginal.push_back(std::move(bo));
+            }
+
+            std::vector<uint16_t> rStack, gStack, bStack;
+            if (!stacker.stackWithMask(rAligned, rOriginal, w, h, method, kappa, mask, rStack)) return false;
+            if (!stacker.stackWithMask(gAligned, gOriginal, w, h, method, kappa, mask, gStack)) return false;
+            if (!stacker.stackWithMask(bAligned, bOriginal, w, h, method, kappa, mask, bStack)) return false;
+
+            outRgb = mergeChannels(rStack, gStack, bStack, w, h);
+            return true;
+        };
+
+        // 1. 加载所有RAW文件并 demosaic 到 RGB
         emit stageMessage("加载 RAW 文件...");
         std::vector<RawImageLoader::ImageData> loadedImages;
+        std::vector<std::vector<uint16_t>> loadedRgb; // demosaiced RGB
         std::vector<QString> loadedPaths;
         RawImageLoader loader;
 
@@ -109,7 +218,23 @@ protected:
                 m_errorString = QString("无法加载: %1").arg(QFileInfo(m_files[i]).fileName());
                 return;
             }
+
+            // Demosaic Bayer CFA to RGB
+            std::vector<uint16_t> rgb;
+            if (img.channels == 1 && !img.bayerPattern.empty()) {
+                if (!loader.decodeToRgb(img, rgb)) {
+                    m_errorString = QString("Demosaic 失败: %1").arg(QFileInfo(m_files[i]).fileName());
+                    return;
+                }
+            } else if (img.channels == 3) {
+                rgb = img.data;
+            } else {
+                m_errorString = QString("不支持的图像格式: %1").arg(QFileInfo(m_files[i]).fileName());
+                return;
+            }
+
             loadedImages.push_back(std::move(img));
+            loadedRgb.push_back(std::move(rgb));
             loadedPaths.push_back(m_files[i]);
 
             int p = static_cast<int>((i + 1) * 10.0 / m_files.size());
@@ -122,7 +247,7 @@ protected:
         }
 
         // 确定参考帧索引
-    std::size_t refIdx = 0;
+        std::size_t refIdx = 0;
         for (std::size_t i = 0; i < loadedPaths.size(); ++i) {
             if (loadedPaths[i] == m_refFrame) {
                 refIdx = i;
@@ -136,11 +261,14 @@ protected:
         m_width = w;
         m_height = h;
 
-        // 2. 星点检测（参考帧）
+        // Extract reference luminance for star detection and mask generation
+        std::vector<uint16_t> refLum = extractLuminance(loadedRgb[refIdx], w, h);
+
+        // 2. 星点检测（参考帧亮度通道）
         emit stageMessage("参考帧星点检测...");
         StarDetector detector;
         std::vector<StarPoint> refStars;
-        if (!detector.detect(refImg.data, w, h, refStars, 5.0)) {
+        if (!detector.detect(refLum, w, h, refStars, 5.0)) {
             m_errorString = "参考帧星点检测失败";
             return;
         }
@@ -149,8 +277,8 @@ protected:
         // 3. 对齐所有帧到参考帧
         emit stageMessage("对齐图像...");
         ImageAligner aligner;
-        std::vector<std::vector<uint16_t>> alignedImages;
-        alignedImages.push_back(refImg.data); // 参考帧不需要变换
+        std::vector<std::vector<uint16_t>> alignedRgb;
+        alignedRgb.push_back(loadedRgb[refIdx]); // 参考帧不需要变换
 
         for (std::size_t i = 0; i < loadedImages.size(); ++i) {
             if (m_cancelled.load()) return;
@@ -162,8 +290,11 @@ protected:
                 return;
             }
 
+            // Extract luminance for star detection
+            std::vector<uint16_t> srcLum = extractLuminance(loadedRgb[i], w, h);
+
             std::vector<StarPoint> srcStars;
-            if (!detector.detect(srcImg.data, w, h, srcStars, 5.0)) {
+            if (!detector.detect(srcLum, w, h, srcStars, 5.0)) {
                 qWarning() << "星点检测失败，跳过:" << loadedPaths[i];
                 continue;
             }
@@ -174,19 +305,23 @@ protected:
                 continue;
             }
 
-            std::vector<uint16_t> aligned;
-            if (!aligner.applyTransform(srcImg.data, w, h, transform, aligned)) {
+            // Apply transform per-channel
+            auto [srcR, srcG, srcB] = splitChannels(loadedRgb[i], w, h);
+            std::vector<uint16_t> alignedR, alignedG, alignedB;
+            if (!aligner.applyTransform(srcR, w, h, transform, alignedR) ||
+                !aligner.applyTransform(srcG, w, h, transform, alignedG) ||
+                !aligner.applyTransform(srcB, w, h, transform, alignedB)) {
                 qWarning() << "变换应用失败，跳过:" << loadedPaths[i];
                 continue;
             }
 
-            alignedImages.push_back(std::move(aligned));
+            alignedRgb.push_back(mergeChannels(alignedR, alignedG, alignedB, w, h));
 
             int p = 20 + static_cast<int>((i + 1) * 30.0 / loadedImages.size());
             emit progress(p);
         }
 
-        if (alignedImages.size() < 2) {
+        if (alignedRgb.size() < 2) {
             m_errorString = "对齐后可用帧数不足（<2），无法堆栈";
             return;
         }
@@ -200,14 +335,15 @@ protected:
         else if (m_params.stackMethod == "average") method = StackingEngine::Average;
         else if (m_params.stackMethod == "kappa-sigma") method = StackingEngine::KappaSigma;
         else if (m_params.stackMethod == "winsorized") method = StackingEngine::Winsorized;
-        std::vector<uint16_t> result;
+
+        std::vector<uint16_t> resultRgb;
         if (m_params.skyGroundSepEnabled) {
             // 天地分离堆栈
             emit stageMessage("生成天地蒙版...");
             std::vector<uint8_t> mask;
             if (m_params.skyGroundMode == SkyGroundMask::AutoDetect) {
-                // 用参考帧生成蒙版
-                if (!SkyGroundMask::autoDetect(refImg.data, w, h, mask)) {
+                // 用参考帧亮度生成蒙版
+                if (!SkyGroundMask::autoDetect(refLum, w, h, mask, m_params.featherRadius)) {
                     m_errorString = "天地蒙版自动检测失败";
                     return;
                 }
@@ -216,55 +352,49 @@ protected:
                     m_errorString = "无法加载用户蒙版";
                     return;
                 }
+                SkyGroundMask::feather(mask, w, h, m_params.featherRadius);
             }
-            SkyGroundMask::feather(mask, w, h, m_params.featherRadius);
 
             emit stageMessage("天地分离堆栈...");
-            // 收集原始图像（未对齐的）用于地景堆栈
-            std::vector<std::vector<uint16_t>> originalImages;
-            for (const auto& img : loadedImages) {
-                originalImages.push_back(img.data);
-            }
-
-            if (!stacker.stackWithMask(alignedImages, originalImages, w, h, method, m_params.kappaValue, mask, result)) {
+            if (!stackWithMaskRgb(stacker, alignedRgb, loadedRgb, w, h, method, m_params.kappaValue, mask, resultRgb)) {
                 m_errorString = "天地分离堆栈失败";
                 return;
             }
         } else {
-            // 原有全图堆栈逻辑
-            if (!stacker.stack(alignedImages, w, h, method, m_params.kappaValue, result)) {
+            // 全图堆栈
+            if (!stackRgb(stacker, alignedRgb, w, h, method, m_params.kappaValue, resultRgb)) {
                 m_errorString = "堆栈失败";
                 return;
             }
         }
-        m_frameCount = static_cast<int>(alignedImages.size());
+        m_frameCount = static_cast<int>(alignedRgb.size());
         emit progress(80);
 
-        // 5. 自动优化（如果启用）
+        // 5. 自动优化（如果启用）—— 对 RGB 每个通道分别处理
         if (m_params.dewarpEnabled || m_params.stretchEnabled) {
             emit stageMessage("自动优化...");
-            std::vector<uint16_t> optimized = result;
-            
+            auto [rCh, gCh, bCh] = splitChannels(resultRgb, w, h);
+
             if (m_params.dewarpEnabled) {
                 std::vector<uint16_t> temp;
-                if (AutoOptimizeEngine::dehaze(optimized, w, h, m_params.dewarpStrength, temp)) {
-                    optimized = std::move(temp);
-                }
+                if (AutoOptimizeEngine::dehaze(rCh, w, h, m_params.dewarpStrength, temp)) rCh = std::move(temp);
+                if (AutoOptimizeEngine::dehaze(gCh, w, h, m_params.dewarpStrength, temp)) gCh = std::move(temp);
+                if (AutoOptimizeEngine::dehaze(bCh, w, h, m_params.dewarpStrength, temp)) bCh = std::move(temp);
             }
-            
+
             if (m_params.stretchEnabled) {
                 std::vector<uint16_t> temp;
-                if (AutoOptimizeEngine::stretchCurve(optimized, w, h, temp)) {
-                    optimized = std::move(temp);
-                }
+                if (AutoOptimizeEngine::stretchCurve(rCh, w, h, temp)) rCh = std::move(temp);
+                if (AutoOptimizeEngine::stretchCurve(gCh, w, h, temp)) gCh = std::move(temp);
+                if (AutoOptimizeEngine::stretchCurve(bCh, w, h, temp)) bCh = std::move(temp);
             }
-            
-            result = std::move(optimized);
+
+            resultRgb = mergeChannels(rCh, gCh, bCh, w, h);
             emit progress(90);
         }
 
-        // 回写自动优化后的结果到 m_stackedData
-        m_stackedData = std::move(result);
+        // 回写结果到 m_stackedData
+        m_stackedData = std::move(resultRgb);
 
         // 6. 导出（根据参数）
         emit stageMessage("导出结果...");
@@ -281,7 +411,7 @@ protected:
         }
 
         QString outFile = outPath + "/" + outFileName + outExt;
-        if (!ImageExporter::export16Bit(result, w, h, outFile.toStdString(), fmt)) {
+        if (!ImageExporter::exportRgb16(m_stackedData, w, h, outFile.toStdString(), fmt)) {
             m_errorString = "导出失败";
             return;
         }
@@ -299,6 +429,72 @@ private:
     int m_frameCount = 0;
     QString m_errorString;
     std::atomic<bool> m_cancelled{false};
+};
+
+/**
+ * @brief 蒙版预览后台工作线程
+ */
+class MaskPreviewWorker : public QThread {
+    Q_OBJECT
+public:
+    MaskPreviewWorker(const QString& filePath, int featherRadius, QObject* parent = nullptr)
+        : QThread(parent), m_filePath(filePath), m_featherRadius(featherRadius) {}
+
+    std::vector<uint8_t> mask() const { return m_mask; }
+    int width() const { return m_width; }
+    int height() const { return m_height; }
+    QString errorString() const { return m_error; }
+
+protected:
+    void run() override {
+        RawImageLoader loader;
+        RawImageLoader::ImageData img;
+        if (!loader.loadRaw(m_filePath.toStdString(), img)) {
+            m_error = "无法加载图像";
+            return;
+        }
+        if (isInterruptionRequested()) return;
+
+        // Demosaic if needed
+        if (img.channels == 1 && !img.bayerPattern.empty()) {
+            std::vector<uint16_t> rgb;
+            if (loader.decodeToRgb(img, rgb)) {
+                img.data = std::move(rgb);
+                img.channels = 3;
+            }
+        }
+
+        // Extract luminance for detection
+        std::vector<uint16_t> lum(img.width * img.height);
+        if (img.channels == 3) {
+            for (int i = 0; i < img.width * img.height; ++i) {
+                uint32_t r = img.data[i * 3 + 0];
+                uint32_t g = img.data[i * 3 + 1];
+                uint32_t b = img.data[i * 3 + 2];
+                lum[i] = static_cast<uint16_t>((r * 299 + g * 587 + b * 114) / 1000);
+            }
+        } else {
+            lum = img.data;
+        }
+
+        if (isInterruptionRequested()) return;
+        if (!SkyGroundMask::autoDetect(lum, img.width, img.height, m_mask, m_featherRadius)) {
+            m_error = "地景检测失败";
+            return;
+        }
+        if (isInterruptionRequested()) return;
+        SkyGroundMask::feather(m_mask, img.width, img.height, m_featherRadius);
+        m_width = img.width;
+        m_height = img.height;
+    }
+
+private:
+    QString m_filePath;
+    int m_featherRadius;
+    std::vector<uint8_t> m_mask;
+    int m_width = 0;
+    int m_height = 0;
+    QString m_error;
 };
 
 class MainWindow : public QMainWindow {
@@ -323,6 +519,10 @@ public:
         if (m_worker && m_worker->isRunning()) {
             m_worker->requestCancel();
             m_worker->wait(3000);
+        }
+        if (m_maskPreviewWorker && m_maskPreviewWorker->isRunning()) {
+            m_maskPreviewWorker->requestInterruption();
+            m_maskPreviewWorker->wait(3000);
         }
     }
 
@@ -630,7 +830,7 @@ private:
             statusBar()->showMessage("参数已更新", 2000);
         });
 
-        // 天地分离蒙版预览请求
+        // 天地分离蒙版预览请求 -> 使用 MaskPreviewWorker
         connect(m_paramsPanel, &ParamsPanel::maskPreviewRequested, this, [this]() {
             QString currentFile = m_projectPanel->currentFilePath();
             if (currentFile.isEmpty()) {
@@ -638,24 +838,27 @@ private:
                 return;
             }
 
-            RawImageLoader loader;
-            RawImageLoader::ImageData img;
-            if (!loader.loadRaw(currentFile.toStdString(), img)) {
-                QMessageBox::warning(this, "错误", "无法加载图像");
-                return;
-            }
-
-            std::vector<uint8_t> mask;
-            if (!SkyGroundMask::autoDetect(img.data, img.width, img.height, mask)) {
-                QMessageBox::warning(this, "错误", "地景检测失败");
-                return;
+            // 取消之前的预览任务
+            if (m_maskPreviewWorker && m_maskPreviewWorker->isRunning()) {
+                m_maskPreviewWorker->requestInterruption();
+                m_maskPreviewWorker->wait(1000);
             }
 
             int feather = m_paramsPanel->featherRadius();
-            SkyGroundMask::feather(mask, img.width, img.height, feather);
-
-            m_previewPanel->setMaskOverlay(mask, img.width, img.height);
-            statusBar()->showMessage("地景检测完成，蓝色=天空，绿色=地景", 5000);
+            m_maskPreviewWorker = new MaskPreviewWorker(currentFile, feather, this);
+            connect(m_maskPreviewWorker, &MaskPreviewWorker::finished, this, [this]() {
+                if (m_maskPreviewWorker->errorString().isEmpty()) {
+                    m_previewPanel->setMaskOverlay(m_maskPreviewWorker->mask(),
+                                                    m_maskPreviewWorker->width(),
+                                                    m_maskPreviewWorker->height());
+                    statusBar()->showMessage("地景检测完成，蓝色=天空，绿色=地景", 5000);
+                } else {
+                    QMessageBox::warning(this, "错误", m_maskPreviewWorker->errorString());
+                }
+                m_maskPreviewWorker->deleteLater();
+                m_maskPreviewWorker = nullptr;
+            });
+            m_maskPreviewWorker->start();
         });
     }
 
@@ -820,11 +1023,11 @@ private slots:
                 QString cacheDir = QDir::homePath() + "/StarProcessor/Cache";
                 QDir().mkpath(cacheDir);
                 QString cacheFile = cacheDir + "/" + QDateTime::currentDateTime().toString("yyyyMMdd_hhmmss") + "_cached.tiff";
-                if (!ImageExporter::export16Bit(m_cachedStackedData, m_cachedWidth, m_cachedHeight, cacheFile.toStdString())) {
+                if (!ImageExporter::exportRgb16(m_cachedStackedData, m_cachedWidth, m_cachedHeight, cacheFile.toStdString())) {
                     qWarning() << "缓存 TIFF 写入失败:" << cacheFile;
                 }
 
-                m_previewPanel->load16BitImage(m_cachedStackedData, m_cachedWidth, m_cachedHeight);
+                m_previewPanel->loadRgb16BitImage(m_cachedStackedData, m_cachedWidth, m_cachedHeight);
                 m_toolbar->enableExport(true);
                 int frameCount = m_cachedFrameCount;
                 statusBar()->showMessage(
@@ -871,7 +1074,7 @@ private slots:
         QString fileName = QDateTime::currentDateTime().toString("yyyyMMdd_hhmmss") + "_stacked_export" + ext;
         QString fullPath = outPath + "/" + fileName;
 
-        if (ImageExporter::export16Bit(m_cachedStackedData, m_cachedWidth, m_cachedHeight,
+        if (ImageExporter::exportRgb16(m_cachedStackedData, m_cachedWidth, m_cachedHeight,
                                         fullPath.toStdString(), fmt)) {
             QMessageBox::information(this, "导出成功", QString("已导出到：%1").arg(fullPath));
             statusBar()->showMessage(QString("已导出：%1").arg(fileName), 5000);
@@ -1000,6 +1203,7 @@ private:
     QWidget* m_stepBar = nullptr;
     QButtonGroup* m_stepGroup = nullptr;
     ProcessingWorker* m_worker = nullptr;
+    MaskPreviewWorker* m_maskPreviewWorker = nullptr;
 
     // 缓存最后一次堆栈结果（用于导出）
     std::vector<uint16_t> m_cachedStackedData;

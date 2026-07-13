@@ -16,6 +16,7 @@ public:
     void loadImage(const QString& filePath);     // 通过 RawImageLoader 加载
     void loadImage(const QImage& image);         // 直接加载 QImage
     void load16BitImage(const std::vector<uint16_t>& data, int w, int h); // 加载 16-bit 单通道并 tone mapping
+    void loadRgb16BitImage(const std::vector<uint16_t>& rgb, int w, int h); // 加载 16-bit RGB 并 tone mapping
     void clearImage();
 
     void setZoom(double zoom);
