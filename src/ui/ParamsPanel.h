@@ -96,7 +96,6 @@ private:
     // 输出组
     QWidget* m_outputGroup = nullptr;
     QComboBox* m_outputFormat = nullptr;
-    QComboBox* m_colorSpace = nullptr;
     QLineEdit* m_outputPath = nullptr;
 
     // 底部按钮

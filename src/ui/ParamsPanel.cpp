@@ -366,28 +366,8 @@ void ParamsPanel::setupUI() {
 
     // 输出路径选择
 
-    // 色彩空间：当前固定输出线性 sRGB，隐藏选择控件直到完整实现色彩空间转换
-    // auto* colorRow = new QHBoxLayout();
-    // auto* colorLabel = new QLabel(QString::fromUtf8("色彩空间:"), m_outputGroup);
-    // colorLabel->setStyleSheet("font-size: 12px; color: #C9D1D9; background-color: transparent;");
-    // colorRow->addWidget(colorLabel);
-    // m_colorSpace = new QComboBox(m_outputGroup);
-    // m_colorSpace->addItems({"sRGB", "Adobe RGB", "ProPhoto RGB", "Rec. 2020"});
-    // m_colorSpace->setStyleSheet(m_alignMethod->styleSheet());
-    // connect(m_colorSpace, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &ParamsPanel::onComboChanged);
-    // colorRow->addWidget(m_colorSpace, 1);
-    // outputLayout->addLayout(colorRow);
-    // 导出时根据选择转换到目标色彩空间（当前均为 sRGB 预览）
-    auto* colorRow = new QHBoxLayout();
-    auto* colorLabel = new QLabel(QString::fromUtf8("色彩空间:"), m_outputGroup);
-    colorLabel->setStyleSheet("font-size: 12px; color: #C9D1D9; background-color: transparent;");
-    colorRow->addWidget(colorLabel);
-    m_colorSpace = new QComboBox(m_outputGroup);
-    m_colorSpace->addItems({"sRGB", "Adobe RGB", "ProPhoto RGB", "Rec. 2020"});
-    m_colorSpace->setStyleSheet(m_alignMethod->styleSheet());
-    connect(m_colorSpace, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &ParamsPanel::onComboChanged);
-    colorRow->addWidget(m_colorSpace, 1);
-    outputLayout->addLayout(colorRow);
+    // 色彩空间：当前固定输出线性 sRGB，暂不提供选择控件
+    // 后续完整实现色彩空间转换后再恢复
 
     // 输出路径选择
     auto* pathRow = new QHBoxLayout();
@@ -630,7 +610,6 @@ void ParamsPanel::onRestoreDefaults() {
     m_starReduceCheck->setChecked(false);
     m_starReduceSlider->setValue(50);
     m_outputFormat->setCurrentIndex(0);
-    m_colorSpace->setCurrentIndex(0);
     // 重置天地分离
     m_skyGroundCheck->setChecked(false);
     m_skyGroundMode->setCurrentIndex(0);
@@ -664,7 +643,6 @@ void ParamsPanel::onSavePreset() {
     settings.setValue("starReduceEnabled", m_starReduceCheck->isChecked());
     settings.setValue("starReduceStrength", m_starReduceSlider->value());
     settings.setValue("outputFormat", m_outputFormat->currentIndex());
-    settings.setValue("colorSpace", m_colorSpace->currentIndex());
     settings.setValue("outputPath", m_outputPath->text());
     settings.setValue("skyGroundSepEnabled", m_skyGroundCheck->isChecked());
     settings.setValue("skyGroundMode", m_skyGroundMode->currentIndex());
@@ -708,7 +686,6 @@ void ParamsPanel::saveCurrentSettings() {
     settings.setValue("starReduceEnabled", m_starReduceCheck->isChecked());
     settings.setValue("starReduceStrength", m_starReduceSlider->value());
     settings.setValue("outputFormat", m_outputFormat->currentIndex());
-    settings.setValue("colorSpace", m_colorSpace->currentIndex());
     settings.setValue("outputPath", m_outputPath->text());
     settings.setValue("lastPresetIndex", m_presetCombo->currentIndex());
     // 天地分离参数
@@ -747,7 +724,6 @@ void ParamsPanel::loadPreset() {
     bool starReduce = settings.value("starReduceEnabled", false).toBool();
     int starReduceStrength = settings.value("starReduceStrength", 50).toInt();
     int outputFormat = settings.value("outputFormat", 0).toInt();
-    int colorSpace = settings.value("colorSpace", 0).toInt();
     QString outputPath = settings.value("outputPath", QDir::homePath() + "/StarProcessor/Output").toString();
     int lastPresetIndex = settings.value("lastPresetIndex", 0).toInt();
 
@@ -767,7 +743,6 @@ void ParamsPanel::loadPreset() {
     QSignalBlocker blocker7(m_starReduceCheck);
     QSignalBlocker blocker8(m_starReduceSlider);
     QSignalBlocker blocker9(m_outputFormat);
-    QSignalBlocker blocker10(m_colorSpace);
     QSignalBlocker blocker11(m_presetCombo);
     QSignalBlocker blocker12(m_skyGroundCheck);
     QSignalBlocker blocker13(m_skyGroundMode);
@@ -784,7 +759,6 @@ void ParamsPanel::loadPreset() {
     m_starReduceCheck->setChecked(starReduce);
     m_starReduceSlider->setValue(starReduceStrength);
     m_outputFormat->setCurrentIndex(outputFormat);
-    m_colorSpace->setCurrentIndex(colorSpace);
     m_outputPath->setText(outputPath);
 
     // 天地分离
@@ -835,9 +809,6 @@ void ParamsPanel::onPresetChanged(int index) {
             applyPreset(preset);
 
             // 恢复自定义预设中保存的其他参数
-            int cs = settings.value("colorSpace", 0).toInt();
-            QSignalBlocker csBlocker(m_colorSpace);
-            m_colorSpace->setCurrentIndex(cs);
             QString op = settings.value("outputPath", QDir::homePath() + "/StarProcessor/Output").toString();
             m_outputPath->setText(op);
 
