@@ -231,6 +231,9 @@ bool StackingEngine::stackWithMask(
     if (images.empty() || originalImages.empty() || width <= 0 || height <= 0) {
         return false;
     }
+    if (images.size() != originalImages.size()) {
+        return false;
+    }
     if (mask.size() != static_cast<size_t>(width * height)) {
         return false;
     }

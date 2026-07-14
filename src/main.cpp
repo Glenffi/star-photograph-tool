@@ -233,8 +233,12 @@ protected:
                 return;
             }
 
-            // demosaic 后释放 CFA 数据，减少内存占用
+            // demosaic 后释放原始图像数据，减少内存占用
             if (!img.bayerPattern.empty()) {
+                img.data.clear();
+                img.data.shrink_to_fit();
+            } else if (img.channels == 3) {
+                // 原生 RGB：数据已 move 到 rgb，清空 img.data 释放副本
                 img.data.clear();
                 img.data.shrink_to_fit();
             }
@@ -356,11 +360,11 @@ protected:
                     return;
                 }
             } else {
-                if (!SkyGroundMask::loadUserMask(m_params.userMaskPath.toStdString(), w, h, mask)) {
+                if (!SkyGroundMask::loadUserMask(m_params.userMaskPath.toStdString(), w, h, mask, m_params.featherRadius)) {
                     m_errorString = "无法加载用户蒙版";
                     return;
                 }
-                SkyGroundMask::feather(mask, w, h, m_params.featherRadius);
+                // loadUserMask 已内部处理羽化，此处无需重复调用
             }
 
             emit stageMessage("天地分离堆栈...");
@@ -528,10 +532,14 @@ public:
             m_worker->requestCancel();
             m_worker->wait(3000);
         }
-        if (m_maskPreviewWorker && m_maskPreviewWorker->isRunning()) {
-            m_maskPreviewWorker->requestInterruption();
-            m_maskPreviewWorker->wait(3000);
+        // 等待所有活动中的 MaskPreviewWorker，避免运行中的 QThread 被销毁
+        for (MaskPreviewWorker* w : m_activeMaskPreviewWorkers) {
+            if (w && w->isRunning()) {
+                w->requestInterruption();
+                w->wait(3000);
+            }
         }
+        m_activeMaskPreviewWorkers.clear();
     }
 
 protected:
@@ -849,27 +857,28 @@ private:
             // 取消之前的预览任务，等待其真正结束
             if (m_maskPreviewWorker && m_maskPreviewWorker->isRunning()) {
                 m_maskPreviewWorker->requestInterruption();
-                if (!m_maskPreviewWorker->wait(2000)) {
-                    // 超时后断开 finished 信号，避免旧回调操作新线程
-                    disconnect(m_maskPreviewWorker, &MaskPreviewWorker::finished, nullptr, nullptr);
+                if (!m_maskPreviewWorker->wait(3000)) {
+                    // 超时：拒绝启动新任务，避免旧 worker 失去清理路径
+                    statusBar()->showMessage("上一个检测任务仍在运行，请稍后再试", 3000);
+                    return;
                 }
             }
 
             int feather = m_paramsPanel->featherRadius();
             MaskPreviewWorker* worker = new MaskPreviewWorker(currentFile, feather, this);
             m_maskPreviewWorker = worker;
+            m_activeMaskPreviewWorkers.insert(worker);
             connect(worker, &MaskPreviewWorker::finished, this, [this, worker]() {
-                // 只处理当前 worker 的结果，忽略已丢弃的旧任务
-                if (worker != m_maskPreviewWorker) {
-                    worker->deleteLater();
-                    return;
-                }
+                m_activeMaskPreviewWorkers.remove(worker);
                 if (worker->errorString().isEmpty()) {
-                    m_previewPanel->setMaskOverlay(worker->mask(),
-                                                    worker->width(),
-                                                    worker->height());
-                    statusBar()->showMessage("地景检测完成，蓝色=天空，绿色=地景", 5000);
-                } else {
+                    // 只处理最新 worker 的结果
+                    if (worker == m_maskPreviewWorker) {
+                        m_previewPanel->setMaskOverlay(worker->mask(),
+                                                        worker->width(),
+                                                        worker->height());
+                        statusBar()->showMessage("地景检测完成，蓝色=天空，绿色=地景", 5000);
+                    }
+                } else if (worker == m_maskPreviewWorker) {
                     QMessageBox::warning(this, "错误", worker->errorString());
                 }
                 worker->deleteLater();
@@ -1223,6 +1232,7 @@ private:
     QButtonGroup* m_stepGroup = nullptr;
     ProcessingWorker* m_worker = nullptr;
     MaskPreviewWorker* m_maskPreviewWorker = nullptr;
+    QSet<MaskPreviewWorker*> m_activeMaskPreviewWorkers;
 
     // 缓存最后一次堆栈结果（用于导出）
     std::vector<uint16_t> m_cachedStackedData;

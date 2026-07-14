@@ -428,10 +428,10 @@ bool SkyGroundMask::autoDetect(const std::vector<uint16_t>& image, int width, in
 }
 
 // ---------------------------------------------------------------------------
-// 8. 加载用户蒙版
+// 8. 加载用户蒙版（带 downscale 羽化优化）
 // ---------------------------------------------------------------------------
 bool SkyGroundMask::loadUserMask(const std::string& path, int width, int height,
-                                 std::vector<uint8_t>& mask)
+                                 std::vector<uint8_t>& mask, int featherRadius)
 {
     QImage img(QString::fromStdString(path));
     if (img.isNull())
@@ -455,10 +455,31 @@ bool SkyGroundMask::loadUserMask(const std::string& path, int width, int height,
         }
     }
 
+    std::vector<uint8_t> resizedMask;
     if (srcW == width && srcH == height) {
-        mask = std::move(srcMask);
+        resizedMask = std::move(srcMask);
     } else {
-        resizeMask(srcMask, srcW, srcH, mask, width, height);
+        resizeMask(srcMask, srcW, srcH, resizedMask, width, height);
+    }
+
+    // 羽化：在小图上做，避免全分辨率高斯模糊的性能开销
+    if (featherRadius > 0) {
+        int smallW = width / 4;
+        int smallH = height / 4;
+        if (smallW < 1) smallW = 1;
+        if (smallH < 1) smallH = 1;
+
+        std::vector<uint8_t> smallMask;
+        resizeMask(resizedMask, width, height, smallMask, smallW, smallH);
+
+        int smallFeather = std::max(1, featherRadius / 4);
+        std::vector<uint8_t> blurredMask;
+        gaussianBlurMask(smallMask, smallW, smallH, blurredMask, static_cast<float>(smallFeather));
+        smallMask = std::move(blurredMask);
+
+        resizeMask(smallMask, smallW, smallH, mask, width, height);
+    } else {
+        mask = std::move(resizedMask);
     }
     return true;
 }

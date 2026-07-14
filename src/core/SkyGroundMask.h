@@ -45,7 +45,7 @@ public:
      * @return true 成功
      */
     static bool loadUserMask(const std::string& path, int width, int height,
-                             std::vector<uint8_t>& mask);
+                             std::vector<uint8_t>& mask, int featherRadius = 0);
 
     /**
      * @brief 应用羽化到蒙版边缘
