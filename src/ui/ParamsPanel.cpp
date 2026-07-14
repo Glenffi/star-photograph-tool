@@ -316,7 +316,7 @@ void ParamsPanel::setupUI() {
     auto* starRow = new QHBoxLayout();
     m_starReduceCheck = new QCheckBox(QString::fromUtf8("启用缩星"), m_starReduceGroup);
     m_starReduceCheck->setEnabled(true);
-    m_starReduceCheck->setToolTip(QString::fromUtf8("AI 自动检测星点并缩小尺寸\n关闭时直接输出原始星点"));
+    m_starReduceCheck->setToolTip(QString::fromUtf8("自动检测星点并缩小尺寸\n关闭时直接输出原始星点"));
     m_starReduceCheck->setStyleSheet(m_dewarpCheck->styleSheet());
     connect(m_starReduceCheck, &QCheckBox::toggled, this, &ParamsPanel::onCheckChanged);
     starRow->addWidget(m_starReduceCheck);
@@ -364,7 +364,17 @@ void ParamsPanel::setupUI() {
     formatRow->addWidget(m_outputFormat, 1);
     outputLayout->addLayout(formatRow);
 
-    // 色彩空间：当前 LibRaw 输出相机线性空间，后续处理保持线性
+    // 色彩空间：当前固定输出线性 sRGB，隐藏选择控件直到完整实现色彩空间转换
+    // auto* colorRow = new QHBoxLayout();
+    // auto* colorLabel = new QLabel(QString::fromUtf8("色彩空间:"), m_outputGroup);
+    // colorLabel->setStyleSheet("font-size: 12px; color: #C9D1D9; background-color: transparent;");
+    // colorRow->addWidget(colorLabel);
+    // m_colorSpace = new QComboBox(m_outputGroup);
+    // m_colorSpace->addItems({"sRGB", "Adobe RGB", "ProPhoto RGB", "Rec. 2020"});
+    // m_colorSpace->setStyleSheet(m_alignMethod->styleSheet());
+    // connect(m_colorSpace, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &ParamsPanel::onComboChanged);
+    // colorRow->addWidget(m_colorSpace, 1);
+    // outputLayout->addLayout(colorRow);
     // 导出时根据选择转换到目标色彩空间（当前均为 sRGB 预览）
     auto* colorRow = new QHBoxLayout();
     auto* colorLabel = new QLabel(QString::fromUtf8("色彩空间:"), m_outputGroup);

@@ -74,6 +74,24 @@ bool RawImageLoader::loadRaw(const std::string& filePath, ImageData& out) {
             return false;
         }
 
+        // 校验 LibRaw 返回的位深、通道数和缓冲区大小
+        if (img->bits != 16) {
+            std::cerr << "LibRaw 输出位深不支持: " << img->bits << " bits (需要 16-bit): " << filePath << std::endl;
+            LibRaw::dcraw_clear_mem(img);
+            return false;
+        }
+        if (img->colors != 3) {
+            std::cerr << "LibRaw 输出通道数不支持: " << img->colors << " colors (需要 3): " << filePath << std::endl;
+            LibRaw::dcraw_clear_mem(img);
+            return false;
+        }
+        size_t expectedDataSize = static_cast<size_t>(img->width) * img->height * img->colors * sizeof(uint16_t);
+        if (img->data_size < expectedDataSize) {
+            std::cerr << "LibRaw 缓冲区大小不足: " << img->data_size << " < " << expectedDataSize << ": " << filePath << std::endl;
+            LibRaw::dcraw_clear_mem(img);
+            return false;
+        }
+
         out.width = img->width;
         out.height = img->height;
         out.channels = 3;
@@ -106,6 +124,24 @@ bool RawImageLoader::loadRaw(const std::string& filePath, ImageData& out) {
         if (!img || img->type != LIBRAW_IMAGE_BITMAP) {
             std::cerr << "LibRaw dcraw_make_mem_image 失败: " << filePath << std::endl;
             if (img) LibRaw::dcraw_clear_mem(img);
+            return false;
+        }
+
+        // 校验 LibRaw 返回的位深、通道数和缓冲区大小
+        if (img->bits != 16) {
+            std::cerr << "LibRaw 输出位深不支持: " << img->bits << " bits (需要 16-bit): " << filePath << std::endl;
+            LibRaw::dcraw_clear_mem(img);
+            return false;
+        }
+        if (img->colors != 3) {
+            std::cerr << "LibRaw 输出通道数不支持: " << img->colors << " colors (需要 3): " << filePath << std::endl;
+            LibRaw::dcraw_clear_mem(img);
+            return false;
+        }
+        size_t expectedDataSize = static_cast<size_t>(img->width) * img->height * img->colors * sizeof(uint16_t);
+        if (img->data_size < expectedDataSize) {
+            std::cerr << "LibRaw 缓冲区大小不足: " << img->data_size << " < " << expectedDataSize << ": " << filePath << std::endl;
+            LibRaw::dcraw_clear_mem(img);
             return false;
         }
 
