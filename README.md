@@ -28,7 +28,7 @@
 |------|------|---------|---------|
 | UI | Qt 6 | 6.2+ | LGPLv3 |
 | RAW 解码 | LibRaw | 0.21+ | LGPLv2.1/CDDL |
-| 图像处理（规划中） | OpenCV | — | Apache-2.0 |
+| 图像处理（纯开源） | 自研算法（星点检测 + 形态学腐蚀） | — | MIT |
 | 图像导出 | libtiff | — | BSD-2-Clause |
 | 构建 | CMake | 3.20+ | — |
 | AI 云端 | FastAPI + Docker | — | MIT/BSD |
@@ -45,6 +45,7 @@ StarProcessor/
 │   │   ├── StarDetector.h/cpp         # 星点检测与 2D 高斯拟合
 │   │   ├── ImageAligner.h/cpp         # 基于星点的图像对齐
 │   │   ├── StackingEngine.h/cpp       # 堆栈降噪（均值/中值/Kappa-Sigma/Winsorized）
+|   │   ├── StarReducer.h/cpp           # 缩星处理（星点检测 + 形态学腐蚀）
 │   │   ├── ImageExporter.h/cpp        # 16-bit TIFF / PNG 8-bit 导出
 │   │   ├── AutoOptimizeEngine.h/cpp   # 自动优化：Dark Channel Prior 去雾 + Arcsinh 曲线拉伸
 │   │   └── PresetManager.h/cpp        # 内置预设与用户预设持久化
@@ -108,12 +109,12 @@ cmake --build . --config Release
 .\Release\StarProcessor.exe
 ```
 
-> **注意**：当前 P2 阶段已实现核心处理链路（对齐 → 堆栈 → 导出）与自动优化（去雾、曲线拉伸），缩星功能将在后续版本迭代。
+> **注意**：当前 P2 阶段已实现核心处理链路（对齐 → 堆栈 → 自动优化 → 缩星 → 导出）。
 
 ## 已知限制
 
-- **P2 阶段**：核心对齐、堆栈（含 Kappa-Sigma / Winsorized）、导出与自动优化（去雾、曲线拉伸）已可用；缩星功能尚未实现
-- **Bayer 解码**：当前使用简单最近邻插值，质量低于专业 debayer 算法
+- **P2 阶段**：核心对齐、堆栈（含 Kappa-Sigma / Winsorized）、自动优化（去雾、曲线拉伸）、缩星与导出均已可用
+- **Bayer 解码**：使用 LibRaw 内置 AHD demosaic + 相机白平衡 + 颜色矩阵，输出高质量 16-bit RGB
 - **色彩管理**：输出色彩空间转换尚未集成，当前为 sRGB 预览
 - **AI 功能**：云端 AI 建议服务需单独部署后端（见 `ai-service/` 目录，后续发布）
 
