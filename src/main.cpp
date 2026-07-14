@@ -34,6 +34,7 @@
 #include <atomic>
 
 #include "core/SkyGroundMask.h"
+#include "core/StarReducer.h"
 #include "ui/ProjectPanel.h"
 #include "ui/PreviewPanel.h"
 #include "ui/ParamsPanel.h"
@@ -369,6 +370,41 @@ protected:
         emit progress(80);
 
         // 5. 自动优化（如果启用）—— 对 RGB 每个通道分别处理
+        if (m_params.dewarpEnabled || m_params.stretchEnabled) {
+            emit stageMessage("自动优化...");
+            auto [rCh, gCh, bCh] = splitChannels(resultRgb, w, h);
+
+            if (m_params.dewarpEnabled) {
+                std::vector<uint16_t> temp;
+                if (AutoOptimizeEngine::dehaze(rCh, w, h, m_params.dewarpStrength, temp)) rCh = std::move(temp);
+                if (AutoOptimizeEngine::dehaze(gCh, w, h, m_params.dewarpStrength, temp)) gCh = std::move(temp);
+                if (AutoOptimizeEngine::dehaze(bCh, w, h, m_params.dewarpStrength, temp)) bCh = std::move(temp);
+            }
+
+            if (m_params.stretchEnabled) {
+                std::vector<uint16_t> temp;
+                if (AutoOptimizeEngine::stretchCurve(rCh, w, h, temp)) rCh = std::move(temp);
+                if (AutoOptimizeEngine::stretchCurve(gCh, w, h, temp)) gCh = std::move(temp);
+                if (AutoOptimizeEngine::stretchCurve(bCh, w, h, temp)) bCh = std::move(temp);
+            }
+
+            resultRgb = mergeChannels(rCh, gCh, bCh, w, h);
+            emit progress(90);
+        }
+
+        // 6. 缩星（如果启用）—— 在自动优化之后、导出之前
+        if (m_params.starReduceEnabled && m_params.starReduceStrength > 0) {
+            emit stageMessage("缩星处理...");
+            if (!StarReducer::reduce(resultRgb, w, h, m_params.starReduceStrength)) {
+                qWarning() << "缩星处理失败，继续导出原图";
+            }
+            emit progress(95);
+        }
+
+        // 回写结果到 m_stackedData
+        m_stackedData = std::move(resultRgb);
+
+        // 7. 导出（根据参数）
         if (m_params.dewarpEnabled || m_params.stretchEnabled) {
             emit stageMessage("自动优化...");
             auto [rCh, gCh, bCh] = splitChannels(resultRgb, w, h);

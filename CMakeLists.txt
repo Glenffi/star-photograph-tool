@@ -94,6 +94,7 @@ set(SOURCES
     src/core/ImageExporter.cpp
     src/core/AutoOptimizeEngine.cpp
     src/core/PresetManager.cpp
+    src/core/StarReducer.cpp
     src/ui/ProjectPanel.cpp
     src/ui/PreviewPanel.cpp
     src/ui/Toolbar.cpp
@@ -110,6 +111,7 @@ set(HEADERS
     src/core/ImageExporter.h
     src/core/AutoOptimizeEngine.h
     src/core/PresetManager.h
+    src/core/StarReducer.h
     src/ui/ProjectPanel.h
     src/ui/PreviewPanel.h
     src/ui/Toolbar.h
