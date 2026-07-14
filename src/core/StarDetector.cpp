@@ -244,8 +244,11 @@ bool StarDetector::detect(const std::vector<uint16_t>& image, int width, int hei
         }
     }
 
-    // 4. 2D 高斯拟合
-    for (const auto& [cx, cy] : candidates) {
+    // 4. 2D 高斯拟合（限制最多处理 5000 个候选，避免密集星场耗时失控）
+    const size_t maxCandidates = 5000;
+    size_t fitCount = std::min(candidates.size(), maxCandidates);
+    for (size_t i = 0; i < fitCount; ++i) {
+        const auto& [cx, cy] = candidates[i];
         StarPoint star;
         if (fit2DGaussian(image, width, height, cx, cy, 7, star)) {
             if (star.fwhm > 0.5 && star.fwhm < 50.0 && star.flux > 0) {

@@ -1,9 +1,11 @@
 #include "ImageExporter.h"
 #include <QImage>
 #include <QString>
+#include <QColorSpace>
 #include <algorithm>
 #include <cstring>
 #include <iostream>
+#include <cmath>
 
 #ifdef HAS_LIBTIFF
 #include <tiffio.h>
@@ -78,12 +80,29 @@ static bool exportTiffRgb16(const std::vector<uint16_t>& rgb, int width, int hei
 #endif
 }
 
+// sRGB OETF: 线性值 -> sRGB 编码值
+// 输入: 0-65535 线性值, 输出: 0-255 sRGB 编码值
+static uint8_t linearToSrgb8(uint16_t linear16) {
+    // 归一化到 0-1
+    float linear = static_cast<float>(linear16) / 65535.0f;
+    // sRGB OETF
+    float srgb;
+    if (linear <= 0.0031308f) {
+        srgb = linear * 12.92f;
+    } else {
+        srgb = 1.055f * std::pow(linear, 1.0f / 2.4f) - 0.055f;
+    }
+    // 量化到 8-bit
+    int val = static_cast<int>(srgb * 255.0f + 0.5f);
+    return static_cast<uint8_t>(std::clamp(val, 0, 255));
+}
+
 static bool exportPng8Bit(const std::vector<uint16_t>& image, int width, int height, const std::string& path) {
     QImage qimg(width, height, QImage::Format_Grayscale8);
     for (int y = 0; y < height; ++y) {
         for (int x = 0; x < width; ++x) {
             uint16_t val = image[y * width + x];
-            uint8_t v = static_cast<uint8_t>(val >> 8);
+            uint8_t v = linearToSrgb8(val);
             qimg.setPixel(x, y, v);
         }
     }
@@ -92,12 +111,14 @@ static bool exportPng8Bit(const std::vector<uint16_t>& image, int width, int hei
 
 static bool exportPngRgb16(const std::vector<uint16_t>& rgb, int width, int height, const std::string& path) {
     QImage qimg(width, height, QImage::Format_RGB888);
+    // 设置 sRGB 色彩空间，确保查看器正确解释
+    qimg.setColorSpace(QColorSpace(QColorSpace::SRgb));
     for (int y = 0; y < height; ++y) {
         for (int x = 0; x < width; ++x) {
             int idx = (y * width + x) * 3;
-            uint8_t r = static_cast<uint8_t>(rgb[idx + 0] >> 8);
-            uint8_t g = static_cast<uint8_t>(rgb[idx + 1] >> 8);
-            uint8_t b = static_cast<uint8_t>(rgb[idx + 2] >> 8);
+            uint8_t r = linearToSrgb8(rgb[idx + 0]);
+            uint8_t g = linearToSrgb8(rgb[idx + 1]);
+            uint8_t b = linearToSrgb8(rgb[idx + 2]);
             qimg.setPixelColor(x, y, QColor(r, g, b));
         }
     }

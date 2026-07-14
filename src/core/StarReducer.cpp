@@ -49,7 +49,8 @@ bool StarReducer::reduce(std::vector<uint16_t>& image, int width, int height, in
         return true;
     }
 
-    // 按 flux 排序后截断至最多 5000 个星点，避免密集星场耗时失控
+    // StarReducer 中已按 flux 排序后截断至 5000，此处检测器内也限制候选数量
+    // 双重保护：检测器限制候选拟合数量，Reducer 限制最终星点数量
     const size_t maxStars = 5000;
     if (stars.size() > maxStars) {
         stars.resize(maxStars);
@@ -140,10 +141,8 @@ void StarReducer::buildStarMask(const std::vector<StarPoint>& stars,
         if (maskRadius < 2.0) maskRadius = 2.0;
         if (maskRadius > 20.0) maskRadius = 20.0;
 
-        // 扩展窗口到 3*sigma，确保 smoothstep 降到 0
-        double sigma = maskRadius / 2.0;
-        double windowRadius = maskRadius + 3.0 * sigma; // 约 2.5 * maskRadius
-        int r = static_cast<int>(std::ceil(windowRadius));
+        // 循环半径直接使用 maskRadius（smoothstep 在 maskRadius 处已精确降到 0）
+        int r = static_cast<int>(std::ceil(maskRadius));
 
         int cx = static_cast<int>(star.x);
         int cy = static_cast<int>(star.y);
