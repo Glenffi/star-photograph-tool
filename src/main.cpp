@@ -405,32 +405,6 @@ protected:
         m_stackedData = std::move(resultRgb);
 
         // 7. 导出（根据参数）
-        if (m_params.dewarpEnabled || m_params.stretchEnabled) {
-            emit stageMessage("自动优化...");
-            auto [rCh, gCh, bCh] = splitChannels(resultRgb, w, h);
-
-            if (m_params.dewarpEnabled) {
-                std::vector<uint16_t> temp;
-                if (AutoOptimizeEngine::dehaze(rCh, w, h, m_params.dewarpStrength, temp)) rCh = std::move(temp);
-                if (AutoOptimizeEngine::dehaze(gCh, w, h, m_params.dewarpStrength, temp)) gCh = std::move(temp);
-                if (AutoOptimizeEngine::dehaze(bCh, w, h, m_params.dewarpStrength, temp)) bCh = std::move(temp);
-            }
-
-            if (m_params.stretchEnabled) {
-                std::vector<uint16_t> temp;
-                if (AutoOptimizeEngine::stretchCurve(rCh, w, h, temp)) rCh = std::move(temp);
-                if (AutoOptimizeEngine::stretchCurve(gCh, w, h, temp)) gCh = std::move(temp);
-                if (AutoOptimizeEngine::stretchCurve(bCh, w, h, temp)) bCh = std::move(temp);
-            }
-
-            resultRgb = mergeChannels(rCh, gCh, bCh, w, h);
-            emit progress(90);
-        }
-
-        // 回写结果到 m_stackedData
-        m_stackedData = std::move(resultRgb);
-
-        // 6. 导出（根据参数）
         emit stageMessage("导出结果...");
         QString outFileName = QDateTime::currentDateTime().toString("yyyyMMdd_hhmmss") + "_stacked";
         QString outPath = m_params.outputPath;
