@@ -30,6 +30,7 @@
 #include <QProgressBar>
 #include <QDateTime>
 #include <QDebug>
+#include <QSet>
 #include <atomic>
 
 #include "core/SkyGroundMask.h"
@@ -227,7 +228,7 @@ protected:
                     return;
                 }
             } else if (img.channels == 3) {
-                rgb = img.data;
+                rgb = std::move(img.data);
             } else {
                 m_errorString = QString("不支持的图像格式: %1").arg(QFileInfo(m_files[i]).fileName());
                 return;
@@ -287,9 +288,11 @@ protected:
         emit stageMessage("对齐图像...");
         ImageAligner aligner;
         std::vector<std::vector<uint16_t>> alignedRgb;
-        std::vector<std::vector<uint16_t>> originalForStackRgb; // 与 alignedRgb 同步的原始帧
+        std::vector<std::vector<uint16_t>> originalForStackRgb; // 仅在天地分离时构建
         alignedRgb.push_back(loadedRgb[refIdx]); // 参考帧不需要变换
-        originalForStackRgb.push_back(loadedRgb[refIdx]); // 参考帧的原始数据
+        if (m_params.skyGroundSepEnabled) {
+            originalForStackRgb.push_back(loadedRgb[refIdx]); // 参考帧的原始数据
+        }
 
         for (std::size_t i = 0; i < loadedImages.size(); ++i) {
             if (m_cancelled.load()) return;
@@ -327,7 +330,9 @@ protected:
             }
 
             alignedRgb.push_back(mergeChannels(alignedR, alignedG, alignedB, w, h));
-            originalForStackRgb.push_back(loadedRgb[i]); // 同步压入对应原始帧
+            if (m_params.skyGroundSepEnabled) {
+                originalForStackRgb.push_back(loadedRgb[i]); // 同步压入对应原始帧
+            }
 
             int p = 20 + static_cast<int>((i + 1) * 30.0 / loadedImages.size());
             emit progress(p);
@@ -528,15 +533,16 @@ public:
     }
 
     ~MainWindow() {
+        // 等待 ProcessingWorker 真正结束（无超时，避免销毁运行中的线程）
         if (m_worker && m_worker->isRunning()) {
             m_worker->requestCancel();
-            m_worker->wait(3000);
+            m_worker->wait();
         }
-        // 等待所有活动中的 MaskPreviewWorker，避免运行中的 QThread 被销毁
+        // 等待所有 MaskPreviewWorker 真正结束
         for (MaskPreviewWorker* w : m_activeMaskPreviewWorkers) {
             if (w && w->isRunning()) {
                 w->requestInterruption();
-                w->wait(3000);
+                w->wait();
             }
         }
         m_activeMaskPreviewWorkers.clear();

@@ -441,15 +441,16 @@ bool SkyGroundMask::loadUserMask(const std::string& path, int width, int height,
     int srcH = img.height();
     std::vector<uint8_t> srcMask(srcW * srcH);
 
-    bool hasAlpha = img.hasAlphaChannel();
+    // 统一处理：完全透明像素视为地景(0)，其余由灰度决定天空(255)/地景(0)
     for (int y = 0; y < srcH; ++y) {
         for (int x = 0; x < srcW; ++x) {
             QRgb pixel = img.pixel(x, y);
-            if (hasAlpha) {
-                int alpha = qAlpha(pixel);
-                srcMask[y * srcW + x] = (alpha == 0) ? 255 : 0;
+            int gray = qGray(pixel);
+            int alpha = qAlpha(pixel);
+            // 契约：完全透明像素视为地景(0)，其余由灰度决定天空(255)/地景(0)
+            if (alpha == 0) {
+                srcMask[y * srcW + x] = 0;
             } else {
-                int gray = qGray(pixel);
                 srcMask[y * srcW + x] = (gray > 128) ? 255 : 0;
             }
         }
