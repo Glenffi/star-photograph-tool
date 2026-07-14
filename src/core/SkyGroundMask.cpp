@@ -416,12 +416,8 @@ bool SkyGroundMask::autoDetect(const std::vector<uint16_t>& image, int width, in
         std::vector<uint8_t> blurredMask;
         gaussianBlurMask(smallMask, smallW, smallH, blurredMask, static_cast<float>(smallFeather));
         smallMask = std::move(blurredMask);
-    } else {
-        // 默认轻微羽化 σ=3
-        std::vector<uint8_t> blurredMask;
-        gaussianBlurMask(smallMask, smallW, smallH, blurredMask, 3.0f);
-        smallMask = std::move(blurredMask);
     }
+    // featherRadius == 0 表示完全不羽化，与 UI 语义一致
 
     // 8. 缩放回原始尺寸（双线性插值）
     std::vector<uint8_t> fullMask;

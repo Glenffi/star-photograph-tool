@@ -233,6 +233,11 @@ protected:
                 return;
             }
 
+            // demosaic 后释放 CFA 数据，减少内存占用
+            if (!img.bayerPattern.empty()) {
+                img.data.clear();
+                img.data.shrink_to_fit();
+            }
             loadedImages.push_back(std::move(img));
             loadedRgb.push_back(std::move(rgb));
             loadedPaths.push_back(m_files[i]);
@@ -278,7 +283,9 @@ protected:
         emit stageMessage("对齐图像...");
         ImageAligner aligner;
         std::vector<std::vector<uint16_t>> alignedRgb;
+        std::vector<std::vector<uint16_t>> originalForStackRgb; // 与 alignedRgb 同步的原始帧
         alignedRgb.push_back(loadedRgb[refIdx]); // 参考帧不需要变换
+        originalForStackRgb.push_back(loadedRgb[refIdx]); // 参考帧的原始数据
 
         for (std::size_t i = 0; i < loadedImages.size(); ++i) {
             if (m_cancelled.load()) return;
@@ -316,6 +323,7 @@ protected:
             }
 
             alignedRgb.push_back(mergeChannels(alignedR, alignedG, alignedB, w, h));
+            originalForStackRgb.push_back(loadedRgb[i]); // 同步压入对应原始帧
 
             int p = 20 + static_cast<int>((i + 1) * 30.0 / loadedImages.size());
             emit progress(p);
@@ -356,7 +364,7 @@ protected:
             }
 
             emit stageMessage("天地分离堆栈...");
-            if (!stackWithMaskRgb(stacker, alignedRgb, loadedRgb, w, h, method, m_params.kappaValue, mask, resultRgb)) {
+            if (!stackWithMaskRgb(stacker, alignedRgb, originalForStackRgb, w, h, method, m_params.kappaValue, mask, resultRgb)) {
                 m_errorString = "天地分离堆栈失败";
                 return;
             }
@@ -483,7 +491,7 @@ protected:
             return;
         }
         if (isInterruptionRequested()) return;
-        SkyGroundMask::feather(m_mask, img.width, img.height, m_featherRadius);
+        // autoDetect 已在小图上完成羽化并 upscale，此处不再重复全分辨率羽化
         m_width = img.width;
         m_height = img.height;
     }
@@ -838,27 +846,38 @@ private:
                 return;
             }
 
-            // 取消之前的预览任务
+            // 取消之前的预览任务，等待其真正结束
             if (m_maskPreviewWorker && m_maskPreviewWorker->isRunning()) {
                 m_maskPreviewWorker->requestInterruption();
-                m_maskPreviewWorker->wait(1000);
+                if (!m_maskPreviewWorker->wait(2000)) {
+                    // 超时后断开 finished 信号，避免旧回调操作新线程
+                    disconnect(m_maskPreviewWorker, &MaskPreviewWorker::finished, nullptr, nullptr);
+                }
             }
 
             int feather = m_paramsPanel->featherRadius();
-            m_maskPreviewWorker = new MaskPreviewWorker(currentFile, feather, this);
-            connect(m_maskPreviewWorker, &MaskPreviewWorker::finished, this, [this]() {
-                if (m_maskPreviewWorker->errorString().isEmpty()) {
-                    m_previewPanel->setMaskOverlay(m_maskPreviewWorker->mask(),
-                                                    m_maskPreviewWorker->width(),
-                                                    m_maskPreviewWorker->height());
+            MaskPreviewWorker* worker = new MaskPreviewWorker(currentFile, feather, this);
+            m_maskPreviewWorker = worker;
+            connect(worker, &MaskPreviewWorker::finished, this, [this, worker]() {
+                // 只处理当前 worker 的结果，忽略已丢弃的旧任务
+                if (worker != m_maskPreviewWorker) {
+                    worker->deleteLater();
+                    return;
+                }
+                if (worker->errorString().isEmpty()) {
+                    m_previewPanel->setMaskOverlay(worker->mask(),
+                                                    worker->width(),
+                                                    worker->height());
                     statusBar()->showMessage("地景检测完成，蓝色=天空，绿色=地景", 5000);
                 } else {
-                    QMessageBox::warning(this, "错误", m_maskPreviewWorker->errorString());
+                    QMessageBox::warning(this, "错误", worker->errorString());
                 }
-                m_maskPreviewWorker->deleteLater();
-                m_maskPreviewWorker = nullptr;
+                worker->deleteLater();
+                if (m_maskPreviewWorker == worker) {
+                    m_maskPreviewWorker = nullptr;
+                }
             });
-            m_maskPreviewWorker->start();
+            worker->start();
         });
     }
 
