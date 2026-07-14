@@ -220,29 +220,10 @@ protected:
                 return;
             }
 
-            // Demosaic Bayer CFA to RGB
-            std::vector<uint16_t> rgb;
-            if (img.channels == 1 && !img.bayerPattern.empty()) {
-                if (!loader.decodeToRgb(img, rgb)) {
-                    m_errorString = QString("Demosaic 失败: %1").arg(QFileInfo(m_files[i]).fileName());
-                    return;
-                }
-            } else if (img.channels == 3) {
-                rgb = std::move(img.data);
-            } else {
-                m_errorString = QString("不支持的图像格式: %1").arg(QFileInfo(m_files[i]).fileName());
-                return;
-            }
-
-            // demosaic 后释放原始图像数据，减少内存占用
-            if (!img.bayerPattern.empty()) {
-                img.data.clear();
-                img.data.shrink_to_fit();
-            } else if (img.channels == 3) {
-                // 原生 RGB：数据已 move 到 rgb，清空 img.data 释放副本
-                img.data.clear();
-                img.data.shrink_to_fit();
-            }
+            // loadRaw() 现在直接输出高质量 RGB（AHD demosaic + 相机 WB + 颜色矩阵）
+            std::vector<uint16_t> rgb = std::move(img.data);
+            img.data.clear();
+            img.data.shrink_to_fit();
             loadedImages.push_back(std::move(img));
             loadedRgb.push_back(std::move(rgb));
             loadedPaths.push_back(m_files[i]);
@@ -472,26 +453,15 @@ protected:
         }
         if (isInterruptionRequested()) return;
 
-        // Demosaic if needed
-        if (img.channels == 1 && !img.bayerPattern.empty()) {
-            std::vector<uint16_t> rgb;
-            if (loader.decodeToRgb(img, rgb)) {
-                img.data = std::move(rgb);
-                img.channels = 3;
-            }
-        }
+        // loadRaw() 现在直接输出 RGB，无需额外 demosaic
 
         // Extract luminance for detection
         std::vector<uint16_t> lum(img.width * img.height);
-        if (img.channels == 3) {
-            for (int i = 0; i < img.width * img.height; ++i) {
-                uint32_t r = img.data[i * 3 + 0];
-                uint32_t g = img.data[i * 3 + 1];
-                uint32_t b = img.data[i * 3 + 2];
-                lum[i] = static_cast<uint16_t>((r * 299 + g * 587 + b * 114) / 1000);
-            }
-        } else {
-            lum = img.data;
+        for (int i = 0; i < img.width * img.height; ++i) {
+            uint32_t r = img.data[i * 3 + 0];
+            uint32_t g = img.data[i * 3 + 1];
+            uint32_t b = img.data[i * 3 + 2];
+            lum[i] = static_cast<uint16_t>((r * 299 + g * 587 + b * 114) / 1000);
         }
 
         if (isInterruptionRequested()) return;

@@ -365,8 +365,8 @@ void ParamsPanel::setupUI() {
     formatRow->addWidget(m_outputFormat, 1);
     outputLayout->addLayout(formatRow);
 
-    // 色彩空间选项当前未实现（decodeToRgb 未应用相机 WB 和颜色矩阵）
-    // 隐藏该选项，避免用户误解
+    // 色彩空间：当前 LibRaw 输出相机线性空间，后续处理保持线性
+    // 导出时根据选择转换到目标色彩空间（当前均为 sRGB 预览）
     auto* colorRow = new QHBoxLayout();
     auto* colorLabel = new QLabel(QString::fromUtf8("色彩空间:"), m_outputGroup);
     colorLabel->setStyleSheet("font-size: 12px; color: #C9D1D9; background-color: transparent;");
@@ -376,7 +376,7 @@ void ParamsPanel::setupUI() {
     m_colorSpace->setStyleSheet(m_alignMethod->styleSheet());
     connect(m_colorSpace, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &ParamsPanel::onComboChanged);
     colorRow->addWidget(m_colorSpace, 1);
-    // outputLayout->addLayout(colorRow); // 隐藏：当前 RGB 输出未实现色彩空间转换
+    outputLayout->addLayout(colorRow);
 
     // 输出路径选择
     auto* pathRow = new QHBoxLayout();

@@ -7,11 +7,11 @@
 class RawImageLoader {
 public:
     struct ImageData {
-        std::vector<uint16_t> data;     // Bayer CFA 或 RGB 数据
+        std::vector<uint16_t> data;     // RGB 数据（channels=3）
         int width = 0;
         int height = 0;
-        int channels = 0;              // 1=Bayer, 3=RGB
-        std::string bayerPattern;        // RGGB/BGGR/GRBG/GBRG
+        int channels = 0;              // 始终为 3（RGB）
+        std::string bayerPattern;        // 已弃用，始终为空字符串
         // EXIF 元数据
         int iso = 0;
         double exposureTime = 0.0;
