@@ -57,7 +57,7 @@ bool RawImageLoader::loadRaw(const std::string& filePath, ImageData& out) {
         processor.imgdata.params.use_camera_matrix = 1;  // 使用相机色彩矩阵
         processor.imgdata.params.output_bps = 16;        // 16-bit 输出
         processor.imgdata.params.no_auto_bright = 1;     // 关闭自动亮度拉伸，保持线性
-        processor.imgdata.params.output_color = 0;       // 输出相机线性空间
+        processor.imgdata.params.output_color = 1;       // 线性 sRGB primaries
         processor.imgdata.params.gamm[0] = 1.0f;           // 关闭 gamma，保持线性
         processor.imgdata.params.gamm[1] = 1.0f;
 
@@ -110,7 +110,7 @@ bool RawImageLoader::loadRaw(const std::string& filePath, ImageData& out) {
         processor.imgdata.params.use_camera_matrix = 1;
         processor.imgdata.params.output_bps = 16;
         processor.imgdata.params.no_auto_bright = 1;
-        processor.imgdata.params.output_color = 0;
+        processor.imgdata.params.output_color = 1;       // 线性 sRGB primaries
         processor.imgdata.params.gamm[0] = 1.0f;
         processor.imgdata.params.gamm[1] = 1.0f;
 

@@ -364,6 +364,8 @@ void ParamsPanel::setupUI() {
     formatRow->addWidget(m_outputFormat, 1);
     outputLayout->addLayout(formatRow);
 
+    // 输出路径选择
+
     // 色彩空间：当前固定输出线性 sRGB，隐藏选择控件直到完整实现色彩空间转换
     // auto* colorRow = new QHBoxLayout();
     // auto* colorLabel = new QLabel(QString::fromUtf8("色彩空间:"), m_outputGroup);
