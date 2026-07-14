@@ -48,6 +48,78 @@
 #include "core/AutoOptimizeEngine.h"
 #include "core/PresetManager.h"
 
+// 辅助函数：选取 N 个亮且空间分布均匀的星点用于对齐
+// 策略：将图像划分为网格，每格取最亮的星点，确保全图覆盖
+static std::vector<StarPoint> selectAlignmentStars(const std::vector<StarPoint>& stars, int imgWidth, int imgHeight, size_t targetCount) {
+    if (stars.size() <= targetCount) {
+        return stars;
+    }
+
+    // 网格划分：目标每格约 1-2 个星点
+    int gridCols = static_cast<int>(std::sqrt(static_cast<double>(targetCount)));
+    int gridRows = gridCols;
+    if (gridCols < 3) gridCols = 3;
+    if (gridRows < 3) gridRows = 3;
+
+    double cellW = static_cast<double>(imgWidth) / gridCols;
+    double cellH = static_cast<double>(imgHeight) / gridRows;
+
+    // 按网格分桶，每格保留最强星点
+    std::vector<std::vector<StarPoint>> grid(gridRows * gridCols);
+    for (const auto& star : stars) {
+        int col = static_cast<int>(star.x / cellW);
+        int row = static_cast<int>(star.y / cellH);
+        if (col >= gridCols) col = gridCols - 1;
+        if (row >= gridRows) row = gridRows - 1;
+        if (col < 0) col = 0;
+        if (row < 0) row = 0;
+        grid[row * gridCols + col].push_back(star);
+    }
+
+    // 每格按 flux 排序取最强，然后全局取 targetCount 个
+    std::vector<StarPoint> selected;
+    selected.reserve(targetCount);
+
+    // 第一轮：每格取最强 1 个，确保空间覆盖
+    for (auto& cell : grid) {
+        if (!cell.empty()) {
+            std::sort(cell.begin(), cell.end(), [](const StarPoint& a, const StarPoint& b) {
+                return a.flux > b.flux;
+            });
+            selected.push_back(cell[0]);
+        }
+    }
+
+    // 如果还不够，从剩余星点中按亮度补充
+    if (selected.size() < targetCount) {
+        std::vector<StarPoint> remaining;
+        remaining.reserve(stars.size());
+        for (const auto& cell : grid) {
+            for (size_t i = 1; i < cell.size(); ++i) {
+                remaining.push_back(cell[i]);
+            }
+        }
+        std::sort(remaining.begin(), remaining.end(), [](const StarPoint& a, const StarPoint& b) {
+            return a.flux > b.flux;
+        });
+        size_t need = targetCount - selected.size();
+        size_t take = std::min(need, remaining.size());
+        for (size_t i = 0; i < take; ++i) {
+            selected.push_back(remaining[i]);
+        }
+    }
+
+    // 如果超过目标数量，按全局亮度截断
+    if (selected.size() > targetCount) {
+        std::sort(selected.begin(), selected.end(), [](const StarPoint& a, const StarPoint& b) {
+            return a.flux > b.flux;
+        });
+        selected.resize(targetCount);
+    }
+
+    return selected;
+}
+
 /**
  * @brief 后台处理工作线程
  */
@@ -253,17 +325,18 @@ protected:
         m_width = w;
         m_height = h;
 
-        // Extract reference luminance for star detection and mask generation
         std::vector<uint16_t> refLum = extractLuminance(loadedRgb[refIdx], w, h);
 
         // 2. 星点检测（参考帧亮度通道）
         emit stageMessage("参考帧星点检测...");
         StarDetector detector;
-        std::vector<StarPoint> refStars;
-        if (!detector.detect(refLum, w, h, refStars, 5.0)) {
+        std::vector<StarPoint> refStarsAll;
+        if (!detector.detect(refLum, w, h, refStarsAll, 5.0)) {
             m_errorString = "参考帧星点检测失败";
             return;
         }
+        // 对齐只需少量亮且空间均匀的星点（~50个），避免 O(n³) 三角形组合爆炸
+        std::vector<StarPoint> refStars = selectAlignmentStars(refStarsAll, w, h, 50);
         emit progress(20);
 
         // 3. 对齐所有帧到参考帧
@@ -289,11 +362,13 @@ protected:
             // Extract luminance for star detection
             std::vector<uint16_t> srcLum = extractLuminance(loadedRgb[i], w, h);
 
-            std::vector<StarPoint> srcStars;
-            if (!detector.detect(srcLum, w, h, srcStars, 5.0)) {
+            std::vector<StarPoint> srcStarsAll;
+            if (!detector.detect(srcLum, w, h, srcStarsAll, 5.0)) {
                 qWarning() << "星点检测失败，跳过:" << loadedPaths[i];
                 continue;
             }
+            // 对齐只需少量亮且空间均匀的星点
+            std::vector<StarPoint> srcStars = selectAlignmentStars(srcStarsAll, w, h, 50);
 
             AlignmentTransform transform;
             if (!aligner.align(refStars, srcStars, transform)) {

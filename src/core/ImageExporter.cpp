@@ -99,6 +99,8 @@ static uint8_t linearToSrgb8(uint16_t linear16) {
 
 static bool exportPng8Bit(const std::vector<uint16_t>& image, int width, int height, const std::string& path) {
     QImage qimg(width, height, QImage::Format_Grayscale8);
+    // 设置 sRGB 色彩空间，与 RGB PNG 保持一致
+    qimg.setColorSpace(QColorSpace(QColorSpace::SRgb));
     for (int y = 0; y < height; ++y) {
         for (int x = 0; x < width; ++x) {
             uint16_t val = image[y * width + x];
@@ -129,8 +131,13 @@ bool ImageExporter::export16Bit(const std::vector<uint16_t>& image,
                                 int width, int height,
                                 const std::string& path,
                                 Format format) {
-    if (image.empty() || width <= 0 || height <= 0 || static_cast<int>(image.size()) != width * height) {
+    if (image.empty() || width <= 0 || height <= 0) {
         std::cerr << "ImageExporter: 无效的图像数据" << std::endl;
+        return false;
+    }
+    const size_t expectedSize = static_cast<size_t>(width) * static_cast<size_t>(height);
+    if (image.size() != expectedSize) {
+        std::cerr << "ImageExporter: 图像尺寸不匹配" << std::endl;
         return false;
     }
 
@@ -145,8 +152,13 @@ bool ImageExporter::exportRgb16(const std::vector<uint16_t>& rgb,
                                 int width, int height,
                                 const std::string& path,
                                 Format format) {
-    if (rgb.empty() || width <= 0 || height <= 0 || static_cast<int>(rgb.size()) != width * height * 3) {
+    if (rgb.empty() || width <= 0 || height <= 0) {
         std::cerr << "ImageExporter: 无效的 RGB 图像数据" << std::endl;
+        return false;
+    }
+    const size_t expectedSize = static_cast<size_t>(width) * static_cast<size_t>(height) * 3;
+    if (rgb.size() != expectedSize) {
+        std::cerr << "ImageExporter: RGB 图像尺寸不匹配" << std::endl;
         return false;
     }
 

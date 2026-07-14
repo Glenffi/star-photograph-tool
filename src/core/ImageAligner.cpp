@@ -15,6 +15,10 @@ static std::vector<Triangle> buildTriangles(const std::vector<StarPoint>& stars,
     int n = static_cast<int>(stars.size());
     if (n < 3) return triangles;
 
+    // 硬上限：最多处理约 50 个星点，避免 O(n³) 组合爆炸
+    // 50 个星点产生约 19600 个三角形，在可接受范围内
+    if (n > 50) n = 50;
+
     for (int i = 0; i < n; ++i) {
         for (int j = i + 1; j < n; ++j) {
             for (int k = j + 1; k < n; ++k) {
