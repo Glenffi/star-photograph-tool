@@ -261,8 +261,8 @@ protected:
         std::vector<StarPoint> refStars;
         DetectionOptions alignOptions;
         alignOptions.spatiallyBalanced = true;
-        alignOptions.maxCandidates = 50;
-        alignOptions.maxStars = 50;
+        alignOptions.maxCandidates = 30;
+        alignOptions.maxStars = 30;
         if (!detector.detect(refLum, w, h, refStars, alignOptions)) {
             m_errorString = "参考帧星点检测失败";
             return;
@@ -295,8 +295,8 @@ protected:
             std::vector<StarPoint> srcStars;
             DetectionOptions alignOptions;
             alignOptions.spatiallyBalanced = true;
-            alignOptions.maxCandidates = 50;
-            alignOptions.maxStars = 50;
+            alignOptions.maxCandidates = 30;
+            alignOptions.maxStars = 30;
             if (!detector.detect(srcLum, w, h, srcStars, alignOptions)) {
                 qWarning() << "星点检测失败，跳过:" << loadedPaths[i];
                 continue;

@@ -1,5 +1,4 @@
 #include "SkyGroundMask.h"
-#include "StarDetector.h"
 #include <QImage>
 #include <algorithm>
 #include <cmath>
@@ -217,34 +216,118 @@ void SkyGroundMask::computeVariance(const std::vector<uint16_t>& image, int w, i
 }
 
 // ---------------------------------------------------------------------------
-// 3. 星点密度（复用 StarDetector 阈值逻辑，统计 50×50 块）
+// 3. 星点密度（轻量局部极大值扫描，统计 50×50 块）
 // ---------------------------------------------------------------------------
 void SkyGroundMask::computeStarDensity(const std::vector<uint16_t>& image, int w, int h,
                                        std::vector<float>& density)
 {
     density.resize(w * h, 0.0f);
 
-    StarDetector detector;
-    std::vector<StarPoint> stars;
-    DetectionOptions densityOptions;
-    densityOptions.fitGaussian = false;
-    densityOptions.maxCandidates = 500;
-    densityOptions.maxStars = 500;
-    detector.detect(image, w, h, stars, densityOptions);
+    // 1. 轻量高斯模糊（sigma=1.5，与 StarDetector 一致）
+    std::vector<float> blurred;
+    {
+        int kernelSize = static_cast<int>(std::ceil(1.5f * 6.0f));
+        if (kernelSize % 2 == 0) kernelSize++;
+        int half = kernelSize / 2;
+        std::vector<float> kernel(kernelSize);
+        float sum = 0.0f;
+        for (int i = 0; i < kernelSize; ++i) {
+            float x = static_cast<float>(i - half);
+            kernel[i] = std::exp(-(x * x) / (2.0f * 1.5f * 1.5f));
+            sum += kernel[i];
+        }
+        for (float& k : kernel) k /= sum;
 
+        std::vector<float> temp(w * h);
+        blurred.resize(w * h);
+
+        // 行方向
+        for (int y = 0; y < h; ++y) {
+            for (int x = 0; x < w; ++x) {
+                float acc = 0.0f;
+                for (int k = 0; k < kernelSize; ++k) {
+                    int px = x + k - half;
+                    px = std::clamp(px, 0, w - 1);
+                    acc += static_cast<float>(image[y * w + px]) * kernel[k];
+                }
+                temp[y * w + x] = acc;
+            }
+        }
+        // 列方向
+        for (int y = 0; y < h; ++y) {
+            for (int x = 0; x < w; ++x) {
+                float acc = 0.0f;
+                for (int k = 0; k < kernelSize; ++k) {
+                    int py = y + k - half;
+                    py = std::clamp(py, 0, h - 1);
+                    acc += temp[py * w + x] * kernel[k];
+                }
+                blurred[y * w + x] = acc;
+            }
+        }
+    }
+
+    // 2. 估计背景中值和噪声（采样）
+    float bgNoise = 0.5f;
+    float backgroundMedian = 0.0f;
+    {
+        size_t sampleCount = std::min<size_t>(blurred.size(), 65536);
+        size_t step = blurred.size() / sampleCount;
+        if (step == 0) step = 1;
+        std::vector<float> samples;
+        samples.reserve(sampleCount);
+        for (size_t i = 0; i < blurred.size(); i += step) {
+            samples.push_back(blurred[i]);
+        }
+        size_t n = samples.size();
+        if (n > 0) {
+            std::nth_element(samples.begin(), samples.begin() + n / 2, samples.end());
+            backgroundMedian = samples[n / 2];
+            std::vector<float> absDev;
+            absDev.reserve(n);
+            for (float v : samples) {
+                absDev.push_back(std::abs(v - backgroundMedian));
+            }
+            std::nth_element(absDev.begin(), absDev.begin() + n / 2, absDev.end());
+            bgNoise = absDev[n / 2] * 1.4826f;
+        }
+    }
+    if (bgNoise < 0.5f) bgNoise = 0.5f;
+    float threshold = backgroundMedian + 5.0f * bgNoise;
+
+    // 3. 局部最大值扫描 + 块直方图统计
     const int blockSize = 50;
     int blockW = (w + blockSize - 1) / blockSize;
     int blockH = (h + blockSize - 1) / blockSize;
     std::vector<int> blockCount(blockW * blockH, 0);
 
-    for (const auto& star : stars) {
-        int bx = static_cast<int>(star.x) / blockSize;
-        int by = static_cast<int>(star.y) / blockSize;
-        bx = std::clamp(bx, 0, blockW - 1);
-        by = std::clamp(by, 0, blockH - 1);
-        blockCount[by * blockW + bx]++;
+    for (int y = 1; y < h - 1; ++y) {
+        for (int x = 1; x < w - 1; ++x) {
+            float val = blurred[y * w + x];
+            if (val < threshold) continue;
+
+            bool isLocalMax = true;
+            for (int dy = -1; dy <= 1 && isLocalMax; ++dy) {
+                for (int dx = -1; dx <= 1; ++dx) {
+                    if (dx == 0 && dy == 0) continue;
+                    if (blurred[(y + dy) * w + (x + dx)] >= val) {
+                        isLocalMax = false;
+                        break;
+                    }
+                }
+            }
+
+            if (isLocalMax) {
+                int bx = x / blockSize;
+                int by = y / blockSize;
+                bx = std::clamp(bx, 0, blockW - 1);
+                by = std::clamp(by, 0, blockH - 1);
+                blockCount[by * blockW + bx]++;
+            }
+        }
     }
 
+    // 4. 块归一化
     int maxCount = 0;
     for (int c : blockCount) {
         if (c > maxCount) maxCount = c;
