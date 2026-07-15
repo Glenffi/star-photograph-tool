@@ -70,6 +70,9 @@ static bool exportTiffRgb16(const std::vector<uint16_t>& rgb, int width, int hei
         TIFFSetField(tiff, TIFFTAG_ICCPROFILE,
                      static_cast<uint32_t>(iccProfile.size()),
                      iccProfile.constData());
+    } else {
+        std::cerr << "ImageExporter: 警告：无法获取线性 sRGB ICC profile，"
+                     "TIFF 将不嵌入色彩空间标记" << std::endl;
     }
 
     for (int row = 0; row < height; ++row) {

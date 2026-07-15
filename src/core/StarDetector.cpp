@@ -298,24 +298,50 @@ bool StarDetector::detect(const std::vector<uint16_t>& image, int width, int hei
 
         // 如果总数仍超过限制，使用轮询方式从各单元格选取，保证空间覆盖
         if (selectedCandidates.size() > options.maxCandidates) {
-            // 1. 每个单元格已按响应降序排列
-            // 2. 轮询选取：每轮从每个非空单元格取 1 个，直到达到 maxCandidates
-            std::vector<Candidate> roundRobin;
-            roundRobin.reserve(options.maxCandidates);
-            
-            std::vector<size_t> indices(grid.size(), 0);
-            bool progress = true;
-            while (roundRobin.size() < options.maxCandidates && progress) {
-                progress = false;
-                for (size_t i = 0; i < grid.size() && roundRobin.size() < options.maxCandidates; ++i) {
-                    if (indices[i] < grid[i].size()) {
-                        roundRobin.push_back(grid[i][indices[i]]);
-                        indices[i]++;
-                        progress = true;
+            // 1. 收集非空网格索引
+            std::vector<size_t> nonEmptyIndices;
+            nonEmptyIndices.reserve(grid.size());
+            for (size_t i = 0; i < grid.size(); ++i) {
+                if (!grid[i].empty()) {
+                    nonEmptyIndices.push_back(i);
+                }
+            }
+
+            // 2. 均匀步长采样：确保预算有限时仍能覆盖全图范围
+            // 例如 64 个非空格、预算 30：步长 ≈ 2，从每个间隔取一个
+            std::vector<Candidate> uniform;
+            uniform.reserve(options.maxCandidates);
+            size_t nonEmptyCount = nonEmptyIndices.size();
+            if (nonEmptyCount > 0) {
+                // 先按均匀步长取第一轮，确保空间覆盖
+                double step = static_cast<double>(nonEmptyCount) / options.maxCandidates;
+                for (size_t i = 0; i < options.maxCandidates && i < nonEmptyCount; ++i) {
+                    size_t idx = nonEmptyIndices[static_cast<size_t>(i * step)];
+                    if (!grid[idx].empty()) {
+                        uniform.push_back(grid[idx][0]); // 取该格最强候选
+                    }
+                }
+
+                // 如果还有剩余预算，用 round-robin 补充（跳过已取过的格）
+                if (uniform.size() < options.maxCandidates) {
+                    std::vector<size_t> indices(grid.size(), 0);
+                    for (size_t i = 0; i < nonEmptyCount; ++i) {
+                        indices[nonEmptyIndices[i]] = 1; // 标记已取过第一轮
+                    }
+                    bool progress = true;
+                    while (uniform.size() < options.maxCandidates && progress) {
+                        progress = false;
+                        for (size_t i = 0; i < grid.size() && uniform.size() < options.maxCandidates; ++i) {
+                            if (indices[i] < grid[i].size()) {
+                                uniform.push_back(grid[i][indices[i]]);
+                                indices[i]++;
+                                progress = true;
+                            }
+                        }
                     }
                 }
             }
-            selectedCandidates = std::move(roundRobin);
+            selectedCandidates = std::move(uniform);
         }
     } else {
         // 不按空间均衡：直接按响应排序后截断
