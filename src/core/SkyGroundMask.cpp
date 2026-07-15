@@ -226,7 +226,11 @@ void SkyGroundMask::computeStarDensity(const std::vector<uint16_t>& image, int w
 
     StarDetector detector;
     std::vector<StarPoint> stars;
-    detector.detect(image, w, h, stars, 5.0);
+    DetectionOptions densityOptions;
+    densityOptions.fitGaussian = false;
+    densityOptions.maxCandidates = 500;
+    densityOptions.maxStars = 500;
+    detector.detect(image, w, h, stars, densityOptions);
 
     const int blockSize = 50;
     int blockW = (w + blockSize - 1) / blockSize;

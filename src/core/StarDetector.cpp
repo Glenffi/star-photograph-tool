@@ -181,6 +181,14 @@ bool StarDetector::fit2DGaussian(const std::vector<uint16_t>& image, int w, int 
 bool StarDetector::detect(const std::vector<uint16_t>& image, int width, int height,
                           std::vector<StarPoint>& stars,
                           double thresholdSigma) {
+    DetectionOptions options;
+    options.thresholdSigma = thresholdSigma;
+    return detect(image, width, height, stars, options);
+}
+
+bool StarDetector::detect(const std::vector<uint16_t>& image, int width, int height,
+                          std::vector<StarPoint>& stars,
+                          const DetectionOptions& options) {
     stars.clear();
 
     if (image.empty() || width <= 0 || height <= 0) {
@@ -191,7 +199,7 @@ bool StarDetector::detect(const std::vector<uint16_t>& image, int width, int hei
     std::vector<float> blurred;
     gaussianBlur(image, width, height, blurred, 1.5f);
 
-    // 2. 估计背景中值和噪声（基于模糊图像，因为检测在 blurred 上进行）
+    // 2. 估计背景中值和噪声
     float bgNoise = 0.0f;
     float backgroundMedian = 0.0f;
     {
@@ -218,10 +226,16 @@ bool StarDetector::detect(const std::vector<uint16_t>& image, int width, int hei
         }
     }
     if (bgNoise < 0.5f) bgNoise = 0.5f;
-    float threshold = backgroundMedian + static_cast<float>(thresholdSigma) * bgNoise;
+    float threshold = backgroundMedian + static_cast<float>(options.thresholdSigma) * bgNoise;
 
-    // 3. 找局部最大值（3×3窗口）
-    std::vector<std::pair<int, int>> candidates;
+    // 3. 找局部最大值（3×3窗口），记录响应值
+    struct Candidate {
+        int x, y;
+        float response;
+    };
+    std::vector<Candidate> candidates;
+    candidates.reserve(8192);
+
     for (int y = 1; y < height - 1; ++y) {
         for (int x = 1; x < width - 1; ++x) {
             float val = blurred[y * width + x];
@@ -239,28 +253,98 @@ bool StarDetector::detect(const std::vector<uint16_t>& image, int width, int hei
             }
 
             if (isLocalMax) {
-                candidates.emplace_back(x, y);
+                candidates.push_back({x, y, val});
             }
         }
     }
 
-    // 4. 2D 高斯拟合（限制最多处理 5000 个候选，避免密集星场耗时失控）
-    const size_t maxCandidates = 5000;
-    size_t fitCount = std::min(candidates.size(), maxCandidates);
-    for (size_t i = 0; i < fitCount; ++i) {
-        const auto& [cx, cy] = candidates[i];
-        StarPoint star;
-        if (fit2DGaussian(image, width, height, cx, cy, 7, star)) {
-            if (star.fwhm > 0.5 && star.fwhm < 50.0 && star.flux > 0) {
-                stars.push_back(star);
+    // 4. 空间均衡筛选（如果启用）
+    std::vector<Candidate> selectedCandidates;
+    if (options.spatiallyBalanced && !candidates.empty()) {
+        // 按网格分桶，每格保留最强 N 个候选
+        int gridCols = options.gridCols;
+        int gridRows = options.gridRows;
+        if (gridCols < 2) gridCols = 2;
+        if (gridRows < 2) gridRows = 2;
+
+        double cellW = static_cast<double>(width) / gridCols;
+        double cellH = static_cast<double>(height) / gridRows;
+
+        std::vector<std::vector<Candidate>> grid(gridRows * gridCols);
+        for (const auto& c : candidates) {
+            int col = static_cast<int>(c.x / cellW);
+            int row = static_cast<int>(c.y / cellH);
+            if (col >= gridCols) col = gridCols - 1;
+            if (row >= gridRows) row = gridRows - 1;
+            if (col < 0) col = 0;
+            if (row < 0) row = 0;
+            grid[row * gridCols + col].push_back(c);
+        }
+
+        // 每格按响应排序取最强，确保空间覆盖
+        selectedCandidates.reserve(candidates.size());
+        for (auto& cell : grid) {
+            if (!cell.empty()) {
+                std::sort(cell.begin(), cell.end(), [](const Candidate& a, const Candidate& b) {
+                    return a.response > b.response;
+                });
+                // 每格最多取 10 个，避免单格垄断
+                size_t perCell = std::min<size_t>(cell.size(), 10);
+                for (size_t i = 0; i < perCell; ++i) {
+                    selectedCandidates.push_back(cell[i]);
+                }
             }
+        }
+
+        // 如果总数仍超过限制，按全局响应截断
+        if (selectedCandidates.size() > options.maxCandidates) {
+            std::sort(selectedCandidates.begin(), selectedCandidates.end(),
+                      [](const Candidate& a, const Candidate& b) {
+                return a.response > b.response;
+            });
+            selectedCandidates.resize(options.maxCandidates);
+        }
+    } else {
+        // 不按空间均衡：直接按响应排序后截断
+        std::sort(candidates.begin(), candidates.end(),
+                  [](const Candidate& a, const Candidate& b) {
+            return a.response > b.response;
+        });
+        size_t fitCount = std::min(candidates.size(), options.maxCandidates);
+        selectedCandidates.reserve(fitCount);
+        for (size_t i = 0; i < fitCount; ++i) {
+            selectedCandidates.push_back(candidates[i]);
         }
     }
 
-    // 按亮度排序
-    std::sort(stars.begin(), stars.end(), [](const StarPoint& a, const StarPoint& b) {
-        return a.flux > b.flux;
-    });
+    // 5. 2D 高斯拟合（如果启用）
+    if (options.fitGaussian) {
+        for (const auto& c : selectedCandidates) {
+            StarPoint star;
+            if (fit2DGaussian(image, width, height, c.x, c.y, 7, star)) {
+                if (star.fwhm > 0.5 && star.fwhm < 50.0 && star.flux > 0) {
+                    stars.push_back(star);
+                }
+            }
+        }
+
+        // 按亮度排序并截断
+        std::sort(stars.begin(), stars.end(), [](const StarPoint& a, const StarPoint& b) {
+            return a.flux > b.flux;
+        });
+        if (stars.size() > options.maxStars) {
+            stars.resize(options.maxStars);
+        }
+    } else {
+        // 不拟合：直接输出候选位置（用于低成本密度统计）
+        for (const auto& c : selectedCandidates) {
+            StarPoint star;
+            star.x = c.x;
+            star.y = c.y;
+            star.flux = c.response;
+            stars.push_back(star);
+        }
+    }
 
     return !stars.empty();
 }

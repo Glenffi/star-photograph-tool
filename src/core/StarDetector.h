@@ -13,6 +13,24 @@ struct StarPoint {
 };
 
 /**
+ * @brief 星点检测选项
+ *
+ * 不同用途需要不同的检测策略：
+ * - Alignment: 少量（~50）亮且空间均匀的星点，用于图像对齐
+ * - Reduction: 最多 5000 个高质量星点，用于缩星处理
+ * - Density: 低成本局部极大值统计，用于天地分离蒙版
+ */
+struct DetectionOptions {
+    size_t maxCandidates = 5000;  // 最大候选数量（高斯拟合前）
+    size_t maxStars = 5000;       // 最大输出星点数量
+    bool spatiallyBalanced = false; // 是否按网格均匀分布
+    int gridCols = 8;             // 空间均衡网格列数
+    int gridRows = 8;             // 空间均衡网格行数
+    bool fitGaussian = true;      // 是否执行 2D 高斯拟合
+    double thresholdSigma = 5.0;  // 检测阈值
+};
+
+/**
  * @brief 星点检测器
  *
  * 基于高斯模糊 + 局部最大值检测 + 2D 高斯拟合的星点检测。
@@ -30,9 +48,19 @@ public:
      * @param thresholdSigma  检测阈值（背景噪声的倍数，默认 5.0）
      * @return true 检测成功
      */
+    /**
+     * @brief 检测图像中的星点（默认选项，兼容旧接口）
+     */
     bool detect(const std::vector<uint16_t>& image, int width, int height,
                 std::vector<StarPoint>& stars,
                 double thresholdSigma = 5.0);
+
+    /**
+     * @brief 检测图像中的星点（带选项，支持不同用途）
+     */
+    bool detect(const std::vector<uint16_t>& image, int width, int height,
+                std::vector<StarPoint>& stars,
+                const DetectionOptions& options);
 
 private:
     void gaussianBlur(const std::vector<uint16_t>& src, int w, int h,

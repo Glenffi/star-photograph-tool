@@ -42,10 +42,13 @@ bool StarReducer::reduce(std::vector<uint16_t>& image, int width, int height, in
         originalLum[i] = static_cast<uint16_t>((r * 299 + g * 587 + b * 114) / 1000);
     }
 
-    // 2. 检测星点
+    // 2. 检测星点（缩星模式：最多 5000 个高质量星点）
     StarDetector detector;
     std::vector<StarPoint> stars;
-    if (!detector.detect(originalLum, width, height, stars, 5.0)) {
+    DetectionOptions reduceOptions;
+    reduceOptions.maxCandidates = 5000;
+    reduceOptions.maxStars = 5000;
+    if (!detector.detect(originalLum, width, height, stars, reduceOptions)) {
         return true;
     }
 
