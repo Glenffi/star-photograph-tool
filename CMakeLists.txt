@@ -86,6 +86,7 @@ endif()
 
 # 核心算法单独成库：GUI 与测试复用同一份实现，避免测试只覆盖复制代码。
 set(CORE_SOURCES
+    src/core/ImageBufferUtils.cpp
     src/core/RawImageLoader.cpp
     src/core/StarDetector.cpp
     src/core/SkyGroundMask.cpp
@@ -107,6 +108,7 @@ set(APP_SOURCES
 )
 
 set(CORE_HEADERS
+    src/core/ImageBufferUtils.h
     src/core/RawImageLoader.h
     src/core/StarDetector.h
     src/core/SkyGroundMask.h
@@ -147,14 +149,30 @@ target_link_libraries(StarProcessorCore PUBLIC
     ${TIFF_LIBRARY}
 )
 
+add_library(StarProcessorWorkers STATIC
+    src/workers/ProcessingWorker.cpp
+    src/workers/ProcessingWorker.h
+    src/workers/MaskPreviewWorker.cpp
+    src/workers/MaskPreviewWorker.h
+)
+target_include_directories(StarProcessorWorkers PUBLIC ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(StarProcessorWorkers PUBLIC StarProcessorCore Qt6::Core Qt6::Gui)
+
 add_executable(${PROJECT_NAME} ${APP_SOURCES} ${APP_HEADERS})
 target_include_directories(${PROJECT_NAME} PRIVATE ${CMAKE_SOURCE_DIR}/src)
-target_link_libraries(${PROJECT_NAME} PRIVATE StarProcessorCore Qt6::Widgets)
+target_link_libraries(${PROJECT_NAME} PRIVATE
+    StarProcessorWorkers
+    Qt6::Widgets
+)
 
 if(BUILD_TESTING)
     add_executable(StarProcessorCoreTests tests/CoreTests.cpp)
     target_link_libraries(StarProcessorCoreTests PRIVATE StarProcessorCore)
     add_test(NAME core_algorithms COMMAND StarProcessorCoreTests)
+
+    add_executable(StarProcessorWorkerTests tests/WorkerTests.cpp)
+    target_link_libraries(StarProcessorWorkerTests PRIVATE StarProcessorWorkers)
+    add_test(NAME worker_lifecycle COMMAND StarProcessorWorkerTests)
 endif()
 
 # macOS 特定设置

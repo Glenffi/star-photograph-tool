@@ -49,23 +49,29 @@ StarProcessor/
 ├── src/
 │   ├── main.cpp                 # 主入口、MainWindow 与后台处理编排
 │   ├── core/
+│   │   ├── ImageBufferUtils.h/cpp     # RGB 校验、亮度提取与通道转换
 │   │   ├── RawImageLoader.h/cpp       # RAW 文件加载与解码
 │   │   ├── ThumbnailGenerator.h/cpp   # 异步缩略图生成
 │   │   ├── StarDetector.h/cpp         # 星点检测与 2D 高斯拟合
 │   │   ├── ImageAligner.h/cpp         # 基于星点的图像对齐
 │   │   ├── StackingEngine.h/cpp       # 堆栈降噪（均值/中值/Kappa-Sigma/Winsorized）
-│   │   ├── StarReducer.h/cpp           # 缩星处理（星点检测 + 形态学腐蚀）
+│   │   ├── StarReducer.h/cpp          # 缩星处理（星点检测 + 形态学腐蚀）
 │   │   ├── ImageExporter.h/cpp        # 16-bit TIFF / PNG 8-bit 导出
 │   │   ├── AutoOptimizeEngine.h/cpp   # 自动优化：Dark Channel Prior 去雾 + Arcsinh 曲线拉伸
 │   │   └── PresetManager.h/cpp        # 内置预设与用户预设持久化
-│   └── ui/
-│       ├── ProjectPanel.h/cpp         # 左侧面板：文件列表
-│       ├── PreviewPanel.h/cpp         # 中央面板：图像预览
-│       ├── ParamsPanel.h/cpp          # 右侧面板：处理参数
-│       └── Toolbar.h/cpp              # 顶部工具栏
+│   ├── ui/
+│   │   ├── ProjectPanel.h/cpp         # 左侧面板：文件列表
+│   │   ├── PreviewPanel.h/cpp         # 中央面板：图像预览
+│   │   ├── ParamsPanel.h/cpp          # 右侧面板：处理参数
+│   │   └── Toolbar.h/cpp              # 顶部工具栏
+│   └── workers/
+│       ├── ProcessingWorker.h/cpp     # 正式处理管线后台执行
+│       └── MaskPreviewWorker.h/cpp    # 天地蒙版快速预览
 ├── cmake/
 │   └── Info.plist.in            # macOS Bundle 配置
-├── tests/CoreTests.cpp          # 核心算法与 TIFF ICC 回归测试
+├── tests/
+│   ├── CoreTests.cpp            # 核心算法与 TIFF ICC 回归测试
+│   └── WorkerTests.cpp          # 任务取消与失败状态测试
 ├── build.sh                     # 一键构建/测试脚本（macOS）
 ├── CMakeLists.txt               # CMake 构建配置
 └── README.md                    # 本文件

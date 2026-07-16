@@ -1,4 +1,5 @@
 #include "core/ImageAligner.h"
+#include "core/ImageBufferUtils.h"
 #include "core/ImageExporter.h"
 #include "core/RawImageLoader.h"
 #include "core/StackingEngine.h"
@@ -89,6 +90,36 @@ void testStacking() {
     check(!engine.stackWithMask(frames, {originals.front()}, 2, 2,
                                 StackingEngine::Average, 2.5, mask, result),
           "Mask stacking should reject mismatched frame counts");
+}
+
+void testImageBufferUtils() {
+    const std::vector<uint16_t> rgb = {
+        1000, 2000, 3000,
+        4000, 5000, 6000
+    };
+    ImageBufferUtils::RgbChannels channels;
+    check(ImageBufferUtils::splitRgb(rgb, 2, 1, channels),
+          "RGB channel split should accept an exact buffer");
+    check(channels.red == std::vector<uint16_t>({1000, 4000}) &&
+              channels.green == std::vector<uint16_t>({2000, 5000}) &&
+              channels.blue == std::vector<uint16_t>({3000, 6000}),
+          "RGB channel split should preserve channel order");
+
+    std::vector<uint16_t> merged;
+    check(ImageBufferUtils::mergeRgb(channels, 2, 1, merged) && merged == rgb,
+          "RGB split and merge should round-trip exactly");
+
+    std::vector<uint16_t> luminance;
+    check(ImageBufferUtils::extractLuminance(rgb, 2, 1, luminance),
+          "Luminance extraction should accept an exact buffer");
+    check(luminance == std::vector<uint16_t>({1815, 4815}),
+          "Luminance extraction should use the documented integer weights");
+
+    const std::vector<uint16_t> previous = {42};
+    luminance = previous;
+    check(!ImageBufferUtils::extractLuminance(rgb, 3, 1, luminance) &&
+              luminance == previous,
+          "A failed buffer conversion should leave its output unchanged");
 }
 
 void testTransformDirection() {
@@ -196,6 +227,7 @@ void testRawApiValidation() {
 int main(int argc, char* argv[]) {
     QCoreApplication application(argc, argv);
     testStacking();
+    testImageBufferUtils();
     testTransformDirection();
     testStarDetectionAndReduction();
     testTiffIccProfile();

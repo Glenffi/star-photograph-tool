@@ -25,519 +25,20 @@
 #include <QDragEnterEvent>
 #include <QDropEvent>
 #include <QMimeData>
-#include <QThread>
 #include <QProgressDialog>
 #include <QProgressBar>
 #include <QDateTime>
 #include <QDebug>
 #include <QSet>
-#include <QImage>
-#include <atomic>
-
-#include "core/SkyGroundMask.h"
-#include "core/StarReducer.h"
 #include "ui/ProjectPanel.h"
 #include "ui/PreviewPanel.h"
 #include "ui/ParamsPanel.h"
 #include "ui/Toolbar.h"
 
 #include "core/RawImageLoader.h"
-#include "core/StarDetector.h"
-#include "core/ImageAligner.h"
-#include "core/StackingEngine.h"
 #include "core/ImageExporter.h"
-#include "core/AutoOptimizeEngine.h"
-#include "core/PresetManager.h"
-
-/**
- * @brief 后台处理工作线程
- */
-class ProcessingWorker : public QThread {
-    Q_OBJECT
-
-public:
-    struct Params {
-        QString alignMethod = "star";
-        QString stackMethod = "average";
-        double kappaValue = 2.5;
-        bool dewarpEnabled = false;
-        int dewarpStrength = 30;
-        bool stretchEnabled = false;
-        bool starReduceEnabled = false;
-        int starReduceStrength = 50;
-        QString outputFormat = "tiff16";
-        QString outputPath;
-        bool skyGroundSepEnabled = false;
-        SkyGroundMask::Mode skyGroundMode = SkyGroundMask::AutoDetect;
-        QString userMaskPath;
-        int featherRadius = 20;
-    };
-
-    ProcessingWorker(const QStringList& files, const QString& refFrame, const Params& params, QObject* parent = nullptr)
-        : QThread(parent)
-        , m_files(files)
-        , m_refFrame(refFrame)
-        , m_params(params)
-    {}
-
-    // Called by the GUI thread only after QThread::finished. Moving avoids a
-    // second full-resolution RGB allocation at the end of processing.
-    std::vector<uint16_t> takeStackedData() { return std::move(m_stackedData); }
-    int stackedWidth() const { return m_width; }
-    int stackedHeight() const { return m_height; }
-    int stackedFrameCount() const { return m_frameCount; }
-    QString errorString() const { return m_errorString; }
-
-    void requestCancel() { m_cancelled.store(true); }
-
-signals:
-    void progress(int value); // 0-100
-    void stageMessage(const QString& msg);
-
-protected:
-    void run() override {
-        m_cancelled.store(false);
-        m_errorString.clear();
-        emit progress(0);
-
-        // Helper: extract luminance from RGB data
-        auto extractLuminance = [](const std::vector<uint16_t>& rgb, int w, int h) -> std::vector<uint16_t> {
-            std::vector<uint16_t> lum(w * h);
-            for (int i = 0; i < w * h; ++i) {
-                uint32_t r = rgb[i * 3 + 0];
-                uint32_t g = rgb[i * 3 + 1];
-                uint32_t b = rgb[i * 3 + 2];
-                lum[i] = static_cast<uint16_t>((r * 299 + g * 587 + b * 114) / 1000);
-            }
-            return lum;
-        };
-
-        // Helper: split RGB into separate channels
-        auto splitChannels = [](const std::vector<uint16_t>& rgb, int w, int h) {
-            std::vector<uint16_t> rch(w * h);
-            std::vector<uint16_t> gch(w * h);
-            std::vector<uint16_t> bch(w * h);
-            for (int i = 0; i < w * h; ++i) {
-                rch[i] = rgb[i * 3 + 0];
-                gch[i] = rgb[i * 3 + 1];
-                bch[i] = rgb[i * 3 + 2];
-            }
-            return std::make_tuple(std::move(rch), std::move(gch), std::move(bch));
-        };
-
-        // Helper: merge channels into RGB
-        auto mergeChannels = [](const std::vector<uint16_t>& rch,
-                                const std::vector<uint16_t>& gch,
-                                const std::vector<uint16_t>& bch, int w, int h) {
-            std::vector<uint16_t> rgb(w * h * 3);
-            for (int i = 0; i < w * h; ++i) {
-                rgb[i * 3 + 0] = rch[i];
-                rgb[i * 3 + 1] = gch[i];
-                rgb[i * 3 + 2] = bch[i];
-            }
-            return rgb;
-        };
-
-        // Helper: stack RGB images using per-channel stacking
-        auto stackRgb = [&](StackingEngine& stacker,
-                            const std::vector<std::vector<uint16_t>>& rgbImages,
-                            int w, int h,
-                            StackingEngine::Method method,
-                            double kappa,
-                            std::vector<uint16_t>& outRgb) -> bool {
-            int n = static_cast<int>(rgbImages.size());
-            if (n == 0) return false;
-
-            // Split all images into channels
-            std::vector<std::vector<uint16_t>> rImages, gImages, bImages;
-            rImages.reserve(n);
-            gImages.reserve(n);
-            bImages.reserve(n);
-            for (const auto& rgb : rgbImages) {
-                auto [rch, gch, bch] = splitChannels(rgb, w, h);
-                rImages.push_back(std::move(rch));
-                gImages.push_back(std::move(gch));
-                bImages.push_back(std::move(bch));
-            }
-
-            std::vector<uint16_t> rStack, gStack, bStack;
-            // applyTransform() pads out-of-frame pixels with zero. Ignore those
-            // zeros here; ordinary stack() calls keep real black pixels valid.
-            if (!stacker.stack(rImages, w, h, method, kappa, rStack, true)) return false;
-            if (!stacker.stack(gImages, w, h, method, kappa, gStack, true)) return false;
-            if (!stacker.stack(bImages, w, h, method, kappa, bStack, true)) return false;
-
-            outRgb = mergeChannels(rStack, gStack, bStack, w, h);
-            return true;
-        };
-
-        // Helper: stackWithMask RGB images using per-channel stacking
-        auto stackWithMaskRgb = [&](StackingEngine& stacker,
-                                    const std::vector<std::vector<uint16_t>>& alignedRgb,
-                                    const std::vector<std::vector<uint16_t>>& originalRgb,
-                                    int w, int h,
-                                    StackingEngine::Method method,
-                                    double kappa,
-                                    const std::vector<uint8_t>& mask,
-                                    std::vector<uint16_t>& outRgb) -> bool {
-            int n = static_cast<int>(alignedRgb.size());
-            if (n == 0) return false;
-
-            // Split aligned images into channels
-            std::vector<std::vector<uint16_t>> rAligned, gAligned, bAligned;
-            std::vector<std::vector<uint16_t>> rOriginal, gOriginal, bOriginal;
-            rAligned.reserve(n); gAligned.reserve(n); bAligned.reserve(n);
-            rOriginal.reserve(n); gOriginal.reserve(n); bOriginal.reserve(n);
-
-            for (int i = 0; i < n; ++i) {
-                auto [ra, ga, ba] = splitChannels(alignedRgb[i], w, h);
-                rAligned.push_back(std::move(ra));
-                gAligned.push_back(std::move(ga));
-                bAligned.push_back(std::move(ba));
-
-                auto [ro, go, bo] = splitChannels(originalRgb[i], w, h);
-                rOriginal.push_back(std::move(ro));
-                gOriginal.push_back(std::move(go));
-                bOriginal.push_back(std::move(bo));
-            }
-
-            std::vector<uint16_t> rStack, gStack, bStack;
-            if (!stacker.stackWithMask(rAligned, rOriginal, w, h, method, kappa, mask, rStack)) return false;
-            if (!stacker.stackWithMask(gAligned, gOriginal, w, h, method, kappa, mask, gStack)) return false;
-            if (!stacker.stackWithMask(bAligned, bOriginal, w, h, method, kappa, mask, bStack)) return false;
-
-            outRgb = mergeChannels(rStack, gStack, bStack, w, h);
-            return true;
-        };
-
-        // 1. 加载所有RAW文件并 demosaic 到 RGB
-        emit stageMessage("加载 RAW 文件...");
-        std::vector<RawImageLoader::ImageData> loadedImages;
-        std::vector<std::vector<uint16_t>> loadedRgb; // demosaiced RGB
-        std::vector<QString> loadedPaths;
-        RawImageLoader loader;
-
-        for (int i = 0; i < m_files.size(); ++i) {
-            if (m_cancelled.load()) return;
-
-            RawImageLoader::ImageData img;
-            if (!loader.loadRaw(m_files[i].toStdString(), img)) {
-                m_errorString = QString("无法加载: %1").arg(QFileInfo(m_files[i]).fileName());
-                return;
-            }
-
-            // loadRaw() 现在直接输出高质量 RGB（AHD demosaic + 相机 WB + 颜色矩阵）
-            std::vector<uint16_t> rgb = std::move(img.data);
-            img.data.clear();
-            img.data.shrink_to_fit();
-            loadedImages.push_back(std::move(img));
-            loadedRgb.push_back(std::move(rgb));
-            loadedPaths.push_back(m_files[i]);
-
-            int p = static_cast<int>((i + 1) * 10.0 / m_files.size());
-            emit progress(p);
-        }
-
-        if (loadedImages.empty()) {
-            m_errorString = "没有成功加载任何图像";
-            return;
-        }
-
-        // 确定参考帧索引
-        std::size_t refIdx = 0;
-        for (std::size_t i = 0; i < loadedPaths.size(); ++i) {
-            if (loadedPaths[i] == m_refFrame) {
-                refIdx = i;
-                break;
-            }
-        }
-
-        const auto& refImg = loadedImages[refIdx];
-        int w = refImg.width;
-        int h = refImg.height;
-        m_width = w;
-        m_height = h;
-
-        std::vector<uint16_t> refLum = extractLuminance(loadedRgb[refIdx], w, h);
-
-        // 2. 星点检测（参考帧亮度通道）
-        emit stageMessage("参考帧星点检测...");
-        StarDetector detector;
-        std::vector<StarPoint> refStars;
-        DetectionOptions alignOptions;
-        alignOptions.spatiallyBalanced = true;
-        alignOptions.maxCandidates = 30;
-        alignOptions.maxStars = 30;
-        if (!detector.detect(refLum, w, h, refStars, alignOptions)) {
-            m_errorString = "参考帧星点检测失败";
-            return;
-        }
-        emit progress(20);
-
-        // 3. 对齐所有帧到参考帧
-        emit stageMessage("对齐图像...");
-        ImageAligner aligner;
-        std::vector<std::vector<uint16_t>> alignedRgb;
-        std::vector<std::vector<uint16_t>> originalForStackRgb; // 仅在天地分离时构建
-        alignedRgb.push_back(loadedRgb[refIdx]); // 参考帧不需要变换
-        if (m_params.skyGroundSepEnabled) {
-            originalForStackRgb.push_back(loadedRgb[refIdx]); // 参考帧的原始数据
-        }
-
-        for (std::size_t i = 0; i < loadedImages.size(); ++i) {
-            if (m_cancelled.load()) return;
-            if (i == refIdx) continue;
-
-            const auto& srcImg = loadedImages[i];
-            if (srcImg.width != w || srcImg.height != h) {
-                m_errorString = QString("图像尺寸不匹配: %1").arg(QFileInfo(loadedPaths[i]).fileName());
-                return;
-            }
-
-            // Extract luminance for star detection
-            std::vector<uint16_t> srcLum = extractLuminance(loadedRgb[i], w, h);
-
-            std::vector<StarPoint> srcStars;
-            DetectionOptions alignOptions;
-            alignOptions.spatiallyBalanced = true;
-            alignOptions.maxCandidates = 30;
-            alignOptions.maxStars = 30;
-            if (!detector.detect(srcLum, w, h, srcStars, alignOptions)) {
-                qWarning() << "星点检测失败，跳过:" << loadedPaths[i];
-                continue;
-            }
-
-            AlignmentTransform transform;
-            if (!aligner.align(refStars, srcStars, transform)) {
-                qWarning() << "对齐失败，跳过:" << loadedPaths[i];
-                continue;
-            }
-
-            // Apply transform per-channel
-            auto [srcR, srcG, srcB] = splitChannels(loadedRgb[i], w, h);
-            std::vector<uint16_t> alignedR, alignedG, alignedB;
-            if (!aligner.applyTransform(srcR, w, h, transform, alignedR) ||
-                !aligner.applyTransform(srcG, w, h, transform, alignedG) ||
-                !aligner.applyTransform(srcB, w, h, transform, alignedB)) {
-                qWarning() << "变换应用失败，跳过:" << loadedPaths[i];
-                continue;
-            }
-
-            alignedRgb.push_back(mergeChannels(alignedR, alignedG, alignedB, w, h));
-            if (m_params.skyGroundSepEnabled) {
-                originalForStackRgb.push_back(loadedRgb[i]); // 同步压入对应原始帧
-            }
-
-            int p = 20 + static_cast<int>((i + 1) * 30.0 / loadedImages.size());
-            emit progress(p);
-        }
-
-        if (alignedRgb.size() < 2) {
-            m_errorString = "对齐后可用帧数不足（<2），无法堆栈";
-            return;
-        }
-        emit progress(55);
-
-        // 4. 堆栈
-        emit stageMessage("堆栈中...");
-        StackingEngine stacker;
-        StackingEngine::Method method = StackingEngine::Average;
-        if (m_params.stackMethod == "median") method = StackingEngine::Median;
-        else if (m_params.stackMethod == "average") method = StackingEngine::Average;
-        else if (m_params.stackMethod == "kappa-sigma") method = StackingEngine::KappaSigma;
-        else if (m_params.stackMethod == "winsorized") method = StackingEngine::Winsorized;
-
-        std::vector<uint16_t> resultRgb;
-        if (m_params.skyGroundSepEnabled) {
-            // 天地分离堆栈
-            emit stageMessage("生成天地蒙版...");
-            std::vector<uint8_t> mask;
-            if (m_params.skyGroundMode == SkyGroundMask::AutoDetect) {
-                // 用参考帧亮度生成蒙版
-                if (!SkyGroundMask::autoDetect(refLum, w, h, mask, m_params.featherRadius)) {
-                    m_errorString = "天地蒙版自动检测失败";
-                    return;
-                }
-            } else {
-                if (!SkyGroundMask::loadUserMask(m_params.userMaskPath.toStdString(), w, h, mask, m_params.featherRadius)) {
-                    m_errorString = "无法加载用户蒙版";
-                    return;
-                }
-                // loadUserMask 已内部处理羽化，此处无需重复调用
-            }
-
-            emit stageMessage("天地分离堆栈...");
-            if (!stackWithMaskRgb(stacker, alignedRgb, originalForStackRgb, w, h, method, m_params.kappaValue, mask, resultRgb)) {
-                m_errorString = "天地分离堆栈失败";
-                return;
-            }
-        } else {
-            // 全图堆栈
-            if (!stackRgb(stacker, alignedRgb, w, h, method, m_params.kappaValue, resultRgb)) {
-                m_errorString = "堆栈失败";
-                return;
-            }
-        }
-        m_frameCount = static_cast<int>(alignedRgb.size());
-        emit progress(80);
-
-        // 5. 自动优化（如果启用）—— 对 RGB 每个通道分别处理
-        if (m_params.dewarpEnabled || m_params.stretchEnabled) {
-            emit stageMessage("自动优化...");
-            auto [rCh, gCh, bCh] = splitChannels(resultRgb, w, h);
-
-            if (m_params.dewarpEnabled) {
-                std::vector<uint16_t> temp;
-                if (AutoOptimizeEngine::dehaze(rCh, w, h, m_params.dewarpStrength, temp)) rCh = std::move(temp);
-                if (AutoOptimizeEngine::dehaze(gCh, w, h, m_params.dewarpStrength, temp)) gCh = std::move(temp);
-                if (AutoOptimizeEngine::dehaze(bCh, w, h, m_params.dewarpStrength, temp)) bCh = std::move(temp);
-            }
-
-            if (m_params.stretchEnabled) {
-                std::vector<uint16_t> temp;
-                if (AutoOptimizeEngine::stretchCurve(rCh, w, h, temp)) rCh = std::move(temp);
-                if (AutoOptimizeEngine::stretchCurve(gCh, w, h, temp)) gCh = std::move(temp);
-                if (AutoOptimizeEngine::stretchCurve(bCh, w, h, temp)) bCh = std::move(temp);
-            }
-
-            resultRgb = mergeChannels(rCh, gCh, bCh, w, h);
-            emit progress(90);
-        }
-
-        // 6. 缩星（如果启用）—— 在自动优化之后、导出之前
-        if (m_params.starReduceEnabled && m_params.starReduceStrength > 0) {
-            emit stageMessage("缩星处理...");
-            if (!StarReducer::reduce(resultRgb, w, h, m_params.starReduceStrength)) {
-                qWarning() << "缩星处理失败，继续导出原图";
-            }
-            emit progress(95);
-        }
-
-        // 回写结果到 m_stackedData
-        m_stackedData = std::move(resultRgb);
-
-        // 7. 导出（根据参数）
-        emit stageMessage("导出结果...");
-        QString outFileName = QDateTime::currentDateTime().toString("yyyyMMdd_hhmmss") + "_stacked";
-        QString outPath = m_params.outputPath;
-        if (outPath.isEmpty()) outPath = QDir::homePath() + "/StarProcessor/Output";
-        QDir().mkpath(outPath);
-
-        ImageExporter::Format fmt = ImageExporter::Tiff16;
-        QString outExt = ".tiff";
-        if (m_params.outputFormat == "png8") {
-            fmt = ImageExporter::Png8;
-            outExt = ".png";
-        }
-
-        QString outFile = outPath + "/" + outFileName + outExt;
-        if (!ImageExporter::exportRgb16(m_stackedData, w, h, outFile.toStdString(), fmt)) {
-            m_errorString = "导出失败";
-            return;
-        }
-        emit progress(100);
-        emit stageMessage("处理完成");
-    }
-
-private:
-    QStringList m_files;
-    QString m_refFrame;
-    Params m_params;
-    std::vector<uint16_t> m_stackedData;
-    int m_width = 0;
-    int m_height = 0;
-    int m_frameCount = 0;
-    QString m_errorString;
-    std::atomic<bool> m_cancelled{false};
-};
-
-/**
- * @brief 蒙版预览后台工作线程
- */
-class MaskPreviewWorker : public QThread {
-    Q_OBJECT
-public:
-    MaskPreviewWorker(const QString& filePath, int featherRadius, QObject* parent = nullptr)
-        : QThread(parent), m_filePath(filePath), m_featherRadius(featherRadius) {}
-
-    std::vector<uint8_t> takeMask() { return std::move(m_mask); }
-    int width() const { return m_width; }
-    int height() const { return m_height; }
-    QString errorString() const { return m_error; }
-
-protected:
-    void run() override {
-        RawImageLoader loader;
-        RawImageLoader::PreviewData preview;
-        RawImageLoader::Metadata metadata;
-        constexpr int kPreviewLongSide = 2400;
-        if (!loader.loadPreview(m_filePath.toStdString(), kPreviewLongSide,
-                                preview, &metadata)) {
-            m_error = "无法加载图像";
-            return;
-        }
-        if (isInterruptionRequested()) return;
-
-        QImage image;
-        if (preview.encoding == RawImageLoader::PreviewData::Encoding::Jpeg) {
-            image = QImage::fromData(preview.bytes.data(),
-                                     static_cast<int>(preview.bytes.size()), "JPEG");
-        } else if (preview.width > 0 && preview.height > 0) {
-            QImage borrowed(preview.bytes.data(), preview.width, preview.height,
-                            preview.width * 3, QImage::Format_RGB888);
-            image = borrowed.copy();
-        }
-        if (image.isNull()) {
-            m_error = "RAW 预览数据无效";
-            return;
-        }
-        if (std::max(image.width(), image.height()) > kPreviewLongSide) {
-            image = image.scaled(kPreviewLongSide, kPreviewLongSide,
-                                 Qt::KeepAspectRatio, Qt::SmoothTransformation);
-        }
-        image = image.convertToFormat(QImage::Format_RGB888);
-
-        // Preview detection needs spatial structure, not processing-grade AHD.
-        // Expand 8-bit luminance to 16-bit so SkyGroundMask keeps one contract.
-        const int previewWidth = image.width();
-        const int previewHeight = image.height();
-        std::vector<uint16_t> lum(static_cast<size_t>(previewWidth) * previewHeight);
-        for (int y = 0; y < previewHeight; ++y) {
-            const uchar* row = image.constScanLine(y);
-            for (int x = 0; x < previewWidth; ++x) {
-                const uint32_t r = row[x * 3];
-                const uint32_t g = row[x * 3 + 1];
-                const uint32_t b = row[x * 3 + 2];
-                lum[static_cast<size_t>(y) * previewWidth + x] =
-                    static_cast<uint16_t>(((r * 299 + g * 587 + b * 114) / 1000) * 257);
-            }
-        }
-
-        if (isInterruptionRequested()) return;
-        const int fullLongSide = std::max(metadata.width, metadata.height);
-        const double previewScale = fullLongSide > 0
-            ? static_cast<double>(std::max(previewWidth, previewHeight)) / fullLongSide
-            : 1.0;
-        const int previewFeather = std::max(0, qRound(m_featherRadius * previewScale));
-        if (!SkyGroundMask::autoDetect(lum, previewWidth, previewHeight,
-                                       m_mask, previewFeather)) {
-            m_error = "地景检测失败";
-            return;
-        }
-        if (isInterruptionRequested()) return;
-        // autoDetect 已在小图上完成羽化并 upscale，此处不再重复全分辨率羽化
-        m_width = previewWidth;
-        m_height = previewHeight;
-    }
-
-private:
-    QString m_filePath;
-    int m_featherRadius;
-    std::vector<uint8_t> m_mask;
-    int m_width = 0;
-    int m_height = 0;
-    QString m_error;
-};
+#include "workers/MaskPreviewWorker.h"
+#include "workers/ProcessingWorker.h"
 
 class MainWindow : public QMainWindow {
     Q_OBJECT
@@ -1012,6 +513,11 @@ private slots:
     }
 
     void onProcessClicked() {
+        if (m_worker && m_worker->isRunning()) {
+            statusBar()->showMessage("已有处理任务正在运行", 3000);
+            return;
+        }
+
         // 1. 收集文件
         auto files = m_projectPanel->includedFilePaths();
         if (files.size() < 2) {
@@ -1031,7 +537,6 @@ private slots:
 
         // 2. 构建参数
         ProcessingWorker::Params params;
-        params.alignMethod = m_paramsPanel->alignMethod();
         params.stackMethod = m_paramsPanel->stackMethod();
         params.kappaValue = m_paramsPanel->kappaValue();
         params.dewarpEnabled = m_paramsPanel->dewarpEnabled();
@@ -1063,20 +568,23 @@ private slots:
         );
 
         // 4. 创建后台线程
-        m_worker = new ProcessingWorker(files, refFrame, params, this);
-        connect(m_worker, &ProcessingWorker::progress, dialog, &QProgressDialog::setValue);
-        connect(m_worker, &ProcessingWorker::stageMessage, dialog, [dialog](const QString& msg) {
+        auto* worker = new ProcessingWorker(files, refFrame, params, this);
+        m_worker = worker;
+        connect(worker, &ProcessingWorker::progress, dialog, &QProgressDialog::setValue);
+        connect(worker, &ProcessingWorker::stageMessage, dialog, [dialog](const QString& msg) {
             dialog->setLabelText(msg);
         });
-        connect(m_worker, &ProcessingWorker::finished, this, [this, dialog]() {
+        connect(worker, &ProcessingWorker::finished, this, [this, dialog, worker]() {
             dialog->close();
             dialog->deleteLater();
-            if (m_worker->errorString().isEmpty()) {
+            if (worker->wasCancelled()) {
+                statusBar()->showMessage("处理已取消", 3000);
+            } else if (worker->errorString().isEmpty()) {
                 // 成功：缓存堆栈结果
-                m_cachedStackedData = m_worker->takeStackedData();
-                m_cachedWidth = m_worker->stackedWidth();
-                m_cachedHeight = m_worker->stackedHeight();
-                m_cachedFrameCount = m_worker->stackedFrameCount();
+                m_cachedStackedData = worker->takeStackedData();
+                m_cachedWidth = worker->stackedWidth();
+                m_cachedHeight = worker->stackedHeight();
+                m_cachedFrameCount = worker->stackedFrameCount();
 
                 // 自动保存到缓存目录
                 QSettings settings("StarProcessor", "App");
@@ -1099,11 +607,11 @@ private slots:
                     5000
                 );
             } else {
-                QMessageBox::warning(this, "处理失败", m_worker->errorString());
+                QMessageBox::warning(this, "处理失败", worker->errorString());
                 statusBar()->showMessage("处理失败", 3000);
             }
-            m_worker->deleteLater();
-            m_worker = nullptr;
+            worker->deleteLater();
+            if (m_worker == worker) m_worker = nullptr;
         });
         connect(dialog, &QProgressDialog::canceled, this, [this]() {
             if (m_worker) {
@@ -1112,7 +620,7 @@ private slots:
             }
         });
 
-        m_worker->start();
+        worker->start();
     }
 
     void onExportClicked() {
