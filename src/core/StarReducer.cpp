@@ -5,33 +5,22 @@
 #include <limits>
 
 bool StarReducer::reduce(std::vector<uint16_t>& image, int width, int height, int strength) {
-    // 参数校验
-    if (image.empty() || width <= 0 || height <= 0) {
-        return true;
-    }
-    if (strength <= 0) {
-        return true;
-    }
-    if (strength > 100) {
-        strength = 100;
-    }
-
-    // 验证数据长度
-    const size_t expectedSize = static_cast<size_t>(width) * static_cast<size_t>(height) * 3;
-    if (image.size() != expectedSize) {
-        return false;
-    }
-
-    // 检查 width * height 乘法溢出
-    if (width > INT_MAX / height) {
-        return false;
-    }
-    // 进一步限制到合理范围
-    if (width > 65536 || height > 65536) {
+    if (width <= 0 || height <= 0 || width > 65536 || height > 65536 ||
+        width > INT_MAX / height) {
         return false;
     }
 
     const int pixelCount = width * height;
+    const size_t expectedSize = static_cast<size_t>(pixelCount) * 3;
+    if (image.size() != expectedSize) {
+        return false;
+    }
+
+    // Zero strength is a valid no-op. Negative input is outside the documented
+    // range and is rejected instead of silently hiding a caller bug.
+    if (strength < 0) return false;
+    if (strength == 0) return true;
+    strength = std::min(strength, 100);
 
     // 1. 从 RGB 提取亮度通道
     std::vector<uint16_t> originalLum(pixelCount);

@@ -31,6 +31,7 @@
 #include <QDateTime>
 #include <QDebug>
 #include <QSet>
+#include <QImage>
 #include <atomic>
 
 #include "core/SkyGroundMask.h"
@@ -79,7 +80,9 @@ public:
         , m_params(params)
     {}
 
-    std::vector<uint16_t> stackedData() const { return m_stackedData; }
+    // Called by the GUI thread only after QThread::finished. Moving avoids a
+    // second full-resolution RGB allocation at the end of processing.
+    std::vector<uint16_t> takeStackedData() { return std::move(m_stackedData); }
     int stackedWidth() const { return m_width; }
     int stackedHeight() const { return m_height; }
     int stackedFrameCount() const { return m_frameCount; }
@@ -158,9 +161,11 @@ protected:
             }
 
             std::vector<uint16_t> rStack, gStack, bStack;
-            if (!stacker.stack(rImages, w, h, method, kappa, rStack)) return false;
-            if (!stacker.stack(gImages, w, h, method, kappa, gStack)) return false;
-            if (!stacker.stack(bImages, w, h, method, kappa, bStack)) return false;
+            // applyTransform() pads out-of-frame pixels with zero. Ignore those
+            // zeros here; ordinary stack() calls keep real black pixels valid.
+            if (!stacker.stack(rImages, w, h, method, kappa, rStack, true)) return false;
+            if (!stacker.stack(gImages, w, h, method, kappa, gStack, true)) return false;
+            if (!stacker.stack(bImages, w, h, method, kappa, bStack, true)) return false;
 
             outRgb = mergeChannels(rStack, gStack, bStack, w, h);
             return true;
@@ -455,7 +460,7 @@ public:
     MaskPreviewWorker(const QString& filePath, int featherRadius, QObject* parent = nullptr)
         : QThread(parent), m_filePath(filePath), m_featherRadius(featherRadius) {}
 
-    std::vector<uint8_t> mask() const { return m_mask; }
+    std::vector<uint8_t> takeMask() { return std::move(m_mask); }
     int width() const { return m_width; }
     int height() const { return m_height; }
     QString errorString() const { return m_error; }
@@ -463,33 +468,66 @@ public:
 protected:
     void run() override {
         RawImageLoader loader;
-        RawImageLoader::ImageData img;
-        if (!loader.loadRaw(m_filePath.toStdString(), img)) {
+        RawImageLoader::PreviewData preview;
+        RawImageLoader::Metadata metadata;
+        constexpr int kPreviewLongSide = 2400;
+        if (!loader.loadPreview(m_filePath.toStdString(), kPreviewLongSide,
+                                preview, &metadata)) {
             m_error = "无法加载图像";
             return;
         }
         if (isInterruptionRequested()) return;
 
-        // loadRaw() 现在直接输出 RGB，无需额外 demosaic
+        QImage image;
+        if (preview.encoding == RawImageLoader::PreviewData::Encoding::Jpeg) {
+            image = QImage::fromData(preview.bytes.data(),
+                                     static_cast<int>(preview.bytes.size()), "JPEG");
+        } else if (preview.width > 0 && preview.height > 0) {
+            QImage borrowed(preview.bytes.data(), preview.width, preview.height,
+                            preview.width * 3, QImage::Format_RGB888);
+            image = borrowed.copy();
+        }
+        if (image.isNull()) {
+            m_error = "RAW 预览数据无效";
+            return;
+        }
+        if (std::max(image.width(), image.height()) > kPreviewLongSide) {
+            image = image.scaled(kPreviewLongSide, kPreviewLongSide,
+                                 Qt::KeepAspectRatio, Qt::SmoothTransformation);
+        }
+        image = image.convertToFormat(QImage::Format_RGB888);
 
-        // Extract luminance for detection
-        std::vector<uint16_t> lum(img.width * img.height);
-        for (int i = 0; i < img.width * img.height; ++i) {
-            uint32_t r = img.data[i * 3 + 0];
-            uint32_t g = img.data[i * 3 + 1];
-            uint32_t b = img.data[i * 3 + 2];
-            lum[i] = static_cast<uint16_t>((r * 299 + g * 587 + b * 114) / 1000);
+        // Preview detection needs spatial structure, not processing-grade AHD.
+        // Expand 8-bit luminance to 16-bit so SkyGroundMask keeps one contract.
+        const int previewWidth = image.width();
+        const int previewHeight = image.height();
+        std::vector<uint16_t> lum(static_cast<size_t>(previewWidth) * previewHeight);
+        for (int y = 0; y < previewHeight; ++y) {
+            const uchar* row = image.constScanLine(y);
+            for (int x = 0; x < previewWidth; ++x) {
+                const uint32_t r = row[x * 3];
+                const uint32_t g = row[x * 3 + 1];
+                const uint32_t b = row[x * 3 + 2];
+                lum[static_cast<size_t>(y) * previewWidth + x] =
+                    static_cast<uint16_t>(((r * 299 + g * 587 + b * 114) / 1000) * 257);
+            }
         }
 
         if (isInterruptionRequested()) return;
-        if (!SkyGroundMask::autoDetect(lum, img.width, img.height, m_mask, m_featherRadius)) {
+        const int fullLongSide = std::max(metadata.width, metadata.height);
+        const double previewScale = fullLongSide > 0
+            ? static_cast<double>(std::max(previewWidth, previewHeight)) / fullLongSide
+            : 1.0;
+        const int previewFeather = std::max(0, qRound(m_featherRadius * previewScale));
+        if (!SkyGroundMask::autoDetect(lum, previewWidth, previewHeight,
+                                       m_mask, previewFeather)) {
             m_error = "地景检测失败";
             return;
         }
         if (isInterruptionRequested()) return;
         // autoDetect 已在小图上完成羽化并 upscale，此处不再重复全分辨率羽化
-        m_width = img.width;
-        m_height = img.height;
+        m_width = previewWidth;
+        m_height = previewHeight;
     }
 
 private:
@@ -866,7 +904,7 @@ private:
                 if (worker->errorString().isEmpty()) {
                     // 只处理最新 worker 的结果
                     if (worker == m_maskPreviewWorker) {
-                        m_previewPanel->setMaskOverlay(worker->mask(),
+                        m_previewPanel->setMaskOverlay(worker->takeMask(),
                                                         worker->width(),
                                                         worker->height());
                         statusBar()->showMessage("地景检测完成，蓝色=天空，绿色=地景", 5000);
@@ -932,8 +970,8 @@ private slots:
 
     void onViewMetadata(const QString& filePath) {
         RawImageLoader loader;
-        RawImageLoader::ImageData imageData;
-        if (!loader.loadRaw(filePath.toStdString(), imageData)) {
+        RawImageLoader::Metadata metadata;
+        if (!loader.loadMetadata(filePath.toStdString(), metadata)) {
             QMessageBox::warning(this, "元数据", "无法加载文件元数据");
             return;
         }
@@ -947,14 +985,14 @@ private slots:
             "<b>尺寸：</b>%7×%8<br>"
             "<b>时间戳：</b>%9"
         ).arg(filePath)
-         .arg(QString::fromStdString(imageData.cameraModel))
-         .arg(imageData.iso)
-         .arg(imageData.exposureTime > 0 ? QString("1/%1s").arg(qRound(1.0 / imageData.exposureTime)) : "—")
-         .arg(imageData.aperture > 0 ? QString("f/%1").arg(imageData.aperture, 0, 'f', 1) : "—")
-         .arg(imageData.focalLength)
-         .arg(imageData.width)
-         .arg(imageData.height)
-         .arg(QString::fromStdString(imageData.timestamp));
+         .arg(QString::fromStdString(metadata.cameraModel))
+         .arg(metadata.iso)
+         .arg(metadata.exposureTime > 0 ? QString("1/%1s").arg(qRound(1.0 / metadata.exposureTime)) : "—")
+         .arg(metadata.aperture > 0 ? QString("f/%1").arg(metadata.aperture, 0, 'f', 1) : "—")
+         .arg(metadata.focalLength)
+         .arg(metadata.width)
+         .arg(metadata.height)
+         .arg(QString::fromStdString(metadata.timestamp));
         QMessageBox::information(this, "图像元数据", info);
     }
 
@@ -1035,13 +1073,15 @@ private slots:
             dialog->deleteLater();
             if (m_worker->errorString().isEmpty()) {
                 // 成功：缓存堆栈结果
-                m_cachedStackedData = m_worker->stackedData();
+                m_cachedStackedData = m_worker->takeStackedData();
                 m_cachedWidth = m_worker->stackedWidth();
                 m_cachedHeight = m_worker->stackedHeight();
                 m_cachedFrameCount = m_worker->stackedFrameCount();
 
                 // 自动保存到缓存目录
-                QString cacheDir = QDir::homePath() + "/StarProcessor/Cache";
+                QSettings settings("StarProcessor", "App");
+                QString cacheDir = settings.value(
+                    "cacheDir", QDir::homePath() + "/StarProcessor/Cache").toString();
                 QDir().mkpath(cacheDir);
                 QString cacheFile = cacheDir + "/" + QDateTime::currentDateTime().toString("yyyyMMdd_hhmmss") + "_cached.tiff";
                 if (!ImageExporter::exportRgb16(m_cachedStackedData, m_cachedWidth, m_cachedHeight, cacheFile.toStdString())) {
@@ -1107,7 +1147,7 @@ private slots:
     void onSettingsClicked() {
         auto* dialog = new QDialog(this);
         dialog->setWindowTitle("设置");
-        dialog->setFixedSize(480, 320);
+        dialog->setFixedSize(480, 240);
         dialog->setStyleSheet(
             "QDialog { background-color: #161B22; color: #E6EDF3; }"
             "QLabel { color: #C9D1D9; background-color: transparent; }"
@@ -1163,28 +1203,6 @@ private slots:
         cacheRow->addWidget(cacheBtn);
         layout->addLayout(cacheRow);
 
-        // 最大内存使用
-        auto* memRow = new QHBoxLayout();
-        auto* memLabel = new QLabel("最大内存:", dialog);
-        auto* memCombo = new QComboBox(dialog);
-        memCombo->addItems({"2 GB", "4 GB", "8 GB", "16 GB", "自动"});
-        memCombo->setCurrentIndex(settings.value("maxMemory", 2).toInt());
-        memRow->addWidget(memLabel);
-        memRow->addWidget(memCombo);
-        memRow->addStretch();
-        layout->addLayout(memRow);
-
-        // 主题
-        auto* themeRow = new QHBoxLayout();
-        auto* themeLabel = new QLabel("主题:", dialog);
-        auto* themeCombo = new QComboBox(dialog);
-        themeCombo->addItems({"深色（默认）", "浅色", "跟随系统"});
-        themeCombo->setCurrentIndex(settings.value("theme", 0).toInt());
-        themeRow->addWidget(themeLabel);
-        themeRow->addWidget(themeCombo);
-        themeRow->addStretch();
-        layout->addLayout(themeRow);
-
         layout->addStretch();
 
         // 底部按钮
@@ -1196,12 +1214,10 @@ private slots:
             "  font-weight: bold; border: none; border-radius: 4px; padding: 6px 24px; }"
             "QPushButton:hover { background-color: #F5C518; }"
         );
-        connect(okBtn, &QPushButton::clicked, dialog, [this, dialog, outDirEdit, cacheEdit, memCombo, themeCombo]() {
+        connect(okBtn, &QPushButton::clicked, dialog, [this, dialog, outDirEdit, cacheEdit]() {
             QSettings s("StarProcessor", "App");
             s.setValue("outputPath", outDirEdit->text());
             s.setValue("cacheDir", cacheEdit->text());
-            s.setValue("maxMemory", memCombo->currentIndex());
-            s.setValue("theme", themeCombo->currentIndex());
             // 同步更新参数面板的输出路径（无需重启即生效）
             if (m_paramsPanel) {
                 m_paramsPanel->setOutputPath(outDirEdit->text());

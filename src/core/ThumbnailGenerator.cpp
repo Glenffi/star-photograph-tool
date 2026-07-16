@@ -13,59 +13,52 @@ public:
         : m_filePath(filePath), m_maxSize(maxSize), m_generator(generator) {}
     
     void run() override {
-        // 使用 LibRaw 加载 RAW 并生成缩略图
         RawImageLoader loader;
-        RawImageLoader::ImageData imageData;
-        
-        if (!loader.loadRaw(m_filePath.toStdString(), imageData)) {
-            qWarning() << "缩略图生成失败：无法加载 RAW" << m_filePath;
-            QPointer<ThumbnailGenerator> safeGen(m_generator);
-            QMetaObject::invokeMethod(m_generator, [safeGen, filePath = m_filePath]() {
-                if (!safeGen) return;
-                emit safeGen->metadataReady(filePath, 0, 0.0, 0.0, 0);
-                emit safeGen->thumbnailReady(filePath, QPixmap());
-            }, Qt::QueuedConnection);
-            return;
-        }
-        
-        // 先发射元数据（主线程安全）
-        int iso = imageData.iso;
-        double exposureTime = imageData.exposureTime;
-        double aperture = imageData.aperture;
-        int focalLength = imageData.focalLength;
+        RawImageLoader::PreviewData preview;
+        RawImageLoader::Metadata metadata;
         QPointer<ThumbnailGenerator> safeGen(m_generator);
-        QMetaObject::invokeMethod(m_generator, [safeGen, filePath = m_filePath, iso, exposureTime, aperture, focalLength]() {
+
+        const bool loaded = loader.loadPreview(m_filePath.toStdString(), m_maxSize,
+                                               preview, &metadata);
+
+        // Metadata is available after open_file(), even when pixel preview
+        // extraction fails for a camera-specific RAW variant.
+        QMetaObject::invokeMethod(m_generator, [safeGen, filePath = m_filePath, metadata]() {
             if (!safeGen) return;
-            emit safeGen->metadataReady(filePath, iso, exposureTime, aperture, focalLength);
+            emit safeGen->metadataReady(filePath, metadata.iso, metadata.exposureTime,
+                                        metadata.aperture, metadata.focalLength);
         }, Qt::QueuedConnection);
-        
-        std::vector<uint8_t> thumbData;
-        if (!loader.generateThumbnail(imageData, m_maxSize, thumbData)) {
-            qWarning() << "缩略图生成失败：无法生成缩略图" << m_filePath;
+
+        if (!loaded) {
+            qWarning() << "缩略图生成失败：无法读取 RAW 预览" << m_filePath;
             QMetaObject::invokeMethod(m_generator, [safeGen, filePath = m_filePath]() {
                 if (!safeGen) return;
                 emit safeGen->thumbnailReady(filePath, QPixmap());
             }, Qt::QueuedConnection);
             return;
         }
-        
-        // 计算缩略图尺寸
-        int thumbWidth, thumbHeight;
-        if (imageData.width > imageData.height) {
-            thumbWidth = m_maxSize;
-            thumbHeight = imageData.height * m_maxSize / imageData.width;
-        } else {
-            thumbHeight = m_maxSize;
-            thumbWidth = imageData.width * m_maxSize / imageData.height;
+
+        QImage image;
+        if (preview.encoding == RawImageLoader::PreviewData::Encoding::Jpeg) {
+            image = QImage::fromData(preview.bytes.data(),
+                                     static_cast<int>(preview.bytes.size()), "JPEG");
+        } else if (preview.width > 0 && preview.height > 0) {
+            QImage borrowed(preview.bytes.data(), preview.width, preview.height,
+                            preview.width * 3, QImage::Format_RGB888);
+            image = borrowed.copy();
         }
-        if (thumbWidth < 1) thumbWidth = 1;
-        if (thumbHeight < 1) thumbHeight = 1;
-        
-        // 创建 QImage（在 worker 线程安全）
-        QImage image(thumbData.data(), thumbWidth, thumbHeight, thumbWidth * 3, QImage::Format_RGB888);
-        // 深拷贝：thumbData 是局部变量，run() 返回后会被释放
-        QImage imageOwned = image.copy();
-        
+        if (image.isNull()) {
+            qWarning() << "缩略图生成失败：预览数据格式无效" << m_filePath;
+            QMetaObject::invokeMethod(m_generator, [safeGen, filePath = m_filePath]() {
+                if (!safeGen) return;
+                emit safeGen->thumbnailReady(filePath, QPixmap());
+            }, Qt::QueuedConnection);
+            return;
+        }
+
+        const QImage imageOwned = image.scaled(m_maxSize, m_maxSize,
+                                                Qt::KeepAspectRatio,
+                                                Qt::SmoothTransformation);
         // 将 QPixmap 转换移到主线程执行
         QMetaObject::invokeMethod(m_generator, [safeGen, filePath = m_filePath, imageOwned]() {
             if (!safeGen) return;

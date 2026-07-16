@@ -20,12 +20,16 @@ public:
 
     /**
      * @brief 堆栈多张图像
+     *
+     * @param ignoreZero true 时把 0 当作对齐重采样产生的无效边界；
+     *                   普通图像应保持 false，使真实黑色像素参与统计。
      */
     bool stack(const std::vector<std::vector<uint16_t>>& images,
                int width, int height,
                Method method,
                double kappa,       // Kappa-Sigma 的 κ 值
-               std::vector<uint16_t>& result);
+               std::vector<uint16_t>& result,
+               bool ignoreZero = false);
 
     /**
      * @brief 天地分离堆栈
@@ -56,13 +60,13 @@ public:
 
 private:
     void stackAverage(const std::vector<std::vector<uint16_t>>& images,
-                      int w, int h, std::vector<uint16_t>& result);
+                      int w, int h, std::vector<uint16_t>& result, bool ignoreZero);
     void stackMedian(const std::vector<std::vector<uint16_t>>& images,
-                     int w, int h, std::vector<uint16_t>& result);
+                     int w, int h, std::vector<uint16_t>& result, bool ignoreZero);
     void stackKappaSigma(const std::vector<std::vector<uint16_t>>& images,
                           int w, int h, double kappa,
-                          std::vector<uint16_t>& result);
+                          std::vector<uint16_t>& result, bool ignoreZero);
     void stackWinsorized(const std::vector<std::vector<uint16_t>>& images,
                           int w, int h, double kappa,
-                          std::vector<uint16_t>& result);
+                          std::vector<uint16_t>& result, bool ignoreZero);
 };

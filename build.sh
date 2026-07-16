@@ -39,6 +39,7 @@ echo ""
 echo "🔍 检查依赖..."
 
 MISSING_DEPS=()
+RUN_TESTS=false
 
 # 检查 CMake
 if ! command -v cmake &> /dev/null; then
@@ -71,6 +72,16 @@ else
     MISSING_DEPS+=("libraw")
 fi
 
+# TIFF 16-bit 是正式导出的必需依赖
+if [ -d "/opt/homebrew/opt/libtiff" ]; then
+    echo -e "${GREEN}✅ libtiff (Homebrew: /opt/homebrew/opt/libtiff)${NC}"
+elif [ -d "/usr/local/opt/libtiff" ]; then
+    echo -e "${GREEN}✅ libtiff (Homebrew: /usr/local/opt/libtiff)${NC}"
+else
+    echo -e "${RED}❌ libtiff 未找到${NC}"
+    MISSING_DEPS+=("libtiff")
+fi
+
 # 如果有缺失依赖，提示安装
 if [ ${#MISSING_DEPS[@]} -ne 0 ]; then
     echo ""
@@ -84,7 +95,7 @@ if [ ${#MISSING_DEPS[@]} -ne 0 ]; then
     echo "  /bin/bash -c \"\$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\""
     echo ""
     echo "  # 2. 安装依赖"
-    echo "  brew install cmake qt@6 libraw"
+    echo "  brew install cmake qt@6 libraw libtiff"
     echo ""
     echo "  # 3. 确保 PATH 包含 brew（如果是 Apple Silicon）"
     echo "  echo 'export PATH=/opt/homebrew/bin:\$PATH' >> ~/.zshrc"
@@ -104,30 +115,21 @@ for arg in "$@"; do
         --build-only)
             BUILD_ONLY=true
             ;;
+        --test)
+            RUN_TESTS=true
+            ;;
         --help)
             echo "用法: $0 [选项]"
             echo ""
             echo "选项:"
             echo "  --clean       清理 build 目录后重新配置（完整重建）"
             echo "  --build-only  仅编译，不启动应用"
+            echo "  --test        编译后运行核心自动化测试"
             echo "  --help        显示此帮助信息"
             exit 0
             ;;
     esac
 done
-
-# 配置 Git 代理（用于推送到 GitHub）
-if [ -x "$(which scutil 2>/dev/null)" ]; then
-    # macOS - 检测系统代理
-    HTTP_PROXY=$(scutil --proxy 2>/dev/null | grep HTTPProxy | awk '{print $3}' | head -1)
-    HTTP_PORT=$(scutil --proxy 2>/dev/null | grep HTTPPort | awk '{print $3}' | head -1)
-    if [ -n "$HTTP_PROXY" ] && [ -n "$HTTP_PORT" ]; then
-        echo -e "${BLUE}🌐 检测到系统代理：${HTTP_PROXY}:${HTTP_PORT}${NC}"
-        git config http.proxy "http://${HTTP_PROXY}:${HTTP_PORT}"
-        git config https.proxy "http://${HTTP_PROXY}:${HTTP_PORT}"
-        echo -e "${GREEN}✅ Git 代理已配置${NC}"
-    fi
-fi
 
 # 创建并进入 build 目录
 echo ""
@@ -146,6 +148,7 @@ if [ ! -f "CMakeCache.txt" ]; then
 fi
 
 cmake .. -DCMAKE_BUILD_TYPE=Release \
+    -DBUILD_TESTING=ON \
     -DCMAKE_PREFIX_PATH="${CMAKE_PREFIX_PATH}" \
     2>&1
 
@@ -162,7 +165,7 @@ echo "🔨 开始编译..."
 CPU_COUNT=$(sysctl -n hw.ncpu 2>/dev/null || nproc 2>/dev/null || echo 4)
 echo -e "${BLUE}使用 ${CPU_COUNT} 个线程并行编译${NC}"
 
-make -j${CPU_COUNT} 2>&1
+cmake --build . --parallel "${CPU_COUNT}" 2>&1
 
 if [ $? -ne 0 ]; then
     echo -e "${RED}❌ 编译失败${NC}"
@@ -170,6 +173,13 @@ if [ $? -ne 0 ]; then
 fi
 
 echo -e "${GREEN}✅ 编译成功${NC}"
+
+if [ "$RUN_TESTS" = true ]; then
+    echo ""
+    echo "🧪 运行核心自动化测试..."
+    ctest --output-on-failure
+    echo -e "${GREEN}✅ 自动化测试通过${NC}"
+fi
 
 if [ "$BUILD_ONLY" = true ]; then
     echo ""

@@ -1,6 +1,8 @@
 cmake_minimum_required(VERSION 3.20)
 project(StarProcessor VERSION 0.4.0 LANGUAGES CXX)
 
+include(CTest)
+
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -82,11 +84,9 @@ message(STATUS "libtiff 库: ${TIFF_LIBRARY}")
 message(STATUS "libtiff 头文件: ${TIFF_INCLUDE_DIR}")
 endif()
 
-# 定义源文件
-set(SOURCES
-    src/main.cpp
+# 核心算法单独成库：GUI 与测试复用同一份实现，避免测试只覆盖复制代码。
+set(CORE_SOURCES
     src/core/RawImageLoader.cpp
-    src/core/ThumbnailGenerator.cpp
     src/core/StarDetector.cpp
     src/core/SkyGroundMask.cpp
     src/core/ImageAligner.cpp
@@ -95,15 +95,19 @@ set(SOURCES
     src/core/AutoOptimizeEngine.cpp
     src/core/PresetManager.cpp
     src/core/StarReducer.cpp
+)
+
+set(APP_SOURCES
+    src/main.cpp
+    src/core/ThumbnailGenerator.cpp
     src/ui/ProjectPanel.cpp
     src/ui/PreviewPanel.cpp
     src/ui/Toolbar.cpp
     src/ui/ParamsPanel.cpp
 )
 
-set(HEADERS
+set(CORE_HEADERS
     src/core/RawImageLoader.h
-    src/core/ThumbnailGenerator.h
     src/core/StarDetector.h
     src/core/SkyGroundMask.h
     src/core/ImageAligner.h
@@ -112,35 +116,46 @@ set(HEADERS
     src/core/AutoOptimizeEngine.h
     src/core/PresetManager.h
     src/core/StarReducer.h
+)
+
+set(APP_HEADERS
+    src/core/ThumbnailGenerator.h
     src/ui/ProjectPanel.h
     src/ui/PreviewPanel.h
     src/ui/Toolbar.h
     src/ui/ParamsPanel.h
 )
 
-# 创建可执行文件
-add_executable(${PROJECT_NAME} ${SOURCES} ${HEADERS})
+# 核心库不依赖 Widgets；ImageExporter、PresetManager 和 SkyGroundMask
+# 使用 Qt Core/Gui 的文件、色彩空间和图像能力。
+add_library(StarProcessorCore STATIC ${CORE_SOURCES} ${CORE_HEADERS})
 
-# 条件定义 libtiff 可用性
-if(TIFF_LIBRARY AND TIFF_INCLUDE_DIR)
-    target_compile_definitions(${PROJECT_NAME} PRIVATE HAS_LIBTIFF)
-endif()
+target_compile_definitions(StarProcessorCore PUBLIC HAS_LIBTIFF)
 
-# 包含目录
-target_include_directories(${PROJECT_NAME} PRIVATE
+# PUBLIC 使应用和测试获得一致的第三方头文件契约。
+target_include_directories(StarProcessorCore PUBLIC
     ${CMAKE_SOURCE_DIR}/src
     ${LibRaw_INCLUDE_DIR}
     ${TIFF_INCLUDE_DIR}
 )
 
 # 链接 Qt 库和 LibRaw、libtiff
-target_link_libraries(${PROJECT_NAME}
+target_link_libraries(StarProcessorCore PUBLIC
     Qt6::Core
     Qt6::Gui
-    Qt6::Widgets
     ${LibRaw_LIBRARY}
     ${TIFF_LIBRARY}
 )
+
+add_executable(${PROJECT_NAME} ${APP_SOURCES} ${APP_HEADERS})
+target_include_directories(${PROJECT_NAME} PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(${PROJECT_NAME} PRIVATE StarProcessorCore Qt6::Widgets)
+
+if(BUILD_TESTING)
+    add_executable(StarProcessorCoreTests tests/CoreTests.cpp)
+    target_link_libraries(StarProcessorCoreTests PRIVATE StarProcessorCore)
+    add_test(NAME core_algorithms COMMAND StarProcessorCoreTests)
+endif()
 
 # macOS 特定设置
 if(APPLE)

@@ -240,15 +240,6 @@ void PreviewPanel::loadImage(const QString& filePath) {
     m_currentFilePath = filePath;
     m_imageFileName = info.fileName();
 
-    // 读取元数据
-    RawImageLoader loader;
-    RawImageLoader::ImageData imageData;
-    if (loader.loadRaw(filePath.toStdString(), imageData)) {
-        m_imageIso = imageData.iso;
-        m_imageExposure = imageData.exposureTime;
-        m_imageFocalLength = imageData.focalLength;
-    }
-
     m_emptyState->setVisible(false);
     m_scrollArea->setVisible(true);
 
@@ -578,65 +569,32 @@ void PreviewPanel::mouseReleaseEvent(QMouseEvent* event) {
 
 QImage PreviewPanel::convertRawToDisplayable(const QString& filePath) {
     RawImageLoader loader;
-    RawImageLoader::ImageData imageData;
-
-    if (!loader.loadRaw(filePath.toStdString(), imageData)) {
+    RawImageLoader::PreviewData preview;
+    RawImageLoader::Metadata metadata;
+    constexpr int kPreviewLongSide = 2400;
+    if (!loader.loadPreview(filePath.toStdString(), kPreviewLongSide,
+                            preview, &metadata)) {
         return QImage();
     }
 
+    m_imageIso = metadata.iso;
+    m_imageExposure = metadata.exposureTime;
+    m_imageFocalLength = metadata.focalLength;
+
     QImage image;
-
-    if (imageData.channels == 3) {
-        image = QImage(imageData.width, imageData.height, QImage::Format_RGB888);
-
-        uint16_t maxVal = 0;
-        for (uint16_t v : imageData.data) {
-            if (v > maxVal) maxVal = v;
-        }
-        if (maxVal < 256) maxVal = 255;
-        if (maxVal == 0) maxVal = 1;
-
-        for (int y = 0; y < imageData.height; ++y) {
-            for (int x = 0; x < imageData.width; ++x) {
-                int idx = (y * imageData.width + x) * 3;
-                int r = (imageData.data[idx + 0] * 255) / maxVal;
-                int g = (imageData.data[idx + 1] * 255) / maxVal;
-                int b = (imageData.data[idx + 2] * 255) / maxVal;
-                r = std::clamp(r, 0, 255);
-                g = std::clamp(g, 0, 255);
-                b = std::clamp(b, 0, 255);
-                image.setPixelColor(x, y, QColor(r, g, b));
-            }
-        }
-    } else {
-        std::vector<uint16_t> rgbData;
-        if (!loader.decodeToRgb(imageData, rgbData)) {
-            return QImage();
-        }
-
-        image = QImage(imageData.width, imageData.height, QImage::Format_RGB888);
-
-        uint16_t maxVal = 0;
-        for (uint16_t v : rgbData) {
-            if (v > maxVal) maxVal = v;
-        }
-        if (maxVal < 256) maxVal = 255;
-        if (maxVal == 0) maxVal = 1;
-
-        for (int y = 0; y < imageData.height; ++y) {
-            for (int x = 0; x < imageData.width; ++x) {
-                int idx = (y * imageData.width + x) * 3;
-                int r = (rgbData[idx + 0] * 255) / maxVal;
-                int g = (rgbData[idx + 1] * 255) / maxVal;
-                int b = (rgbData[idx + 2] * 255) / maxVal;
-                r = std::clamp(r, 0, 255);
-                g = std::clamp(g, 0, 255);
-                b = std::clamp(b, 0, 255);
-                image.setPixelColor(x, y, QColor(r, g, b));
-            }
-        }
+    if (preview.encoding == RawImageLoader::PreviewData::Encoding::Jpeg) {
+        image = QImage::fromData(preview.bytes.data(),
+                                 static_cast<int>(preview.bytes.size()), "JPEG");
+    } else if (preview.width > 0 && preview.height > 0) {
+        QImage borrowed(preview.bytes.data(), preview.width, preview.height,
+                        preview.width * 3, QImage::Format_RGB888);
+        image = borrowed.copy();
     }
-
+    if (image.isNull()) return image;
+    if (std::max(image.width(), image.height()) > kPreviewLongSide) {
+        image = image.scaled(kPreviewLongSide, kPreviewLongSide,
+                             Qt::KeepAspectRatio, Qt::SmoothTransformation);
+    }
     return image;
 }
 

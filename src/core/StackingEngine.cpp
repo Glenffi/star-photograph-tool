@@ -2,34 +2,47 @@
 #include <algorithm>
 #include <numeric>
 #include <cmath>
+#include <limits>
+
+namespace {
+bool imageSize(int width, int height, size_t& size) {
+    if (width <= 0 || height <= 0) return false;
+    if (static_cast<size_t>(width) > std::numeric_limits<size_t>::max() /
+                                     static_cast<size_t>(height)) return false;
+    size = static_cast<size_t>(width) * static_cast<size_t>(height);
+    return true;
+}
+}
 
 bool StackingEngine::stack(const std::vector<std::vector<uint16_t>>& images,
                              int width, int height,
                              Method method,
                              double kappa,
-                             std::vector<uint16_t>& result) {
-    if (images.empty() || width <= 0 || height <= 0) {
+                             std::vector<uint16_t>& result,
+                             bool ignoreZero) {
+    size_t expectedSize = 0;
+    if (images.empty() || !imageSize(width, height, expectedSize)) {
         return false;
     }
 
     for (const auto& img : images) {
-        if (static_cast<int>(img.size()) != width * height) {
+        if (img.size() != expectedSize) {
             return false;
         }
     }
 
     switch (method) {
         case Average:
-            stackAverage(images, width, height, result);
+            stackAverage(images, width, height, result, ignoreZero);
             return true;
         case Median:
-            stackMedian(images, width, height, result);
+            stackMedian(images, width, height, result, ignoreZero);
             return true;
         case KappaSigma:
-            stackKappaSigma(images, width, height, kappa, result);
+            stackKappaSigma(images, width, height, kappa, result, ignoreZero);
             return true;
         case Winsorized:
-            stackWinsorized(images, width, height, kappa, result);
+            stackWinsorized(images, width, height, kappa, result, ignoreZero);
             return true;
     }
 
@@ -43,7 +56,8 @@ StackingEngine::Method StackingEngine::recommendMethod(int frameCount) {
 }
 
 void StackingEngine::stackAverage(const std::vector<std::vector<uint16_t>>& images,
-                                    int w, int h, std::vector<uint16_t>& result) {
+                                    int w, int h, std::vector<uint16_t>& result,
+                                    bool ignoreZero) {
     result.resize(w * h);
 
     for (int y = 0; y < h; ++y) {
@@ -52,7 +66,7 @@ void StackingEngine::stackAverage(const std::vector<std::vector<uint16_t>>& imag
             int count = 0;
             for (const auto& img : images) {
                 uint16_t val = img[y * w + x];
-                if (val != 0) {
+                if (!ignoreZero || val != 0) {
                     sum += val;
                     ++count;
                 }
@@ -67,7 +81,8 @@ void StackingEngine::stackAverage(const std::vector<std::vector<uint16_t>>& imag
 }
 
 void StackingEngine::stackMedian(const std::vector<std::vector<uint16_t>>& images,
-                                   int w, int h, std::vector<uint16_t>& result) {
+                                   int w, int h, std::vector<uint16_t>& result,
+                                   bool ignoreZero) {
     result.resize(w * h);
     std::vector<uint16_t> pixels;
     pixels.reserve(images.size());
@@ -77,7 +92,7 @@ void StackingEngine::stackMedian(const std::vector<std::vector<uint16_t>>& image
             pixels.clear();
             for (const auto& img : images) {
                 uint16_t val = img[y * w + x];
-                if (val != 0) {
+                if (!ignoreZero || val != 0) {
                     pixels.push_back(val);
                 }
             }
@@ -86,7 +101,12 @@ void StackingEngine::stackMedian(const std::vector<std::vector<uint16_t>>& image
             } else {
                 size_t mid = pixels.size() / 2;
                 std::nth_element(pixels.begin(), pixels.begin() + mid, pixels.end());
-                result[y * w + x] = pixels[mid];
+                uint32_t median = pixels[mid];
+                if (pixels.size() % 2 == 0) {
+                    median += *std::max_element(pixels.begin(), pixels.begin() + mid);
+                    median = (median + 1) / 2;
+                }
+                result[y * w + x] = static_cast<uint16_t>(median);
             }
         }
     }
@@ -127,7 +147,8 @@ static double computeMAD(std::vector<uint16_t>& v, double med) {
 
 void StackingEngine::stackKappaSigma(const std::vector<std::vector<uint16_t>>& images,
                                       int w, int h, double kappa,
-                                      std::vector<uint16_t>& result) {
+                                      std::vector<uint16_t>& result,
+                                      bool ignoreZero) {
     result.resize(w * h);
     int n = static_cast<int>(images.size());
     std::vector<uint16_t> pixels;
@@ -138,7 +159,7 @@ void StackingEngine::stackKappaSigma(const std::vector<std::vector<uint16_t>>& i
             pixels.clear();
             for (const auto& img : images) {
                 uint16_t val = img[y * w + x];
-                if (val != 0) pixels.push_back(val);
+                if (!ignoreZero || val != 0) pixels.push_back(val);
             }
             if (pixels.empty()) {
                 result[y * w + x] = 0;
@@ -184,7 +205,8 @@ void StackingEngine::stackKappaSigma(const std::vector<std::vector<uint16_t>>& i
 
 void StackingEngine::stackWinsorized(const std::vector<std::vector<uint16_t>>& images,
                                       int w, int h, double kappa,
-                                      std::vector<uint16_t>& result) {
+                                      std::vector<uint16_t>& result,
+                                      bool ignoreZero) {
     result.resize(w * h);
     int n = static_cast<int>(images.size());
     std::vector<uint16_t> pixels;
@@ -196,7 +218,7 @@ void StackingEngine::stackWinsorized(const std::vector<std::vector<uint16_t>>& i
             pixels.clear();
             for (const auto& img : images) {
                 uint16_t val = img[y * w + x];
-                if (val != 0) pixels.push_back(val);
+                if (!ignoreZero || val != 0) pixels.push_back(val);
             }
             if (pixels.empty()) {
                 result[y * w + x] = 0;
@@ -228,55 +250,37 @@ bool StackingEngine::stackWithMask(
     const std::vector<uint8_t>& mask,
     std::vector<uint16_t>& result)
 {
-    if (images.empty() || originalImages.empty() || width <= 0 || height <= 0) {
+    size_t expectedSize = 0;
+    if (images.empty() || originalImages.empty() ||
+        !imageSize(width, height, expectedSize)) {
         return false;
     }
     if (images.size() != originalImages.size()) {
         return false;
     }
-    if (mask.size() != static_cast<size_t>(width * height)) {
+    if (mask.size() != expectedSize) {
         return false;
     }
     for (const auto& img : images) {
-        if (static_cast<int>(img.size()) != width * height) {
+        if (img.size() != expectedSize) {
             return false;
         }
     }
     for (const auto& img : originalImages) {
-        if (static_cast<int>(img.size()) != width * height) {
+        if (img.size() != expectedSize) {
             return false;
         }
     }
 
-    // 1. 天空区域：用对齐后的 images 堆栈
-    std::vector<std::vector<uint16_t>> skyImages;
-    skyImages.reserve(images.size());
-    for (const auto& img : images) {
-        std::vector<uint16_t> skyImg(img.size());
-        for (size_t i = 0; i < img.size(); ++i) {
-            skyImg[i] = (mask[i] > 0) ? img[i] : static_cast<uint16_t>(0);
-        }
-        skyImages.push_back(std::move(skyImg));
-    }
-
+    // Each output pixel is stacked independently, so masking every input frame
+    // first only duplicates memory. Stack both sources once, then blend them.
     std::vector<uint16_t> skyResult;
-    if (!stack(skyImages, width, height, method, kappa, skyResult)) {
+    if (!stack(images, width, height, method, kappa, skyResult, true)) {
         return false;
-    }
-
-    // 2. 地景区域：用原始 originalImages 直接堆栈（Average固定）
-    std::vector<std::vector<uint16_t>> groundImages;
-    groundImages.reserve(originalImages.size());
-    for (const auto& img : originalImages) {
-        std::vector<uint16_t> groundImg(img.size());
-        for (size_t i = 0; i < img.size(); ++i) {
-            groundImg[i] = (mask[i] < 255) ? img[i] : static_cast<uint16_t>(0);
-        }
-        groundImages.push_back(std::move(groundImg));
     }
 
     std::vector<uint16_t> groundResult;
-    stackAverage(groundImages, width, height, groundResult);
+    stackAverage(originalImages, width, height, groundResult, false);
 
     // 3. 融合：result = sky * (mask/255) + ground * (1 - mask/255)
     result.resize(width * height);

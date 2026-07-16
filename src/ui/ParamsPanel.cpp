@@ -181,7 +181,13 @@ void ParamsPanel::setupUI() {
     auto* skyGroundRow = new QHBoxLayout();
     m_skyGroundCheck = new QCheckBox(QString::fromUtf8("天地分离"), m_stackGroup);
     m_skyGroundCheck->setToolTip(QString::fromUtf8("不带赤道仪时，天空对齐星点，地景保持固定，避免地景拖影"));
-    m_skyGroundCheck->setStyleSheet(m_dewarpCheck->styleSheet());
+    // Do not copy styles from controls created later in setupUI(). Keeping this
+    // style self-contained also prevents construction order from becoming a
+    // hidden dependency between otherwise unrelated parameter groups.
+    m_skyGroundCheck->setStyleSheet(
+        "QCheckBox { font-size: 12px; color: #C9D1D9; background-color: transparent; }"
+        "QCheckBox::indicator { width: 14px; height: 14px; }"
+    );
     connect(m_skyGroundCheck, &QCheckBox::toggled, this, &ParamsPanel::onCheckChanged);
     connect(m_skyGroundCheck, &QCheckBox::toggled, this, [this]() {
         updateSkyGroundControls();
@@ -363,8 +369,6 @@ void ParamsPanel::setupUI() {
     connect(m_outputFormat, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &ParamsPanel::onComboChanged);
     formatRow->addWidget(m_outputFormat, 1);
     outputLayout->addLayout(formatRow);
-
-    // 输出路径选择
 
     // 色彩空间：当前固定输出线性 sRGB，暂不提供选择控件
     // 后续完整实现色彩空间转换后再恢复
@@ -841,7 +845,9 @@ void ParamsPanel::applyPreset(const Preset& preset) {
     QSignalBlocker blocker4(m_dewarpCheck);
     QSignalBlocker blocker5(m_dewarpSlider);
     QSignalBlocker blocker6(m_stretchCheck);
-    QSignalBlocker blocker7(m_outputFormat);
+    QSignalBlocker blocker7(m_starReduceCheck);
+    QSignalBlocker blocker8(m_starReduceSlider);
+    QSignalBlocker blocker9(m_outputFormat);
 
     // Align method
     if (preset.alignMethod == "star") m_alignMethod->setCurrentIndex(0);
@@ -866,6 +872,12 @@ void ParamsPanel::applyPreset(const Preset& preset) {
 
     // Stretch
     m_stretchCheck->setChecked(preset.stretchEnabled);
+
+    // Star reduction is part of the preset contract. Apply both values here so
+    // built-in and custom presets behave the same after being selected.
+    m_starReduceCheck->setChecked(preset.starReduceEnabled);
+    m_starReduceSlider->setValue(preset.starReduceStrength);
+    m_starReduceSlider->setEnabled(preset.starReduceEnabled);
 
     // Output format
     if (preset.outputFormat == "tiff16") m_outputFormat->setCurrentIndex(0);

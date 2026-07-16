@@ -1,216 +1,274 @@
 #include "RawImageLoader.h"
-#include <libraw/libraw.h>
-#include <algorithm>
-#include <cmath>
-#include <fstream>
-#include <iostream>
-#include <cstring>
 
-bool RawImageLoader::loadRaw(const std::string& filePath, ImageData& out) {
-    // 检查文件是否存在
-    std::ifstream file(filePath, std::ios::binary);
-    if (!file.is_open()) {
-        std::cerr << "无法打开文件: " << filePath << std::endl;
+#include <libraw/libraw.h>
+
+#include <algorithm>
+#include <cstring>
+#include <ctime>
+#include <iostream>
+#include <limits>
+
+namespace {
+
+void extractMetadata(const LibRaw& processor, RawImageLoader::Metadata& out) {
+    const auto& data = processor.imgdata;
+    out.width = static_cast<int>(data.sizes.width);
+    out.height = static_cast<int>(data.sizes.height);
+    out.iso = static_cast<int>(data.other.iso_speed);
+    out.exposureTime = data.other.shutter;
+    out.aperture = data.other.aperture;
+    out.focalLength = static_cast<int>(data.other.focal_len);
+    out.cameraModel = data.idata.model;
+
+    if (data.other.timestamp <= 0) return;
+
+    const std::time_t timestamp = static_cast<std::time_t>(data.other.timestamp);
+    std::tm localTime{};
+#ifdef _WIN32
+    if (localtime_s(&localTime, &timestamp) != 0) return;
+#else
+    if (!localtime_r(&timestamp, &localTime)) return;
+#endif
+    char buffer[64]{};
+    if (std::strftime(buffer, sizeof(buffer), "%Y-%m-%d %H:%M:%S", &localTime) > 0) {
+        out.timestamp = buffer;
+    }
+}
+
+void copyMetadata(const RawImageLoader::Metadata& metadata,
+                  RawImageLoader::ImageData& image) {
+    image.iso = metadata.iso;
+    image.exposureTime = metadata.exposureTime;
+    image.aperture = metadata.aperture;
+    image.focalLength = metadata.focalLength;
+    image.cameraModel = metadata.cameraModel;
+    image.timestamp = metadata.timestamp;
+}
+
+bool copyBitmap8(const libraw_processed_image_t& image,
+                 RawImageLoader::PreviewData& out) {
+    if (image.type != LIBRAW_IMAGE_BITMAP || image.bits != 8 ||
+        image.width == 0 || image.height == 0 ||
+        (image.colors != 1 && image.colors < 3)) {
         return false;
     }
-    file.close();
+
+    const size_t pixelCount = static_cast<size_t>(image.width) * image.height;
+    if (pixelCount > std::numeric_limits<size_t>::max() / 3) return false;
+    const size_t sourceSize = pixelCount * image.colors;
+    if (image.data_size < sourceSize) return false;
+
+    out.width = static_cast<int>(image.width);
+    out.height = static_cast<int>(image.height);
+    out.encoding = RawImageLoader::PreviewData::Encoding::Rgb8;
+    out.bytes.resize(pixelCount * 3);
+
+    if (image.colors == 3) {
+        std::memcpy(out.bytes.data(), image.data, out.bytes.size());
+        return true;
+    }
+
+    for (size_t i = 0; i < pixelCount; ++i) {
+        if (image.colors == 1) {
+            out.bytes[i * 3] = image.data[i];
+            out.bytes[i * 3 + 1] = image.data[i];
+            out.bytes[i * 3 + 2] = image.data[i];
+        } else {
+            out.bytes[i * 3] = image.data[i * image.colors];
+            out.bytes[i * 3 + 1] = image.data[i * image.colors + 1];
+            out.bytes[i * 3 + 2] = image.data[i * image.colors + 2];
+        }
+    }
+    return true;
+}
+
+bool loadFastHalfSize(const std::string& filePath,
+                      RawImageLoader::PreviewData& out) {
+    LibRaw processor;
+    int result = processor.open_file(filePath.c_str());
+    if (result != LIBRAW_SUCCESS) return false;
+    result = processor.unpack();
+    if (result != LIBRAW_SUCCESS) return false;
+
+    // This fallback is display-oriented. half_size and bilinear demosaic keep
+    // browsing responsive; the processing pipeline still uses 16-bit AHD.
+    auto& params = processor.imgdata.params;
+    params.half_size = 1;
+    params.user_qual = 0;
+    params.use_camera_wb = 1;
+    params.use_camera_matrix = 1;
+    params.output_bps = 8;
+    params.output_color = 1;
+    params.no_auto_bright = 0;
+
+    result = processor.dcraw_process();
+    if (result != LIBRAW_SUCCESS) return false;
+
+    libraw_processed_image_t* image = processor.dcraw_make_mem_image(&result);
+    if (!image || result != LIBRAW_SUCCESS) {
+        if (image) LibRaw::dcraw_clear_mem(image);
+        return false;
+    }
+    const bool copied = copyBitmap8(*image, out);
+    LibRaw::dcraw_clear_mem(image);
+    return copied;
+}
+
+} // namespace
+
+bool RawImageLoader::loadMetadata(const std::string& filePath, Metadata& out) {
+    out = {};
+    LibRaw processor;
+    const int result = processor.open_file(filePath.c_str());
+    if (result != LIBRAW_SUCCESS) {
+        std::cerr << "LibRaw open_file failed: " << filePath
+                  << " (code: " << result << ")" << std::endl;
+        return false;
+    }
+    extractMetadata(processor, out);
+    return true;
+}
+
+bool RawImageLoader::loadPreview(const std::string& filePath, int requestedMaxSize,
+                                 PreviewData& out, Metadata* metadata) {
+    out = {};
+    if (requestedMaxSize <= 0) return false;
 
     LibRaw processor;
-
-    int ret = processor.open_file(filePath.c_str());
-    if (ret != LIBRAW_SUCCESS) {
-        std::cerr << "LibRaw open_file 失败: " << filePath << " (code: " << ret << ")" << std::endl;
+    int result = processor.open_file(filePath.c_str());
+    if (result != LIBRAW_SUCCESS) {
+        std::cerr << "LibRaw open_file failed: " << filePath
+                  << " (code: " << result << ")" << std::endl;
         return false;
     }
 
-    ret = processor.unpack();
-    if (ret != LIBRAW_SUCCESS) {
-        std::cerr << "LibRaw unpack 失败: " << filePath << " (code: " << ret << ")" << std::endl;
-        return false;
-    }
+    Metadata localMetadata;
+    extractMetadata(processor, localMetadata);
+    if (metadata) *metadata = localMetadata;
 
-    // 保存元数据（在 dcraw_process 之前提取，因为某些参数会被修改）
-    out.iso = static_cast<int>(processor.imgdata.other.iso_speed);
-    out.exposureTime = processor.imgdata.other.shutter;
-    out.aperture = processor.imgdata.other.aperture;
-    out.focalLength = static_cast<int>(processor.imgdata.other.focal_len);
-    out.cameraModel = processor.imgdata.idata.model;
+    PreviewData embeddedFallback;
+    bool hasEmbeddedFallback = false;
+    result = processor.unpack_thumb();
+    if (result == LIBRAW_SUCCESS) {
+        libraw_processed_image_t* image = processor.dcraw_make_mem_thumb(&result);
+        if (image && result == LIBRAW_SUCCESS) {
+            PreviewData embedded;
+            bool usable = false;
+            if (image->type == LIBRAW_IMAGE_JPEG && image->data_size > 0) {
+                embedded.encoding = PreviewData::Encoding::Jpeg;
+                embedded.width = static_cast<int>(image->width);
+                embedded.height = static_cast<int>(image->height);
+                embedded.bytes.assign(image->data, image->data + image->data_size);
+                usable = true;
+            } else {
+                usable = copyBitmap8(*image, embedded);
+            }
+            LibRaw::dcraw_clear_mem(image);
 
-    auto& other = processor.imgdata.other;
-    if (other.timestamp > 0) {
-        char buf[64];
-        time_t t = static_cast<time_t>(other.timestamp);
-        struct tm* tm_info = localtime(&t);
-        if (tm_info) {
-            strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S", tm_info);
-            out.timestamp = buf;
+            // Tiny camera thumbnails are insufficient for the central preview.
+            // A 75% threshold avoids an expensive fallback for previews that are
+            // already close to the requested display size.
+            const int embeddedLongSide = std::max(embedded.width, embedded.height);
+            const int minimumUsefulSide = std::min(requestedMaxSize, 800) * 3 / 4;
+            if (usable && embeddedLongSide >= minimumUsefulSide) {
+                out = std::move(embedded);
+                return true;
+            }
+            if (usable) {
+                embeddedFallback = std::move(embedded);
+                hasEmbeddedFallback = true;
+            }
+        } else if (image) {
+            LibRaw::dcraw_clear_mem(image);
         }
     }
 
-    // 判断是否为 Bayer 模式
-    bool isBayer = (processor.imgdata.idata.filters != 0);
+    if (loadFastHalfSize(filePath, out)) return true;
 
-    if (isBayer) {
-        // Bayer CFA: 使用 LibRaw 内置高质量 demosaic (AHD) + 相机 WB + 颜色矩阵
-        processor.imgdata.params.user_qual = 3;          // AHD demosaic
-        processor.imgdata.params.use_camera_wb = 1;      // 使用相机白平衡
-        processor.imgdata.params.use_camera_matrix = 1;  // 使用相机色彩矩阵
-        processor.imgdata.params.output_bps = 16;        // 16-bit 输出
-        processor.imgdata.params.no_auto_bright = 1;     // 关闭自动亮度拉伸，保持线性
-        processor.imgdata.params.output_color = 1;       // 线性 sRGB primaries
-        processor.imgdata.params.gamm[0] = 1.0f;           // 关闭 gamma，保持线性
-        processor.imgdata.params.gamm[1] = 1.0f;
-
-        ret = processor.dcraw_process();
-        if (ret != LIBRAW_SUCCESS) {
-            std::cerr << "LibRaw dcraw_process 失败: " << filePath << " (code: " << ret << ")" << std::endl;
-            return false;
-        }
-
-        libraw_processed_image_t* img = processor.dcraw_make_mem_image(&ret);
-        if (!img || img->type != LIBRAW_IMAGE_BITMAP) {
-            std::cerr << "LibRaw dcraw_make_mem_image 失败: " << filePath << std::endl;
-            if (img) LibRaw::dcraw_clear_mem(img);
-            return false;
-        }
-
-        // 校验 LibRaw 返回的位深、通道数和缓冲区大小
-        if (img->bits != 16) {
-            std::cerr << "LibRaw 输出位深不支持: " << img->bits << " bits (需要 16-bit): " << filePath << std::endl;
-            LibRaw::dcraw_clear_mem(img);
-            return false;
-        }
-        if (img->colors != 3) {
-            std::cerr << "LibRaw 输出通道数不支持: " << img->colors << " colors (需要 3): " << filePath << std::endl;
-            LibRaw::dcraw_clear_mem(img);
-            return false;
-        }
-        size_t expectedDataSize = static_cast<size_t>(img->width) * img->height * img->colors * sizeof(uint16_t);
-        if (img->data_size < expectedDataSize) {
-            std::cerr << "LibRaw 缓冲区大小不足: " << img->data_size << " < " << expectedDataSize << ": " << filePath << std::endl;
-            LibRaw::dcraw_clear_mem(img);
-            return false;
-        }
-
-        out.width = img->width;
-        out.height = img->height;
-        out.channels = 3;
-        out.bayerPattern = "";
-
-        // img->data 是 uint8_t 数组，但 16-bit 模式下每像素占 2 bytes
-        // colors=3, bits=16
-        size_t totalPixels = img->width * img->height * img->colors;
-        out.data.resize(totalPixels);
-        std::memcpy(out.data.data(), img->data, totalPixels * sizeof(uint16_t));
-
-        LibRaw::dcraw_clear_mem(img);
-    } else {
-        // 非 Bayer（如 Foveon 或已解码 RGB），使用 LibRaw 处理
-        processor.imgdata.params.use_camera_wb = 1;
-        processor.imgdata.params.use_camera_matrix = 1;
-        processor.imgdata.params.output_bps = 16;
-        processor.imgdata.params.no_auto_bright = 1;
-        processor.imgdata.params.output_color = 1;       // 线性 sRGB primaries
-        processor.imgdata.params.gamm[0] = 1.0f;
-        processor.imgdata.params.gamm[1] = 1.0f;
-
-        ret = processor.dcraw_process();
-        if (ret != LIBRAW_SUCCESS) {
-            std::cerr << "LibRaw dcraw_process 失败: " << filePath << " (code: " << ret << ")" << std::endl;
-            return false;
-        }
-
-        libraw_processed_image_t* img = processor.dcraw_make_mem_image(&ret);
-        if (!img || img->type != LIBRAW_IMAGE_BITMAP) {
-            std::cerr << "LibRaw dcraw_make_mem_image 失败: " << filePath << std::endl;
-            if (img) LibRaw::dcraw_clear_mem(img);
-            return false;
-        }
-
-        // 校验 LibRaw 返回的位深、通道数和缓冲区大小
-        if (img->bits != 16) {
-            std::cerr << "LibRaw 输出位深不支持: " << img->bits << " bits (需要 16-bit): " << filePath << std::endl;
-            LibRaw::dcraw_clear_mem(img);
-            return false;
-        }
-        if (img->colors != 3) {
-            std::cerr << "LibRaw 输出通道数不支持: " << img->colors << " colors (需要 3): " << filePath << std::endl;
-            LibRaw::dcraw_clear_mem(img);
-            return false;
-        }
-        size_t expectedDataSize = static_cast<size_t>(img->width) * img->height * img->colors * sizeof(uint16_t);
-        if (img->data_size < expectedDataSize) {
-            std::cerr << "LibRaw 缓冲区大小不足: " << img->data_size << " < " << expectedDataSize << ": " << filePath << std::endl;
-            LibRaw::dcraw_clear_mem(img);
-            return false;
-        }
-
-        out.width = img->width;
-        out.height = img->height;
-        out.channels = 3;
-        out.bayerPattern = "";
-
-        size_t totalPixels = img->width * img->height * img->colors;
-        out.data.resize(totalPixels);
-        std::memcpy(out.data.data(), img->data, totalPixels * sizeof(uint16_t));
-
-        LibRaw::dcraw_clear_mem(img);
+    // A small preview is still preferable to no image for RAW variants whose
+    // full pixel payload is not supported by the installed LibRaw version.
+    if (hasEmbeddedFallback) {
+        out = std::move(embeddedFallback);
+        return true;
     }
 
-    processor.recycle();
-    return true;
+    std::cerr << "LibRaw preview decoding failed: " << filePath << std::endl;
+    return false;
 }
 
-bool RawImageLoader::decodeToRgb(const ImageData& bayer, std::vector<uint16_t>& rgb) {
-    // 当前 loadRaw() 已直接输出 RGB，此函数保留为兼容性接口
-    if (bayer.channels != 3 || bayer.data.empty()) {
-        std::cerr << "decodeToRgb: 输入不是有效的 RGB 数据" << std::endl;
-        return false;
-    }
-    rgb = bayer.data;
-    return true;
-}
+bool RawImageLoader::loadRaw(const std::string& filePath, ImageData& out) {
+    out = {};
+    LibRaw processor;
 
-bool RawImageLoader::generateThumbnail(const ImageData& raw, int maxSize, std::vector<uint8_t>& thumb) {
-    if (raw.data.empty() || raw.width == 0 || raw.height == 0) {
-        std::cerr << "generateThumbnail: 无效的图像数据" << std::endl;
+    int result = processor.open_file(filePath.c_str());
+    if (result != LIBRAW_SUCCESS) {
+        std::cerr << "LibRaw open_file failed: " << filePath
+                  << " (code: " << result << ")" << std::endl;
         return false;
     }
 
-    // 计算缩略图尺寸
-    int thumbWidth, thumbHeight;
-    if (raw.width > raw.height) {
-        thumbWidth = maxSize;
-        thumbHeight = raw.height * maxSize / raw.width;
-    } else {
-        thumbHeight = maxSize;
-        thumbWidth = raw.width * maxSize / raw.height;
-    }
-    if (thumbWidth < 1) thumbWidth = 1;
-    if (thumbHeight < 1) thumbHeight = 1;
+    Metadata metadata;
+    extractMetadata(processor, metadata);
+    copyMetadata(metadata, out);
 
-    thumb.resize(thumbWidth * thumbHeight * 3);
-
-    // 将 16-bit 数据缩放到 8-bit
-    auto scale16to8 = [](uint16_t v) -> uint8_t {
-        uint32_t scaled = (static_cast<uint32_t>(v) * 255) / 65535;
-        if (scaled > 255) scaled = 255;
-        return static_cast<uint8_t>(scaled);
-    };
-
-    // 直接采样 RGB 数据（loadRaw 现在始终输出 RGB）
-    for (int y = 0; y < thumbHeight; ++y) {
-        for (int x = 0; x < thumbWidth; ++x) {
-            int srcX = x * raw.width / thumbWidth;
-            int srcY = y * raw.height / thumbHeight;
-            int srcIdx = (srcY * raw.width + srcX) * 3;
-            int dstIdx = (y * thumbWidth + x) * 3;
-
-            thumb[dstIdx + 0] = scale16to8(raw.data[srcIdx + 0]);
-            thumb[dstIdx + 1] = scale16to8(raw.data[srcIdx + 1]);
-            thumb[dstIdx + 2] = scale16to8(raw.data[srcIdx + 2]);
-        }
+    result = processor.unpack();
+    if (result != LIBRAW_SUCCESS) {
+        std::cerr << "LibRaw unpack failed: " << filePath
+                  << " (code: " << result << ")" << std::endl;
+        return false;
     }
 
+    auto& params = processor.imgdata.params;
+    if (processor.imgdata.idata.filters != 0) {
+        params.user_qual = 3; // AHD demosaic for the full processing path.
+    }
+    params.use_camera_wb = 1;
+    params.use_camera_matrix = 1;
+    params.output_bps = 16;
+    params.no_auto_bright = 1;
+    params.output_color = 1; // sRGB primaries
+    params.gamm[0] = 1.0f;   // linear transfer function
+    params.gamm[1] = 1.0f;
+
+    result = processor.dcraw_process();
+    if (result != LIBRAW_SUCCESS) {
+        std::cerr << "LibRaw dcraw_process failed: " << filePath
+                  << " (code: " << result << ")" << std::endl;
+        return false;
+    }
+
+    libraw_processed_image_t* image = processor.dcraw_make_mem_image(&result);
+    if (!image || result != LIBRAW_SUCCESS || image->type != LIBRAW_IMAGE_BITMAP) {
+        std::cerr << "LibRaw dcraw_make_mem_image failed: " << filePath << std::endl;
+        if (image) LibRaw::dcraw_clear_mem(image);
+        return false;
+    }
+
+    if (image->bits != 16 || image->colors != 3) {
+        std::cerr << "Unsupported LibRaw output (bits=" << image->bits
+                  << ", colors=" << image->colors << "): " << filePath << std::endl;
+        LibRaw::dcraw_clear_mem(image);
+        return false;
+    }
+
+    const size_t pixelCount = static_cast<size_t>(image->width) * image->height;
+    if (pixelCount > std::numeric_limits<size_t>::max() / (3 * sizeof(uint16_t))) {
+        LibRaw::dcraw_clear_mem(image);
+        return false;
+    }
+    const size_t valueCount = pixelCount * 3;
+    const size_t expectedSize = valueCount * sizeof(uint16_t);
+    if (image->data_size < expectedSize) {
+        std::cerr << "LibRaw buffer is smaller than expected: " << filePath << std::endl;
+        LibRaw::dcraw_clear_mem(image);
+        return false;
+    }
+
+    out.width = static_cast<int>(image->width);
+    out.height = static_cast<int>(image->height);
+    out.channels = 3;
+    out.data.resize(valueCount);
+    std::memcpy(out.data.data(), image->data, expectedSize);
+    LibRaw::dcraw_clear_mem(image);
     return true;
 }
