@@ -67,9 +67,12 @@ static bool exportTiffRgb16(const std::vector<uint16_t>& rgb, int width, int hei
     // 使用 Qt 内置的线性 sRGB ICC profile
     const QByteArray iccProfile = QColorSpace(QColorSpace::SRgbLinear).iccProfile();
     if (!iccProfile.isEmpty()) {
-        TIFFSetField(tiff, TIFFTAG_ICCPROFILE,
-                     static_cast<uint32_t>(iccProfile.size()),
-                     iccProfile.constData());
+        if (TIFFSetField(tiff, TIFFTAG_ICCPROFILE,
+                         static_cast<uint32_t>(iccProfile.size()),
+                         iccProfile.constData()) != 1) {
+            std::cerr << "ImageExporter: 警告：TIFFSetField ICC profile 失败，"
+                         "导出将不嵌入色彩空间标记" << std::endl;
+        }
     } else {
         std::cerr << "ImageExporter: 警告：无法获取线性 sRGB ICC profile，"
                      "TIFF 将不嵌入色彩空间标记" << std::endl;
