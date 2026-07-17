@@ -176,6 +176,50 @@ void testTransformDirection() {
           "Affine resampling should succeed");
     check(destination[2 * width + 4] == 50000,
           "Affine resampling should use the documented source-to-reference direction");
+
+    AlignmentTransform singular;
+    singular.a = 0.0;
+    singular.e = 0.0;
+    check(!aligner.applyTransform(source, width, height, singular, destination),
+          "Affine resampling should reject a singular transform");
+    check(!aligner.applyTransform(source, width + 1, height, transform, destination),
+          "Affine resampling should reject a mismatched source buffer");
+}
+
+void testAlignmentEstimation() {
+    const std::vector<StarPoint> reference = {
+        {80.0, 90.0}, {210.0, 130.0}, {355.0, 75.0}, {520.0, 160.0},
+        {125.0, 310.0}, {290.0, 265.0}, {470.0, 350.0}, {650.0, 290.0},
+        {190.0, 505.0}, {390.0, 470.0}, {575.0, 540.0}, {730.0, 430.0}
+    };
+    std::vector<StarPoint> source = reference;
+    for (StarPoint& star : source) {
+        star.x -= 12.5;
+        star.y += 7.25;
+    }
+
+    ImageAligner aligner;
+    AlignmentTransform transform;
+    AlignmentQuality quality;
+    check(aligner.align(reference, source, transform, &quality),
+          "Triangle matching should recover a translated synthetic star field");
+    check(std::abs(transform.a - 1.0) < 0.01 &&
+              std::abs(transform.e - 1.0) < 0.01 &&
+              std::abs(transform.b) < 0.01 && std::abs(transform.d) < 0.01 &&
+              std::abs(transform.c - 12.5) < 0.2 &&
+              std::abs(transform.f + 7.25) < 0.2,
+          "Estimated alignment should preserve scale and recover translation");
+    check(quality.matchedStars == static_cast<int>(reference.size()) &&
+              quality.rmsError < 0.01,
+          "Independent alignment verification should match every synthetic star");
+
+    std::vector<StarPoint> implausiblyScaled = reference;
+    for (StarPoint& star : implausiblyScaled) {
+        star.x *= 0.1;
+        star.y *= 0.1;
+    }
+    check(!aligner.align(reference, implausiblyScaled, transform),
+          "Alignment should reject a physically implausible scale change");
 }
 
 void testStarDetectionAndReduction() {
@@ -271,6 +315,7 @@ int main(int argc, char* argv[]) {
     testMemoryEstimator();
     testPreviewToneMapper();
     testTransformDirection();
+    testAlignmentEstimation();
     testStarDetectionAndReduction();
     testTiffIccProfile();
     testRawApiValidation();

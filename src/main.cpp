@@ -547,8 +547,9 @@ private slots:
             refFrame = m_projectPanel->referenceFramePath();
         }
         if (refFrame.isEmpty()) {
-            // 自动选择第一个为参考帧
-            refFrame = files.first();
+            // Without a quality score, the middle frame minimizes the maximum
+            // temporal drift to both ends of a fixed-tripod sequence.
+            refFrame = files.at(files.size() / 2);
             m_projectPanel->setReferenceFrame(refFrame);
         }
 

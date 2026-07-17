@@ -1,11 +1,12 @@
 #include "ImageAligner.h"
 #include <cmath>
 #include <algorithm>
+#include <limits>
 #include <random>
 
 // 三角形结构
 struct Triangle {
-    int idx[3];  // 星点索引
+    int idx[3];  // 按对边长度排序后的顶点索引，保证相似三角形顶点一一对应
     double sides[3]; // 边长，排序后
     double ratio[2]; // 短边/长边，中边/长边
 };
@@ -15,9 +16,9 @@ static std::vector<Triangle> buildTriangles(const std::vector<StarPoint>& stars,
     int n = static_cast<int>(stars.size());
     if (n < 3) return triangles;
 
-    // 硬上限：最多处理约 50 个星点，避免 O(n³) 组合爆炸
-    // 50 个星点产生约 19600 个三角形，在可接受范围内
-    if (n > 50) n = 50;
+    // Triangle-to-triangle comparison grows as O(n^6). Keep geometric hashing
+    // at 30 stars; the translation fallback can still use the complete list.
+    if (n > 30) n = 30;
 
     for (int i = 0; i < n; ++i) {
         for (int j = i + 1; j < n; ++j) {
@@ -36,11 +37,26 @@ static std::vector<Triangle> buildTriangles(const std::vector<StarPoint>& stars,
                 if (s1 > maxDist || s2 > maxDist || s3 > maxDist) continue;
                 if (s1 < 1.0 || s2 < 1.0 || s3 < 1.0) continue;
 
-                Triangle tri;
-                tri.idx[0] = i; tri.idx[1] = j; tri.idx[2] = k;
-
                 double sorted[3] = {s1, s2, s3};
                 std::sort(sorted, sorted + 3);
+                const double areaTwice = std::abs(dx1 * dy2 - dy1 * dx2);
+                if (areaTwice < 0.02 * sorted[2] * sorted[2]) continue;
+                // Near-isosceles triangles do not provide a stable canonical
+                // vertex ordering when measurement noise swaps equal sides.
+                if ((sorted[1] - sorted[0]) / sorted[2] < 0.015 ||
+                    (sorted[2] - sorted[1]) / sorted[2] < 0.015) continue;
+
+                Triangle tri;
+                // Opposite-edge lengths identify corresponding vertices in
+                // similar scalene triangles: i<->|jk|, j<->|ik|, k<->|ij|.
+                std::pair<double, int> vertices[3] = {{s3, i}, {s2, j}, {s1, k}};
+                std::sort(vertices, vertices + 3,
+                          [](const auto& left, const auto& right) {
+                              return left.first < right.first;
+                          });
+                for (int vertex = 0; vertex < 3; ++vertex) {
+                    tri.idx[vertex] = vertices[vertex].second;
+                }
                 tri.sides[0] = sorted[0];
                 tri.sides[1] = sorted[1];
                 tri.sides[2] = sorted[2];
@@ -61,8 +77,23 @@ bool ImageAligner::triangleMatch(const std::vector<StarPoint>& refStars,
     matches.clear();
     if (refStars.size() < 3 || srcStars.size() < 3) return false;
 
-    // 估计最大距离（图像对角线的50%）
-    double maxDist = 1000.0; // 保守估计
+    auto coveredDiagonal = [](const std::vector<StarPoint>& stars) {
+        double minX = stars.front().x;
+        double maxX = stars.front().x;
+        double minY = stars.front().y;
+        double maxY = stars.front().y;
+        for (const StarPoint& star : stars) {
+            minX = std::min(minX, star.x);
+            maxX = std::max(maxX, star.x);
+            minY = std::min(minY, star.y);
+            maxY = std::max(maxY, star.y);
+        }
+        return std::hypot(maxX - minX, maxY - minY);
+    };
+    // A fixed 1000 px limit discards almost every useful triangle on 36 MP
+    // frames. Derive the limit from the actual spatial star coverage.
+    const double maxDist = std::max(1000.0,
+        0.75 * std::max(coveredDiagonal(refStars), coveredDiagonal(srcStars)));
 
     auto refTris = buildTriangles(refStars, maxDist);
     auto srcTris = buildTriangles(srcStars, maxDist);
@@ -75,15 +106,13 @@ bool ImageAligner::triangleMatch(const std::vector<StarPoint>& refStars,
     for (const auto& rt : refTris) {
         for (const auto& st : srcTris) {
             // 三角形相似度判断
-            if (std::abs(rt.ratio[0] - st.ratio[0]) > 0.05) continue;
-            if (std::abs(rt.ratio[1] - st.ratio[1]) > 0.05) continue;
-            if (std::abs(rt.sides[2] - st.sides[2]) / rt.sides[2] > 0.3) continue;
+            if (std::abs(rt.ratio[0] - st.ratio[0]) > 0.025) continue;
+            if (std::abs(rt.ratio[1] - st.ratio[1]) > 0.025) continue;
+            if (std::abs(rt.sides[2] - st.sides[2]) / rt.sides[2] > 0.1) continue;
 
-            // 投票
+            // Canonical vertex ordering makes the correspondence explicit.
             for (int a = 0; a < 3; ++a) {
-                for (int b = 0; b < 3; ++b) {
-                    vote[rt.idx[a]][st.idx[b]]++;
-                }
+                vote[rt.idx[a]][st.idx[a]]++;
             }
         }
     }
@@ -116,6 +145,60 @@ bool ImageAligner::triangleMatch(const std::vector<StarPoint>& refStars,
     }
 
     return matches.size() >= 3;
+}
+
+bool ImageAligner::translationSeedMatch(
+    const std::vector<StarPoint>& refStars,
+    const std::vector<StarPoint>& srcStars,
+    std::vector<std::pair<int, int>>& matches) {
+    matches.clear();
+    if (refStars.size() < 3 || srcStars.size() < 3) return false;
+
+    constexpr double matchRadius = 96.0;
+    const double radiusSquared = matchRadius * matchRadius;
+    double bestError = std::numeric_limits<double>::max();
+
+    // Every ref/src pair supplies a coarse translation hypothesis. For a real
+    // fixed-tripod sequence, many other stars then land close to unique peers;
+    // random hypotheses normally explain only one or two points.
+    for (size_t refSeed = 0; refSeed < refStars.size(); ++refSeed) {
+        for (size_t srcSeed = 0; srcSeed < srcStars.size(); ++srcSeed) {
+            const double offsetX = refStars[refSeed].x - srcStars[srcSeed].x;
+            const double offsetY = refStars[refSeed].y - srcStars[srcSeed].y;
+            std::vector<bool> refUsed(refStars.size(), false);
+            std::vector<std::pair<int, int>> candidate;
+            double error = 0.0;
+
+            for (size_t srcIndex = 0; srcIndex < srcStars.size(); ++srcIndex) {
+                int nearestRef = -1;
+                double nearestDistance = radiusSquared;
+                const double x = srcStars[srcIndex].x + offsetX;
+                const double y = srcStars[srcIndex].y + offsetY;
+                for (size_t refIndex = 0; refIndex < refStars.size(); ++refIndex) {
+                    if (refUsed[refIndex]) continue;
+                    const double dx = refStars[refIndex].x - x;
+                    const double dy = refStars[refIndex].y - y;
+                    const double distance = dx * dx + dy * dy;
+                    if (distance < nearestDistance) {
+                        nearestDistance = distance;
+                        nearestRef = static_cast<int>(refIndex);
+                    }
+                }
+                if (nearestRef >= 0) {
+                    refUsed[static_cast<size_t>(nearestRef)] = true;
+                    candidate.emplace_back(nearestRef, static_cast<int>(srcIndex));
+                    error += nearestDistance;
+                }
+            }
+
+            if (candidate.size() > matches.size() ||
+                (candidate.size() == matches.size() && error < bestError)) {
+                matches = std::move(candidate);
+                bestError = error;
+            }
+        }
+    }
+    return matches.size() >= 4;
 }
 
 // 解仿射矩阵：从3对点
@@ -257,21 +340,38 @@ static bool isInlier(const StarPoint& ref, const StarPoint& src, const Alignment
     return (dx * dx + dy * dy) < (threshold * threshold);
 }
 
+static bool isPlausibleTransform(const AlignmentTransform& t) {
+    if (!std::isfinite(t.a) || !std::isfinite(t.b) || !std::isfinite(t.c) ||
+        !std::isfinite(t.d) || !std::isfinite(t.e) || !std::isfinite(t.f)) {
+        return false;
+    }
+    const double scaleX = std::hypot(t.a, t.d);
+    const double scaleY = std::hypot(t.b, t.e);
+    const double determinant = t.a * t.e - t.b * t.d;
+    if (scaleX < 0.85 || scaleX > 1.15 || scaleY < 0.85 || scaleY > 1.15 ||
+        determinant <= 0.0) {
+        return false;
+    }
+    const double normalizedDot = (t.a * t.b + t.d * t.e) / (scaleX * scaleY);
+    return std::abs(normalizedDot) < 0.15;
+}
+
 bool ImageAligner::ransacAffine(const std::vector<StarPoint>& refStars,
                                   const std::vector<StarPoint>& srcStars,
                                   const std::vector<std::pair<int, int>>& matches,
                                   AlignmentTransform& out) {
     if (matches.size() < 3) return false;
 
-    std::random_device rd;
-    std::mt19937 rng(rd());
+    // A fixed seed makes regression results reproducible.
+    std::mt19937 rng(0x53544152U);
     std::uniform_int_distribution<int> dist(0, static_cast<int>(matches.size()) - 1);
 
     int bestInliers = 0;
+    double bestSquaredError = std::numeric_limits<double>::max();
     AlignmentTransform bestT;
     double threshold = 2.0; // 像素误差阈值
 
-    for (int iter = 0; iter < 100; ++iter) {
+    for (int iter = 0; iter < 500; ++iter) {
         // 随机采样3对（无放回）
         std::vector<std::pair<int, int>> sample;
         std::vector<int> used;
@@ -285,23 +385,33 @@ bool ImageAligner::ransacAffine(const std::vector<StarPoint>& refStars,
         }
 
         AlignmentTransform t;
-        if (!solveAffine(refStars, srcStars, sample, t)) continue;
+        if (!solveAffine(refStars, srcStars, sample, t) || !isPlausibleTransform(t)) continue;
 
         // 验证内点率
         int inliers = 0;
+        double squaredError = 0.0;
         for (const auto& m : matches) {
             if (isInlier(refStars[m.first], srcStars[m.second], t, threshold)) {
                 inliers++;
+                const auto& ref = refStars[m.first];
+                const auto& src = srcStars[m.second];
+                const double dx = t.a * src.x + t.b * src.y + t.c - ref.x;
+                const double dy = t.d * src.x + t.e * src.y + t.f - ref.y;
+                squaredError += dx * dx + dy * dy;
             }
         }
 
-        if (inliers > bestInliers) {
+        if (inliers > bestInliers ||
+            (inliers == bestInliers && squaredError < bestSquaredError)) {
             bestInliers = inliers;
+            bestSquaredError = squaredError;
             bestT = t;
         }
     }
 
-    if (bestInliers < 3) return false;
+    const int minimumInliers = matches.size() == 3
+        ? 3 : std::max(4, std::min(8, static_cast<int>(std::ceil(matches.size() * 0.3))));
+    if (bestInliers < minimumInliers) return false;
 
     // 用所有内点重新拟合
     std::vector<std::pair<int, int>> inlierMatches;
@@ -319,33 +429,109 @@ bool ImageAligner::ransacAffine(const std::vector<StarPoint>& refStars,
     } else {
         out = bestT;
     }
+    if (!isPlausibleTransform(out)) return false;
 
-    return true;
+    int finalInliers = 0;
+    double finalSquaredError = 0.0;
+    for (const auto& match : matches) {
+        const auto& ref = refStars[match.first];
+        const auto& src = srcStars[match.second];
+        const double dx = out.a * src.x + out.b * src.y + out.c - ref.x;
+        const double dy = out.d * src.x + out.e * src.y + out.f - ref.y;
+        if (dx * dx + dy * dy < threshold * threshold) {
+            ++finalInliers;
+            finalSquaredError += dx * dx + dy * dy;
+        }
+    }
+    const double rms = finalInliers > 0
+        ? std::sqrt(finalSquaredError / finalInliers)
+        : std::numeric_limits<double>::max();
+    return finalInliers >= minimumInliers && rms <= threshold;
+}
+
+AlignmentQuality ImageAligner::evaluateTransform(
+    const std::vector<StarPoint>& refStars,
+    const std::vector<StarPoint>& srcStars,
+    const AlignmentTransform& transform,
+    double matchRadius) const {
+    AlignmentQuality quality;
+    if (matchRadius <= 0.0) return quality;
+    std::vector<bool> refUsed(refStars.size(), false);
+    double squaredError = 0.0;
+    const double radiusSquared = matchRadius * matchRadius;
+
+    for (const StarPoint& src : srcStars) {
+        const double x = transform.a * src.x + transform.b * src.y + transform.c;
+        const double y = transform.d * src.x + transform.e * src.y + transform.f;
+        int nearestRef = -1;
+        double nearestDistance = radiusSquared;
+        for (size_t refIndex = 0; refIndex < refStars.size(); ++refIndex) {
+            if (refUsed[refIndex]) continue;
+            const double dx = refStars[refIndex].x - x;
+            const double dy = refStars[refIndex].y - y;
+            const double distance = dx * dx + dy * dy;
+            if (distance < nearestDistance) {
+                nearestDistance = distance;
+                nearestRef = static_cast<int>(refIndex);
+            }
+        }
+        if (nearestRef >= 0) {
+            refUsed[static_cast<size_t>(nearestRef)] = true;
+            ++quality.matchedStars;
+            squaredError += nearestDistance;
+        }
+    }
+    quality.rmsError = quality.matchedStars > 0
+        ? std::sqrt(squaredError / quality.matchedStars)
+        : std::numeric_limits<double>::max();
+    return quality;
 }
 
 bool ImageAligner::align(const std::vector<StarPoint>& refStars,
                            const std::vector<StarPoint>& srcStars,
-                           AlignmentTransform& out) {
+                           AlignmentTransform& out,
+                           AlignmentQuality* quality) {
     std::vector<std::pair<int, int>> matches;
-    if (!triangleMatch(refStars, srcStars, matches)) return false;
-    return ransacAffine(refStars, srcStars, matches, out);
+    bool aligned = triangleMatch(refStars, srcStars, matches) &&
+                   ransacAffine(refStars, srcStars, matches, out);
+    if (!aligned) {
+        aligned = translationSeedMatch(refStars, srcStars, matches) &&
+                  ransacAffine(refStars, srcStars, matches, out);
+    }
+    if (!aligned) return false;
+
+    const AlignmentQuality verified = evaluateTransform(refStars, srcStars, out, 4.0);
+    if (quality) *quality = verified;
+    const int minimumMatches = std::max(4, std::min(8,
+        static_cast<int>(std::ceil(std::min(refStars.size(), srcStars.size()) * 0.2))));
+    return verified.matchedStars >= minimumMatches && verified.rmsError <= 2.5;
 }
 
 bool ImageAligner::applyTransform(const std::vector<uint16_t>& src, int w, int h,
                                     const AlignmentTransform& t,
                                     std::vector<uint16_t>& dst) {
-    dst.resize(w * h);
+    if (w <= 1 || h <= 1 ||
+        static_cast<size_t>(w) > std::numeric_limits<size_t>::max() / static_cast<size_t>(h) ||
+        src.size() != static_cast<size_t>(w) * static_cast<size_t>(h)) {
+        return false;
+    }
+
+    const double det = t.a * t.e - t.b * t.d;
+    if (!std::isfinite(det) || std::abs(det) < 1e-12) return false;
+    const double sourceXFromX = t.e / det;
+    const double sourceXFromY = -t.b / det;
+    const double sourceXOffset = (t.b * t.f - t.e * t.c) / det;
+    const double sourceYFromX = -t.d / det;
+    const double sourceYFromY = t.a / det;
+    const double sourceYOffset = (t.d * t.c - t.a * t.f) / det;
+
+    dst.resize(static_cast<size_t>(w) * h);
 
     for (int y = 0; y < h; ++y) {
         for (int x = 0; x < w; ++x) {
-            // 目标坐标 (x,y) 对应源坐标：使用逆变换
-            double det = t.a * t.e - t.b * t.d;
-            if (std::abs(det) < 1e-12) {
-                dst[y * w + x] = 0;
-                continue;
-            }
-            double sx = (t.e * x - t.b * y + t.b * t.f - t.e * t.c) / det;
-            double sy = (-t.d * x + t.a * y + t.d * t.c - t.a * t.f) / det;
+            // The transform maps source to destination, so resampling uses its inverse.
+            const double sx = sourceXFromX * x + sourceXFromY * y + sourceXOffset;
+            const double sy = sourceYFromX * x + sourceYFromY * y + sourceYOffset;
 
             int ix = static_cast<int>(std::floor(sx));
             int iy = static_cast<int>(std::floor(sy));

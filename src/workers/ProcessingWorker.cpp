@@ -246,8 +246,8 @@ void ProcessingWorker::run() {
     StarDetector detector;
     DetectionOptions alignmentOptions;
     alignmentOptions.spatiallyBalanced = true;
-    alignmentOptions.maxCandidates = 30;
-    alignmentOptions.maxStars = 30;
+    alignmentOptions.maxCandidates = 50;
+    alignmentOptions.maxStars = 50;
     std::vector<StarPoint> referenceStars;
     if (!detector.detect(referenceLuminance, width, height,
                          referenceStars, alignmentOptions)) {

@@ -64,6 +64,26 @@ QStringList rawFiles(const QString& directory) {
     return files;
 }
 
+QStringList sampleCategories(const QString& sampleRoot) {
+    QStringList categories;
+    for (const QString& category : kCategories) {
+        if (!rawFiles(QDir(sampleRoot).filePath(category)).isEmpty()) {
+            categories.push_back(category);
+        }
+    }
+
+    const QStringList directories = QDir(sampleRoot).entryList(
+        QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name | QDir::IgnoreCase);
+    for (const QString& directory : directories) {
+        if (!categories.contains(directory) &&
+            !rawFiles(QDir(sampleRoot).filePath(directory)).isEmpty()) {
+            categories.push_back(directory);
+        }
+    }
+    // Keep an empty report structurally useful before the first samples arrive.
+    return categories.isEmpty() ? kCategories : categories;
+}
+
 QString relativePath(const QString& root, const QString& path) {
     return QDir(root).relativeFilePath(path);
 }
@@ -205,8 +225,8 @@ QJsonObject inspectFile(const QString& sampleRoot,
 
     DetectionOptions options;
     options.spatiallyBalanced = true;
-    options.maxCandidates = 30;
-    options.maxStars = 30;
+    options.maxCandidates = 50;
+    options.maxStars = 50;
     std::vector<StarPoint> stars;
     StarDetector detector;
     timer.restart();
@@ -232,11 +252,14 @@ QJsonObject inspectFile(const QString& sampleRoot,
             result["alignment"] = "dimension-mismatch";
         } else {
             AlignmentTransform transform;
+            AlignmentQuality quality;
             ImageAligner aligner;
             timer.restart();
-            const bool aligned = aligner.align(reference.stars, stars, transform);
+            const bool aligned = aligner.align(reference.stars, stars, transform, &quality);
             result["alignmentMs"] = static_cast<double>(timer.elapsed());
             result["alignment"] = aligned ? "passed" : "failed";
+            result["alignmentMatchedStars"] = quality.matchedStars;
+            result["alignmentRmsError"] = quality.rmsError;
             if (aligned) {
                 ++summary.alignmentPassed;
                 result["transform"] = transformJson(transform);
@@ -346,7 +369,14 @@ int main(int argc, char* argv[]) {
         "Compare against a previous report.json and fail on regressions.", "file");
     const QCommandLineOption strictOption("strict",
         "Fail when any sample cannot complete the checks enabled by this mode.");
-    parser.addOptions({samplesOption, outputOption, quickOption, baselineOption, strictOption});
+    const QCommandLineOption categoryOption("category",
+        "Only process one category directory.", "name");
+    const QCommandLineOption limitOption("limit",
+        "Process at most this many sorted files per category.", "count", "0");
+    const QCommandLineOption referenceIndexOption("reference-index",
+        "Use this zero-based sorted file index as the category reference.", "index", "-1");
+    parser.addOptions({samplesOption, outputOption, quickOption, baselineOption,
+                       strictOption, categoryOption, limitOption, referenceIndexOption});
     parser.process(application);
 
     const QString sampleRoot = QDir(parser.value(samplesOption)).absolutePath();
@@ -359,6 +389,18 @@ int main(int argc, char* argv[]) {
         : QDir(parser.value(outputOption)).absolutePath();
     QDir().mkpath(outputRoot);
     const bool quick = parser.isSet(quickOption);
+    bool limitOk = false;
+    const int fileLimit = parser.value(limitOption).toInt(&limitOk);
+    if (!limitOk || fileLimit < 0) {
+        std::cerr << "--limit must be a non-negative integer.\n";
+        return 2;
+    }
+    bool referenceIndexOk = false;
+    const int requestedReferenceIndex = parser.value(referenceIndexOption).toInt(&referenceIndexOk);
+    if (!referenceIndexOk || requestedReferenceIndex < -1) {
+        std::cerr << "--reference-index must be -1 or a non-negative integer.\n";
+        return 2;
+    }
 
     QJsonObject report;
     report["schemaVersion"] = 1;
@@ -366,6 +408,9 @@ int main(int argc, char* argv[]) {
     report["generatedAt"] = QDateTime::currentDateTimeUtc().toString(Qt::ISODate);
     report["sampleRoot"] = sampleRoot;
     report["mode"] = quick ? "quick" : "full";
+    report["categoryFilter"] = parser.value(categoryOption);
+    report["fileLimitPerCategory"] = fileLimit;
+    report["requestedReferenceIndex"] = requestedReferenceIndex;
     report["physicalMemoryBytes"] = QString::number(
         ProcessingMemoryEstimator::totalPhysicalMemoryBytes());
     report["recommendedBudgetBytes"] = QString::number(
@@ -373,9 +418,22 @@ int main(int argc, char* argv[]) {
 
     Summary total;
     QJsonArray categories;
-    for (const QString& category : kCategories) {
+    QStringList categoriesToProcess = sampleCategories(sampleRoot);
+    if (parser.isSet(categoryOption)) {
+        categoriesToProcess = {parser.value(categoryOption)};
+    }
+    for (const QString& category : categoriesToProcess) {
         const QString categoryPath = QDir(sampleRoot).filePath(category);
-        const QStringList files = rawFiles(categoryPath);
+        QStringList files = rawFiles(categoryPath);
+        if (fileLimit > 0 && files.size() > fileLimit) files = files.mid(0, fileLimit);
+        if (requestedReferenceIndex >= files.size() && !files.isEmpty()) {
+            std::cerr << "--reference-index is outside category "
+                      << category.toStdString() << ".\n";
+            return 2;
+        }
+        if (requestedReferenceIndex > 0) {
+            files.prepend(files.takeAt(requestedReferenceIndex));
+        }
         Summary categorySummary;
         QHash<QString, ReferenceFrame> references;
         QJsonObject memoryEstimate;
@@ -470,7 +528,8 @@ int main(int argc, char* argv[]) {
     const bool strictPassed = total.metadataPassed == total.files &&
         total.previewPassed == total.files &&
         (quick || (total.fullDecodePassed == total.files &&
-                   total.starDetectionPassed == total.files));
+                   total.starDetectionPassed == total.files &&
+                   total.alignmentPassed == total.alignmentAttempted));
     if ((parser.isSet(strictOption) && !strictPassed) || !baselinePassed) return 6;
     return 0;
 }

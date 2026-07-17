@@ -16,6 +16,11 @@ struct AlignmentTransform {
     double d = 0.0, e = 1.0, f = 0.0;
 };
 
+struct AlignmentQuality {
+    int matchedStars = 0;
+    double rmsError = 0.0;
+};
+
 /**
  * @brief 图像对齐器
  *
@@ -29,11 +34,13 @@ public:
      * @param refStars  参考帧的星点列表
      * @param srcStars  源帧的星点列表
      * @param out       输出变换矩阵
+     * @param quality   可选的独立最近邻匹配数与 RMS 质量指标
      * @return true 对齐成功
      */
     bool align(const std::vector<StarPoint>& refStars,
                const std::vector<StarPoint>& srcStars,
-               AlignmentTransform& out);
+               AlignmentTransform& out,
+               AlignmentQuality* quality = nullptr);
 
     /**
      * @brief 应用仿射变换到图像
@@ -55,8 +62,15 @@ private:
     bool triangleMatch(const std::vector<StarPoint>& refStars,
                        const std::vector<StarPoint>& srcStars,
                        std::vector<std::pair<int, int>>& matches);
+    bool translationSeedMatch(const std::vector<StarPoint>& refStars,
+                              const std::vector<StarPoint>& srcStars,
+                              std::vector<std::pair<int, int>>& matches);
     bool ransacAffine(const std::vector<StarPoint>& refStars,
                         const std::vector<StarPoint>& srcStars,
                         const std::vector<std::pair<int, int>>& matches,
                         AlignmentTransform& out);
+    AlignmentQuality evaluateTransform(const std::vector<StarPoint>& refStars,
+                                       const std::vector<StarPoint>& srcStars,
+                                       const AlignmentTransform& transform,
+                                       double matchRadius) const;
 };

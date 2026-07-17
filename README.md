@@ -138,7 +138,7 @@ cmake --build . --config Release
 
 ## 真实 RAW 样片回归
 
-样片默认放在代码目录旁的 `star-photograph-tool-samples`。完整模式会逐张执行正式 AHD 解码、星点检测和同目录序列对齐，并在 `build/sample-regression-output` 写入 `report.json` 与检查预览。
+样片默认放在代码目录旁的 `star-photograph-tool-samples`。工具优先识别约定的五类目录，也会自动发现其他包含 RAW 的一级目录。完整模式会逐张执行正式 AHD 解码、星点检测和同目录序列对齐，并在 `build/sample-regression-output` 写入 `report.json` 与检查预览。
 
 ```bash
 # 完整回归
@@ -146,6 +146,12 @@ cmake --build . --config Release
 
 # 只检查元数据和浏览预览
 ./run-sample-regression.sh --quick
+
+# 对一个大目录先完整检查排序后的前 8 张
+./run-sample-regression.sh --category star-raw --limit 8
+
+# 15 张序列使用排序后的第 8 张（索引 7）作为参考帧
+./run-sample-regression.sh --category star-raw --limit 15 --reference-index 7
 
 # 将上一份报告作为基线；能力或结果退化时返回非零退出码
 ./run-sample-regression.sh --baseline /path/to/baseline-report.json --strict
