@@ -35,34 +35,6 @@ QList<Preset> PresetManager::builtinPresets() {
     deepSky.outputFormat = "tiff16";
     presets.append(deepSky);
 
-    // 单帧降噪
-    Preset singleFrame;
-    singleFrame.name = "单帧降噪";
-    singleFrame.alignMethod = "star";
-    singleFrame.stackMethod = "median";
-    singleFrame.kappaValue = 2.0;
-    singleFrame.dewarpEnabled = false;
-    singleFrame.dewarpStrength = 30;
-    singleFrame.stretchEnabled = true;
-    singleFrame.starReduceEnabled = false;
-    singleFrame.starReduceStrength = 50;
-    singleFrame.outputFormat = "tiff16";
-    presets.append(singleFrame);
-
-    // 延时序列
-    Preset timelapse;
-    timelapse.name = "延时序列";
-    timelapse.alignMethod = "star";
-    timelapse.stackMethod = "kappa-sigma";
-    timelapse.kappaValue = 3.0;
-    timelapse.dewarpEnabled = true;
-    timelapse.dewarpStrength = 30;
-    timelapse.stretchEnabled = false;
-    timelapse.starReduceEnabled = false;
-    timelapse.starReduceStrength = 50;
-    timelapse.outputFormat = "tiff16";
-    presets.append(timelapse);
-
     return presets;
 }
 

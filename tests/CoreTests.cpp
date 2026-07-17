@@ -2,6 +2,8 @@
 #include "core/ImageBufferUtils.h"
 #include "core/ImageExporter.h"
 #include "core/RawImageLoader.h"
+#include "core/ProcessingMemoryEstimator.h"
+#include "core/PreviewToneMapper.h"
 #include "core/StackingEngine.h"
 #include "core/StarDetector.h"
 #include "core/StarReducer.h"
@@ -122,6 +124,44 @@ void testImageBufferUtils() {
           "A failed buffer conversion should leave its output unchanged");
 }
 
+void testMemoryEstimator() {
+    constexpr uint64_t frameBytes = 6000ULL * 4000ULL * 3ULL * sizeof(uint16_t);
+    check(ProcessingMemoryEstimator::estimatePeakBytes(6000, 4000, 20, false) ==
+              frameBytes * 44,
+          "Normal stack estimate should use 2N+4 RGB frame equivalents");
+    check(ProcessingMemoryEstimator::estimatePeakBytes(6000, 4000, 20, true) ==
+              frameBytes * 86,
+          "Sky/ground estimate should use 4N+6 RGB frame equivalents");
+    check(ProcessingMemoryEstimator::estimatePeakBytes(0, 4000, 20, false) == 0,
+          "Memory estimator should reject invalid dimensions");
+    check(ProcessingMemoryEstimator::recommendedBudgetBytes() > 0,
+          "Memory estimator should always provide a usable default budget");
+}
+
+void testPreviewToneMapper() {
+    const std::vector<uint16_t> mono = {0, 1000, 2000, 65535};
+    const PreviewImage8 monoPreview = PreviewToneMapper::mapMono16(mono, 4, 1, 2);
+    check(monoPreview.width == 2 && monoPreview.height == 1,
+          "Preview mapper should enforce its long-side limit");
+    check(monoPreview.rgb.size() == 6 && monoPreview.rgb[0] == 0,
+          "Mono preview should produce an RGB buffer with a black black-point");
+    const PreviewImage8 fullMonoPreview = PreviewToneMapper::mapMono16(mono, 4, 1, 4);
+    check(fullMonoPreview.rgb.back() == 255,
+          "Preview tone mapping should map its white point to full display white");
+
+    std::vector<uint16_t> rgb(8 * 4 * 3, 0);
+    rgb[rgb.size() - 3] = 65535;
+    rgb[rgb.size() - 2] = 32768;
+    rgb[rgb.size() - 1] = 16384;
+    const PreviewImage8 rgbPreview = PreviewToneMapper::mapRgb16(rgb, 8, 4, 4);
+    check(rgbPreview.width == 4 && rgbPreview.height == 2,
+          "RGB preview should preserve aspect ratio while downsampling");
+    check(rgbPreview.rgb.size() == 24,
+          "RGB preview should return exactly three bytes per output pixel");
+    check(PreviewToneMapper::mapRgb16(rgb, 7, 4).rgb.empty(),
+          "Preview mapper should reject a mismatched RGB buffer");
+}
+
 void testTransformDirection() {
     constexpr int width = 8;
     constexpr int height = 6;
@@ -228,6 +268,8 @@ int main(int argc, char* argv[]) {
     QCoreApplication application(argc, argv);
     testStacking();
     testImageBufferUtils();
+    testMemoryEstimator();
+    testPreviewToneMapper();
     testTransformDirection();
     testStarDetectionAndReduction();
     testTiffIccProfile();

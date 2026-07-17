@@ -367,8 +367,7 @@ void ProjectPanel::addFiles(const QStringList& filePaths) {
         // 完成后通过 metadataReady 信号传回主线程
 
         m_fileItems.append(item);
-        int index = m_fileItems.size() - 1;
-        addFileCard(item, index);
+        addFileCard(item);
         m_thumbnailGen->generateAsync(filePath, 96);
         added = true;
     }
@@ -380,13 +379,14 @@ void ProjectPanel::addFiles(const QStringList& filePaths) {
     }
 }
 
-void ProjectPanel::addFileCard(const FileItem& item, int index) {
+void ProjectPanel::addFileCard(const FileItem& item) {
     auto* card = new FileCard(item, m_listContainer);
-    connect(card, &FileCard::clicked, this, [this, index]() {
-        setCurrentIndex(index);
+    connect(card, &FileCard::clicked, this, [this, card]() {
+        setCurrentIndex(m_cards.indexOf(card));
     });
-    connect(card, &FileCard::customContextMenuRequested, this, [this, card, index](const QPoint& pos) {
-        m_contextMenuIndex = index;
+    connect(card, &FileCard::customContextMenuRequested, this, [this, card](const QPoint& pos) {
+        m_contextMenuIndex = m_cards.indexOf(card);
+        if (m_contextMenuIndex < 0) return;
         m_contextMenu->exec(card->mapToGlobal(pos));
     });
     m_cards.append(card);
@@ -415,14 +415,6 @@ void ProjectPanel::removeSelected() {
     card->deleteLater();
     m_fileItems.removeAt(idx);
     m_currentIndex = -1;
-
-    // 重新索引所有卡片
-    for (int i = 0; i < m_cards.size(); ++i) {
-        disconnect(m_cards[i], &FileCard::clicked, nullptr, nullptr);
-        connect(m_cards[i], &FileCard::clicked, this, [this, i]() {
-            setCurrentIndex(i);
-        });
-    }
 
     if (m_cards.isEmpty()) {
         showEmptyState();
@@ -583,14 +575,6 @@ void ProjectPanel::onRemoveFromList() {
         m_currentIndex = -1;
     } else if (m_currentIndex > idx) {
         m_currentIndex--;
-    }
-
-    // 重新连接
-    for (int i = 0; i < m_cards.size(); ++i) {
-        disconnect(m_cards[i], &FileCard::clicked, nullptr, nullptr);
-        connect(m_cards[i], &FileCard::clicked, this, [this, i]() {
-            setCurrentIndex(i);
-        });
     }
 
     if (m_cards.isEmpty()) {

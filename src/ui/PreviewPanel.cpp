@@ -1,4 +1,5 @@
 #include "PreviewPanel.h"
+#include "../core/PreviewToneMapper.h"
 #include "../core/RawImageLoader.h"
 #include <QScrollArea>
 #include <QVBoxLayout>
@@ -12,6 +13,7 @@
 #include <QDebug>
 #include <QPainter>
 #include <algorithm>
+#include <cmath>
 
 PreviewPanel::PreviewPanel(QWidget* parent)
     : QWidget(parent)
@@ -106,6 +108,8 @@ void PreviewPanel::setupTopBar() {
 
     m_beforeAfterBtn = createToolBtn(QString::fromUtf8("对比"), QString::fromUtf8("Before/After 对比"));
     m_beforeAfterBtn->setCheckable(true);
+    // The pipeline does not yet retain a matching pre-processing frame.
+    m_beforeAfterBtn->setVisible(false);
     connect(m_beforeAfterBtn, &QPushButton::clicked, this, &PreviewPanel::onToggleBeforeAfter);
     layout->addWidget(m_beforeAfterBtn);
 
@@ -266,32 +270,15 @@ void PreviewPanel::loadImage(const QImage& image) {
 }
 
 void PreviewPanel::load16BitImage(const std::vector<uint16_t>& data, int w, int h) {
-    if (data.empty() || w <= 0 || h <= 0) {
+    const PreviewImage8 preview = PreviewToneMapper::mapMono16(data, w, h);
+    if (preview.rgb.empty()) {
         clearImage();
         return;
     }
 
-    // 找到最大值用于归一化
-    uint16_t maxVal = 0;
-    for (uint16_t v : data) {
-        if (v > maxVal) maxVal = v;
-    }
-    if (maxVal < 256) maxVal = 255;
-    if (maxVal == 0) maxVal = 1;
-
-    // Arcsinh tone mapping
-    QImage image(w, h, QImage::Format_RGB888);
-    float scale = 255.0f / static_cast<float>(maxVal);
-    for (int y = 0; y < h; ++y) {
-        for (int x = 0; x < w; ++x) {
-            uint16_t val = data[y * w + x];
-            float normalized = val * scale;
-            // Arcsinh stretch: asinh(nonlinear) * factor
-            float stretched = std::asinh(normalized * 0.05f) * 40.0f;
-            int v = static_cast<int>(std::clamp(stretched, 0.0f, 255.0f));
-            image.setPixelColor(x, y, QColor(v, v, v));
-        }
-    }
+    const QImage borrowed(preview.rgb.data(), preview.width, preview.height,
+                          preview.width * 3, QImage::Format_RGB888);
+    const QImage image = borrowed.copy();
 
     m_currentImage = image;
     m_beforeImage = image;
@@ -311,38 +298,15 @@ void PreviewPanel::load16BitImage(const std::vector<uint16_t>& data, int w, int 
 }
 
 void PreviewPanel::loadRgb16BitImage(const std::vector<uint16_t>& rgb, int w, int h) {
-    if (rgb.empty() || w <= 0 || h <= 0 || static_cast<int>(rgb.size()) != w * h * 3) {
+    const PreviewImage8 preview = PreviewToneMapper::mapRgb16(rgb, w, h);
+    if (preview.rgb.empty()) {
         clearImage();
         return;
     }
 
-    // 找到最大值用于归一化
-    uint16_t maxVal = 0;
-    for (uint16_t v : rgb) {
-        if (v > maxVal) maxVal = v;
-    }
-    if (maxVal < 256) maxVal = 255;
-    if (maxVal == 0) maxVal = 1;
-
-    // Arcsinh tone mapping for RGB
-    QImage image(w, h, QImage::Format_RGB888);
-    float scale = 255.0f / static_cast<float>(maxVal);
-    for (int y = 0; y < h; ++y) {
-        for (int x = 0; x < w; ++x) {
-            int idx = (y * w + x) * 3;
-            float r = rgb[idx + 0] * scale;
-            float g = rgb[idx + 1] * scale;
-            float b = rgb[idx + 2] * scale;
-            // Arcsinh stretch
-            r = std::asinh(r * 0.05f) * 40.0f;
-            g = std::asinh(g * 0.05f) * 40.0f;
-            b = std::asinh(b * 0.05f) * 40.0f;
-            int ri = static_cast<int>(std::clamp(r, 0.0f, 255.0f));
-            int gi = static_cast<int>(std::clamp(g, 0.0f, 255.0f));
-            int bi = static_cast<int>(std::clamp(b, 0.0f, 255.0f));
-            image.setPixelColor(x, y, QColor(ri, gi, bi));
-        }
-    }
+    const QImage borrowed(preview.rgb.data(), preview.width, preview.height,
+                          preview.width * 3, QImage::Format_RGB888);
+    const QImage image = borrowed.copy();
 
     m_currentImage = image;
     m_beforeImage = image;
@@ -380,7 +344,7 @@ void PreviewPanel::clearImage() {
 }
 
 void PreviewPanel::setZoom(double zoom) {
-    m_zoom = std::clamp(zoom, 0.01, 50.0);
+    m_zoom = std::clamp(zoom, 0.01, maximumSafeZoom());
     applyZoom();
     updateZoomDisplay();
     emit zoomChanged(m_zoom);
@@ -403,8 +367,7 @@ void PreviewPanel::onFitView() {
 
     double scaleW = double(viewW) / m_currentImage.width();
     double scaleH = double(viewH) / m_currentImage.height();
-    m_zoom = std::min(scaleW, scaleH);
-    m_zoom = std::max(m_zoom, 0.01);
+    m_zoom = std::clamp(std::min(scaleW, scaleH), 0.01, maximumSafeZoom());
 
     applyZoom();
     updateZoomDisplay();
@@ -425,24 +388,7 @@ void PreviewPanel::onZoomOut() {
 
 void PreviewPanel::onToggleBeforeAfter() {
     m_beforeAfterMode = m_beforeAfterBtn->isChecked();
-    // 目前 Before/After 模式使用相同图像，后续处理阶段会替换 afterImage
-    if (m_beforeAfterMode) {
-        // 在 QLabel 上显示 afterImage（当前和原图相同）
-        if (!m_afterImage.isNull()) {
-            QPixmap pixmap = QPixmap::fromImage(m_afterImage);
-            if (m_zoom != 1.0) {
-                pixmap = pixmap.scaled(
-                    int(m_afterImage.width() * m_zoom),
-                    int(m_afterImage.height() * m_zoom),
-                    Qt::KeepAspectRatio,
-                    Qt::SmoothTransformation
-                );
-            }
-            m_imageLabel->setPixmap(pixmap);
-        }
-    } else {
-        updateImageDisplay();
-    }
+    applyZoom();
 }
 
 void PreviewPanel::onToggleInfo() {
@@ -456,13 +402,14 @@ void PreviewPanel::updateImageDisplay() {
 }
 
 void PreviewPanel::applyZoom() {
-    if (m_currentImage.isNull()) return;
+    const QImage& image = displayedImage();
+    if (image.isNull()) return;
 
-    int w = int(m_currentImage.width() * m_zoom);
-    int h = int(m_currentImage.height() * m_zoom);
+    const int w = std::max(1, qRound(image.width() * m_zoom));
+    const int h = std::max(1, qRound(image.height() * m_zoom));
 
-    QPixmap pixmap = QPixmap::fromImage(m_currentImage);
-    if (w > 0 && h > 0) {
+    QPixmap pixmap = QPixmap::fromImage(image);
+    if (w != image.width() || h != image.height()) {
         pixmap = pixmap.scaled(w, h, Qt::KeepAspectRatio, Qt::SmoothTransformation);
     }
 
@@ -476,6 +423,22 @@ void PreviewPanel::applyZoom() {
 
     m_imageLabel->setPixmap(pixmap);
     m_imageLabel->setFixedSize(pixmap.size());
+}
+
+double PreviewPanel::maximumSafeZoom() const {
+    const QImage& image = displayedImage();
+    if (image.isNull()) return 1.0;
+
+    // A scaled QPixmap may require several temporary copies. Bound it to about
+    // 32 megapixels so zoom cannot allocate multiple gigabytes on a large frame.
+    constexpr double maxRenderedPixels = 32.0 * 1024.0 * 1024.0;
+    const double pixels = static_cast<double>(image.width()) * image.height();
+    return std::clamp(std::sqrt(maxRenderedPixels / std::max(1.0, pixels)), 1.0, 8.0);
+}
+
+const QImage& PreviewPanel::displayedImage() const {
+    if (m_beforeAfterMode && !m_afterImage.isNull()) return m_afterImage;
+    return m_currentImage;
 }
 
 void PreviewPanel::updateZoomDisplay() {

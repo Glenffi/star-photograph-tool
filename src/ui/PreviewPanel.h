@@ -62,6 +62,8 @@ private:
     void updateZoomDisplay();
     void updateImageDisplay();
     void applyZoom();
+    double maximumSafeZoom() const;
+    const QImage& displayedImage() const;
     QImage convertRawToDisplayable(const QString& filePath);
     QString formatExposureTime(double seconds) const;
 

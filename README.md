@@ -13,13 +13,14 @@
 - 星点遮罩、形态学腐蚀和羽化混合的自动缩星
 - 线性 sRGB 16-bit TIFF（嵌入 ICC）和 sRGB 8-bit PNG 导出
 - 内嵌 RAW 缩略图优先、half-size 快速回退的浏览预览
+- 处理前内存预算检查，以及受控分辨率的 16-bit 结果预览
 
 ## 规划中
 
 - 校准帧（Dark / Flat / Bias）
 - 延时图片序列降噪、星轨合成
 - 云端 AI 参数建议
-- GPU 加速、磁盘分块和内存预算
+- GPU 加速和磁盘分块处理
 - Windows 构建与 CI 持续验证
 
 ## 系统要求
@@ -50,6 +51,8 @@ StarProcessor/
 │   ├── main.cpp                 # 主入口、MainWindow 与后台处理编排
 │   ├── core/
 │   │   ├── ImageBufferUtils.h/cpp     # RGB 校验、亮度提取与通道转换
+│   │   ├── ProcessingMemoryEstimator.h/cpp # 跨平台物理内存与处理峰值估算
+│   │   ├── PreviewToneMapper.h/cpp    # 16-bit 结果的有界 8-bit 显示映射
 │   │   ├── RawImageLoader.h/cpp       # RAW 文件加载与解码
 │   │   ├── ThumbnailGenerator.h/cpp   # 异步缩略图生成
 │   │   ├── StarDetector.h/cpp         # 星点检测与 2D 高斯拟合
@@ -113,7 +116,7 @@ cmake --build build --parallel
 ctest --test-dir build --output-on-failure
 
 # 4. 运行
-./StarProcessor.app/Contents/MacOS/StarProcessor
+./build/StarProcessor.app/Contents/MacOS/StarProcessor
 ```
 
 ### Windows
@@ -134,7 +137,9 @@ cmake --build . --config Release
 
 - **正式 RAW 解码**：LibRaw AHD + 相机白平衡 + 颜色矩阵，输出线性 sRGB 原色的 16-bit RGB
 - **浏览预览**：优先使用相机内嵌 JPEG，回退到 half-size 快速解码；预览不参与最终处理
-- **内存**：处理流程仍会把可用帧保存在内存中，超高像素和大量帧尚未实现磁盘分块
+- **内存**：处理前按分辨率、帧数和天地分离模式估算峰值，默认最多使用物理内存的 65%；超高像素和大量帧仍需后续磁盘分块
+- **结果预览**：16-bit 处理结果会映射为最长边不超过 4096 px 的 8-bit 显示缓存；TIFF/PNG 导出始终使用完整分辨率结果
+- **预设**：当前仅提供“银河广角”和“深空天体”；单帧降噪与延时序列在专用流程完成前不显示
 - **天地检测**：传统 CV 自动蒙版需要人工预览确认，复杂山脊、云层和强光污染场景可能误判
 - **测试样片**：算法合成测试已接入；跨机型 RAW 样片集和 Windows CI 尚未建立
 

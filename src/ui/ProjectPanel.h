@@ -99,7 +99,7 @@ private:
     void setupEmptyState();
     void setupFileList();
     void setupBottomBar();
-    void addFileCard(const FileItem& item, int index);
+    void addFileCard(const FileItem& item);
     void updateCard(int index);
     void updateCardSelection(int index);
     void updateAllCardStyles();

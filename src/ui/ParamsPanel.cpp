@@ -67,10 +67,9 @@ void ParamsPanel::setupUI() {
     presetRow->addWidget(presetLabel);
     m_presetCombo = new QComboBox(container);
     m_presetCombo->addItem(QString::fromUtf8("自定义"));
-    m_presetCombo->addItem(QString::fromUtf8("银河广角"));
-    m_presetCombo->addItem(QString::fromUtf8("深空天体"));
-    m_presetCombo->addItem(QString::fromUtf8("单帧降噪"));
-    m_presetCombo->addItem(QString::fromUtf8("延时序列"));
+    for (const Preset& preset : PresetManager::builtinPresets()) {
+        m_presetCombo->addItem(preset.name);
+    }
     m_presetCombo->setStyleSheet(
         "QComboBox { background-color: #21262D; color: #E6EDF3; border: 1px solid #30363D; "
         "border-radius: 4px; padding: 4px 8px; font-size: 12px; }"
@@ -576,6 +575,7 @@ void ParamsPanel::onGroupToggled(bool checked) {
             child->setVisible(checked);
         }
     }
+    if (checked && group == m_stackGroup) updateSkyGroundControls();
     group->setMinimumHeight(checked ? 0 : 28);
 }
 
@@ -762,6 +762,7 @@ void ParamsPanel::loadPreset() {
     m_stretchCheck->setChecked(stretch);
     m_starReduceCheck->setChecked(starReduce);
     m_starReduceSlider->setValue(starReduceStrength);
+    m_starReduceSlider->setEnabled(starReduce);
     m_outputFormat->setCurrentIndex(outputFormat);
     m_outputPath->setText(outputPath);
 
@@ -957,14 +958,19 @@ void ParamsPanel::setOutputPath(const QString& path) {
 
 void ParamsPanel::updateRefFrameList(const QStringList& fileNames) {
     if (!m_refFrame) return;
-    QString current = m_refFrame->currentText();
+    const QString currentPath = m_refFrame->currentData().toString();
+    QSignalBlocker blocker(m_refFrame);
     m_refFrame->clear();
     m_refFrame->addItem(QString::fromUtf8("自动选择"));
-    for (const QString& name : fileNames) {
-        m_refFrame->addItem(QFileInfo(name).fileName());
+    for (const QString& path : fileNames) {
+        m_refFrame->addItem(QFileInfo(path).fileName(), path);
     }
-    int idx = m_refFrame->findText(current);
+    const int idx = m_refFrame->findData(currentPath);
     if (idx >= 0) m_refFrame->setCurrentIndex(idx);
+}
+
+QString ParamsPanel::selectedReferenceFrame() const {
+    return m_refFrame ? m_refFrame->currentData().toString() : QString();
 }
 
 bool ParamsPanel::skyGroundSeparationEnabled() const {

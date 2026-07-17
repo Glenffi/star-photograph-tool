@@ -345,9 +345,9 @@ private:
 
         // 文件变化 -> 更新按钮状态 & 参考帧列表 & 智能推荐堆栈算法
         connect(m_projectPanel, &ProjectPanel::filesChanged, this, [this]() {
+            invalidateCachedResult();
             int count = m_projectPanel->includedFilePaths().size();
             m_toolbar->enableProcess(count >= 2);
-            if (count < 2) m_toolbar->enableExport(false);
             m_paramsPanel->updateRefFrameList(m_projectPanel->includedFilePaths());
             if (count >= 2) {
                 m_paramsPanel->recommendStackMethod(count);
@@ -366,11 +366,6 @@ private:
                     QString("坐标: (%1, %2) | RGB: (%3, %4, %5)").arg(x).arg(y).arg(r).arg(g).arg(b)
                 );
             }
-        });
-
-        // 参数变化
-        connect(m_previewPanel, &PreviewPanel::mousePixelInfo, this, [](int x, int y, int r, int g, int b) {
-            Q_UNUSED(x) Q_UNUSED(y) Q_UNUSED(r) Q_UNUSED(g) Q_UNUSED(b)
         });
 
         // 参数变化
@@ -427,6 +422,25 @@ private:
                "QMenu::item { padding: 6px 20px; border-radius: 4px; }"
                "QMenu::item:selected { background-color: #30363D; }"
                "QMenu::separator { height: 1px; background-color: #30363D; margin: 4px 8px; }";
+    }
+
+    static QString formatExposureTime(double seconds) {
+        if (seconds >= 1.0) {
+            return QString("%1s").arg(seconds, 0, 'f', seconds >= 10.0 ? 0 : 1);
+        }
+        if (seconds > 0.0) {
+            return QString("1/%1s").arg(qRound(1.0 / seconds));
+        }
+        return QString::fromUtf8("—");
+    }
+
+    void invalidateCachedResult() {
+        m_cachedStackedData.clear();
+        m_cachedStackedData.shrink_to_fit();
+        m_cachedWidth = 0;
+        m_cachedHeight = 0;
+        m_cachedFrameCount = 0;
+        if (m_toolbar) m_toolbar->enableExport(false);
     }
 
 private slots:
@@ -488,7 +502,7 @@ private slots:
         ).arg(filePath)
          .arg(QString::fromStdString(metadata.cameraModel))
          .arg(metadata.iso)
-         .arg(metadata.exposureTime > 0 ? QString("1/%1s").arg(qRound(1.0 / metadata.exposureTime)) : "—")
+         .arg(formatExposureTime(metadata.exposureTime))
          .arg(metadata.aperture > 0 ? QString("f/%1").arg(metadata.aperture, 0, 'f', 1) : "—")
          .arg(metadata.focalLength)
          .arg(metadata.width)
@@ -528,7 +542,10 @@ private slots:
         // 保存当前参数设置
         m_paramsPanel->saveCurrentSettings();
 
-        QString refFrame = m_projectPanel->referenceFramePath();
+        QString refFrame = m_paramsPanel->selectedReferenceFrame();
+        if (refFrame.isEmpty() || !files.contains(refFrame)) {
+            refFrame = m_projectPanel->referenceFramePath();
+        }
         if (refFrame.isEmpty()) {
             // 自动选择第一个为参考帧
             refFrame = files.first();
@@ -550,6 +567,10 @@ private slots:
         params.skyGroundMode = m_paramsPanel->skyGroundMode();
         params.userMaskPath = m_paramsPanel->userMaskPath();
         params.featherRadius = m_paramsPanel->featherRadius();
+
+        // A new run invalidates the previous export immediately. A cancelled or
+        // failed run must never leave an old result looking current.
+        invalidateCachedResult();
 
         // 3. 创建进度对话框
         auto* dialog = new QProgressDialog(this);

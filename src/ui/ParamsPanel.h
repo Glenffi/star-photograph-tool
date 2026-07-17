@@ -30,6 +30,7 @@ public:
     int starReduceStrength() const;
     QString outputFormat() const;
     QString outputPath() const;
+    QString selectedReferenceFrame() const;
 
     void updateRefFrameList(const QStringList& fileNames);
     void recommendStackMethod(int frameCount);

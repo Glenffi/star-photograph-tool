@@ -4,6 +4,7 @@
 #include "core/ImageAligner.h"
 #include "core/ImageBufferUtils.h"
 #include "core/ImageExporter.h"
+#include "core/ProcessingMemoryEstimator.h"
 #include "core/RawImageLoader.h"
 #include "core/StackingEngine.h"
 #include "core/StarDetector.h"
@@ -149,13 +150,61 @@ bool ProcessingWorker::stopIfCancelled() {
 void ProcessingWorker::run() {
     m_errorString.clear();
     m_stackedData.clear();
+    m_width = 0;
+    m_height = 0;
+    m_frameCount = 0;
     m_wasCancelled = false;
     emit progress(0);
+
+    if (m_files.isEmpty()) {
+        m_errorString = "没有可处理的图像";
+        return;
+    }
+
+    emit stageMessage("检查图像与内存预算...");
+    RawImageLoader loader;
+    std::vector<RawImageLoader::Metadata> metadata;
+    metadata.reserve(static_cast<size_t>(m_files.size()));
+    size_t referenceIndex = 0;
+    for (int i = 0; i < m_files.size(); ++i) {
+        if (stopIfCancelled()) return;
+        RawImageLoader::Metadata item;
+        if (!loader.loadMetadata(m_files[i].toStdString(), item)) {
+            m_errorString = QString("无法读取元数据: %1")
+                                .arg(QFileInfo(m_files[i]).fileName());
+            return;
+        }
+        if (m_files[i] == m_referenceFrame) referenceIndex = static_cast<size_t>(i);
+        metadata.push_back(std::move(item));
+    }
+
+    const int metadataWidth = metadata[referenceIndex].width;
+    const int metadataHeight = metadata[referenceIndex].height;
+    for (size_t i = 0; i < metadata.size(); ++i) {
+        if (metadata[i].width != metadataWidth || metadata[i].height != metadataHeight) {
+            m_errorString = QString("图像尺寸不匹配: %1")
+                                .arg(QFileInfo(m_files[static_cast<int>(i)]).fileName());
+            return;
+        }
+    }
+
+    const uint64_t estimatedBytes = ProcessingMemoryEstimator::estimatePeakBytes(
+        metadataWidth, metadataHeight, m_files.size(), m_params.skyGroundSepEnabled);
+    const uint64_t budgetBytes = m_params.memoryBudgetBytes > 0
+        ? m_params.memoryBudgetBytes
+        : ProcessingMemoryEstimator::recommendedBudgetBytes();
+    if (estimatedBytes == 0 || estimatedBytes > budgetBytes) {
+        constexpr double kGiB = 1024.0 * 1024.0 * 1024.0;
+        m_errorString = QString("预计需要约 %1 GB 内存，当前安全预算为 %2 GB。"
+                                "请减少帧数或关闭天地分离。")
+                            .arg(estimatedBytes / kGiB, 0, 'f', 1)
+                            .arg(budgetBytes / kGiB, 0, 'f', 1);
+        return;
+    }
 
     emit stageMessage("加载 RAW 文件...");
     std::vector<LoadedFrame> frames;
     frames.reserve(static_cast<size_t>(m_files.size()));
-    RawImageLoader loader;
 
     for (int i = 0; i < m_files.size(); ++i) {
         if (stopIfCancelled()) return;
@@ -178,14 +227,9 @@ void ProcessingWorker::run() {
         return;
     }
 
-    size_t referenceIndex = 0;
-    for (size_t i = 0; i < frames.size(); ++i) {
-        if (frames[i].path == m_referenceFrame) {
-            referenceIndex = i;
-            break;
-        }
-    }
-
+    // LibRaw applies the camera orientation during dcraw_process(). Portrait
+    // files can therefore swap the header dimensions; all pixel algorithms
+    // must use the dimensions of the processed reference buffer.
     const int width = frames[referenceIndex].width;
     const int height = frames[referenceIndex].height;
     m_width = width;

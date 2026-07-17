@@ -32,7 +32,7 @@ void Toolbar::setupUI() {
     );
     leftLayout->addWidget(m_brandLabel);
 
-    m_versionLabel = new QLabel("v0.3.0", this);
+    m_versionLabel = new QLabel("v0.4.0", this);
     m_versionLabel->setStyleSheet(
         "font-size: 10px; color: #8B949E; background-color: #21262D; "
         "border-radius: 4px; padding: 2px 6px;"

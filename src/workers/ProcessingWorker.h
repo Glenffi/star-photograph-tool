@@ -28,6 +28,7 @@ public:
         SkyGroundMask::Mode skyGroundMode = SkyGroundMask::AutoDetect;
         QString userMaskPath;
         int featherRadius = 20;
+        uint64_t memoryBudgetBytes = 0; // 0 selects the platform recommendation.
     };
 
     ProcessingWorker(const QStringList& files, const QString& referenceFrame,
