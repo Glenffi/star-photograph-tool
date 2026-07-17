@@ -34,12 +34,21 @@ void testCancellationBeforeStart() {
     check(worker.errorString().isEmpty(), "Cancellation should not be reported as an error");
 }
 
+void testRawLoaderFitsWorkerStack() {
+    ProcessingWorker::Params params;
+    ProcessingWorker worker({"not-a-real-file.raw"}, "not-a-real-file.raw", params);
+    worker.start();
+    check(worker.wait(3000), "RAW metadata failure should finish without overflowing worker stack");
+    check(!worker.errorString().isEmpty(), "Unreadable RAW input should expose an error");
+}
+
 } // namespace
 
 int main(int argc, char* argv[]) {
     QCoreApplication application(argc, argv);
     testEmptyInput();
     testCancellationBeforeStart();
+    testRawLoaderFitsWorkerStack();
     if (failures == 0) {
         std::cout << "All worker tests passed.\n";
         return 0;

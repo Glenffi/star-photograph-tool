@@ -40,6 +40,7 @@ public:
     int stackedHeight() const { return m_height; }
     int stackedFrameCount() const { return m_frameCount; }
     QString errorString() const { return m_errorString; }
+    QString outputFile() const { return m_outputFile; }
     bool wasCancelled() const { return m_wasCancelled; }
 
     void requestCancel();
@@ -62,6 +63,7 @@ private:
     int m_height = 0;
     int m_frameCount = 0;
     QString m_errorString;
+    QString m_outputFile;
     std::atomic<bool> m_cancelRequested{false};
     bool m_wasCancelled = false;
 };

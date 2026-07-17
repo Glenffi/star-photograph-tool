@@ -92,6 +92,27 @@ void testStacking() {
     check(!engine.stackWithMask(frames, {originals.front()}, 2, 2,
                                 StackingEngine::Average, 2.5, mask, result),
           "Mask stacking should reject mismatched frame counts");
+
+    const std::vector<std::vector<uint16_t>> rgbFrames = {
+        {100, 200, 300, 0, 500, 600},
+        {110, 210, 310, 400, 510, 610},
+        {120, 220, 320, 420, 520, 620}
+    };
+    check(engine.stackRgb(rgbFrames, 2, 1, StackingEngine::Average, 2.5,
+                          result, true),
+          "Interleaved RGB stacking should succeed");
+    check(result == std::vector<uint16_t>({110, 210, 310, 410, 510, 610}),
+          "Interleaved RGB stacking should preserve channels and ignore padding");
+
+    const std::vector<std::vector<uint16_t>> outlierFrames = {
+        {100}, {102}, {99}, {101}, {50000}
+    };
+    check(engine.stack(outlierFrames, 1, 1, StackingEngine::KappaSigma, 1.5,
+                       result) && result[0] < 200,
+          "Kappa-Sigma should reject a strong positive outlier");
+    check(engine.stack(outlierFrames, 1, 1, StackingEngine::Winsorized, 1.5,
+                       result) && result[0] < 200,
+          "Winsorized stacking should clamp a strong positive outlier");
 }
 
 void testImageBufferUtils() {
@@ -124,14 +145,42 @@ void testImageBufferUtils() {
           "A failed buffer conversion should leave its output unchanged");
 }
 
+void testRgbTransform() {
+    const int width = 3;
+    const int height = 2;
+    const std::vector<uint16_t> rgb = {
+        1, 2, 3, 4, 5, 6, 7, 8, 9,
+        10, 11, 12, 13, 14, 15, 16, 17, 18
+    };
+    ImageAligner aligner;
+    AlignmentTransform identity;
+    std::vector<uint16_t> transformed;
+    check(aligner.applyTransformRgb(rgb, width, height, identity, transformed),
+          "Interleaved RGB transform should accept a valid buffer");
+    // Bilinear resampling intentionally zero-fills the last row and column,
+    // where a complete 2x2 source neighborhood is unavailable.
+    check(transformed == std::vector<uint16_t>({
+              1, 2, 3, 4, 5, 6, 0, 0, 0,
+              0, 0, 0, 0, 0, 0, 0, 0, 0}),
+          "Identity RGB transform should preserve valid samples and border policy");
+    check(!aligner.applyTransformRgb({1, 2, 3}, width, height, identity, transformed),
+          "Interleaved RGB transform should reject a truncated buffer");
+}
+
 void testMemoryEstimator() {
     constexpr uint64_t frameBytes = 6000ULL * 4000ULL * 3ULL * sizeof(uint16_t);
     check(ProcessingMemoryEstimator::estimatePeakBytes(6000, 4000, 20, false) ==
-              frameBytes * 44,
-          "Normal stack estimate should use 2N+4 RGB frame equivalents");
+              frameBytes * 8,
+          "Disk-backed normal stacking should use a bounded RAM estimate");
     check(ProcessingMemoryEstimator::estimatePeakBytes(6000, 4000, 20, true) ==
-              frameBytes * 86,
-          "Sky/ground estimate should use 4N+6 RGB frame equivalents");
+              frameBytes * 10,
+          "Disk-backed sky/ground stacking should use a bounded RAM estimate");
+    check(ProcessingMemoryEstimator::estimateScratchDiskBytes(6000, 4000, 20, false) ==
+              frameBytes * 20,
+          "Normal stacking should reserve one cached frame per input");
+    check(ProcessingMemoryEstimator::estimateScratchDiskBytes(6000, 4000, 20, true) ==
+              frameBytes * 40,
+          "Sky/ground stacking should reserve aligned and original caches");
     check(ProcessingMemoryEstimator::estimatePeakBytes(0, 4000, 20, false) == 0,
           "Memory estimator should reject invalid dimensions");
     check(ProcessingMemoryEstimator::recommendedBudgetBytes() > 0,
@@ -312,6 +361,7 @@ int main(int argc, char* argv[]) {
     QCoreApplication application(argc, argv);
     testStacking();
     testImageBufferUtils();
+    testRgbTransform();
     testMemoryEstimator();
     testPreviewToneMapper();
     testTransformDirection();

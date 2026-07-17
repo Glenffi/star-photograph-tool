@@ -58,6 +58,16 @@ public:
                         const AlignmentTransform& t,
                         std::vector<uint16_t>& dst);
 
+    /**
+     * @brief Apply one transform directly to an interleaved RGB image.
+     *
+     * This avoids three full-size input copies and three output allocations.
+     * All channels use the same inverse-mapped sample position.
+     */
+    bool applyTransformRgb(const std::vector<uint16_t>& src, int w, int h,
+                           const AlignmentTransform& t,
+                           std::vector<uint16_t>& dst);
+
 private:
     bool triangleMatch(const std::vector<StarPoint>& refStars,
                        const std::vector<StarPoint>& srcStars,

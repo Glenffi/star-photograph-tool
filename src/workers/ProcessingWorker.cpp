@@ -13,17 +13,86 @@
 #include <QDateTime>
 #include <QDebug>
 #include <QDir>
+#include <QFile>
 #include <QFileInfo>
+#include <QStorageInfo>
+#include <QTemporaryDir>
 
+#include <algorithm>
+#include <cstring>
+#include <functional>
+#include <limits>
 #include <utility>
+
+#ifdef Q_OS_MACOS
+#include <fcntl.h>
+#endif
 
 namespace {
 
-struct LoadedFrame {
-    QString path;
-    int width = 0;
-    int height = 0;
-    std::vector<uint16_t> rgb;
+class DiskFrameStore {
+public:
+    explicit DiskFrameStore(const QString& prefix)
+        : m_directory(QDir::tempPath() + "/" + prefix + "-XXXXXX") {}
+
+    bool isValid() const { return m_directory.isValid(); }
+    int frameCount() const { return m_files.size(); }
+
+    bool append(const std::vector<uint16_t>& frame) {
+        if (!isValid() || frame.empty() ||
+            frame.size() > static_cast<size_t>(std::numeric_limits<qint64>::max()) /
+                               sizeof(uint16_t)) {
+            return false;
+        }
+        const QString path = m_directory.filePath(
+            QString("frame-%1.rgb16").arg(m_files.size(), 4, 10, QLatin1Char('0')));
+        QFile file(path);
+        const qint64 bytes = static_cast<qint64>(frame.size() * sizeof(uint16_t));
+        if (!file.open(QIODevice::WriteOnly)) return false;
+        disableFileCache(file);
+        if (file.write(reinterpret_cast<const char*>(frame.data()), bytes) != bytes) {
+            return false;
+        }
+        m_files.push_back(path);
+        return true;
+    }
+
+    bool readRows(int frameIndex, int width, int startRow, int rowCount,
+                  std::vector<uint16_t>& output) const {
+        if (frameIndex < 0 || frameIndex >= m_files.size() || width <= 0 ||
+            startRow < 0 || rowCount <= 0) {
+            return false;
+        }
+        const size_t rowValues = static_cast<size_t>(width) * 3;
+        const size_t valueCount = rowValues * static_cast<size_t>(rowCount);
+        if (valueCount > static_cast<size_t>(std::numeric_limits<qint64>::max()) /
+                             sizeof(uint16_t)) {
+            return false;
+        }
+        const qint64 offset = static_cast<qint64>(
+            rowValues * static_cast<size_t>(startRow) * sizeof(uint16_t));
+        const qint64 bytes = static_cast<qint64>(valueCount * sizeof(uint16_t));
+        QFile file(m_files[frameIndex]);
+        output.resize(valueCount);
+        if (!file.open(QIODevice::ReadOnly)) return false;
+        disableFileCache(file);
+        return file.seek(offset) && file.read(reinterpret_cast<char*>(output.data()), bytes) == bytes;
+    }
+
+private:
+    static void disableFileCache(QFile& file) {
+#ifdef Q_OS_MACOS
+        // Temporary frames are written once and consumed sequentially. Caching
+        // multi-gigabyte files competes with image buffers and can trigger macOS
+        // memory-pressure termination without improving this access pattern.
+        if (file.handle() >= 0) fcntl(file.handle(), F_NOCACHE, 1);
+#else
+        Q_UNUSED(file);
+#endif
+    }
+
+    QTemporaryDir m_directory;
+    QStringList m_files;
 };
 
 bool splitFrames(const std::vector<std::vector<uint16_t>>& rgbFrames,
@@ -58,30 +127,6 @@ bool mergeChannels(std::vector<uint16_t> red, std::vector<uint16_t> green,
     return ImageBufferUtils::mergeRgb(channels, width, height, output);
 }
 
-bool stackRgb(StackingEngine& stacker,
-              const std::vector<std::vector<uint16_t>>& rgbFrames,
-              int width, int height, StackingEngine::Method method, double kappa,
-              std::vector<uint16_t>& output) {
-    if (rgbFrames.empty()) return false;
-    std::vector<std::vector<uint16_t>> red;
-    std::vector<std::vector<uint16_t>> green;
-    std::vector<std::vector<uint16_t>> blue;
-    if (!splitFrames(rgbFrames, width, height, red, green, blue)) return false;
-
-    std::vector<uint16_t> redResult;
-    std::vector<uint16_t> greenResult;
-    std::vector<uint16_t> blueResult;
-    // ImageAligner pads out-of-frame pixels with zero. Only this aligned path
-    // treats zero as invalid; ordinary stack calls preserve real black pixels.
-    if (!stacker.stack(red, width, height, method, kappa, redResult, true) ||
-        !stacker.stack(green, width, height, method, kappa, greenResult, true) ||
-        !stacker.stack(blue, width, height, method, kappa, blueResult, true)) {
-        return false;
-    }
-    return mergeChannels(std::move(redResult), std::move(greenResult),
-                         std::move(blueResult), width, height, output);
-}
-
 bool stackRgbWithMask(StackingEngine& stacker,
                       const std::vector<std::vector<uint16_t>>& aligned,
                       const std::vector<std::vector<uint16_t>>& originals,
@@ -114,6 +159,62 @@ bool stackRgbWithMask(StackingEngine& stacker,
     }
     return mergeChannels(std::move(redResult), std::move(greenResult),
                          std::move(blueResult), width, height, output);
+}
+
+bool stackCachedRgb(StackingEngine& stacker, const DiskFrameStore& aligned,
+                    const DiskFrameStore* originals, int width, int height,
+                    StackingEngine::Method method, double kappa,
+                    const std::vector<uint8_t>* mask,
+                    std::vector<uint16_t>& output,
+                    const std::function<bool()>& cancelled,
+                    const std::function<void(int)>& rowsCompleted) {
+    if (aligned.frameCount() < 2 || width <= 0 || height <= 0 ||
+        (originals && originals->frameCount() != aligned.frameCount()) ||
+        (mask && mask->size() != static_cast<size_t>(width) * height)) {
+        return false;
+    }
+    constexpr int kRowsPerChunk = 32;
+    output.resize(static_cast<size_t>(width) * height * 3);
+    for (int startRow = 0; startRow < height; startRow += kRowsPerChunk) {
+        if (cancelled()) return false;
+        const int rowCount = std::min(kRowsPerChunk, height - startRow);
+        std::vector<std::vector<uint16_t>> alignedChunk(
+            static_cast<size_t>(aligned.frameCount()));
+        for (int frame = 0; frame < aligned.frameCount(); ++frame) {
+            if (!aligned.readRows(frame, width, startRow, rowCount,
+                                  alignedChunk[static_cast<size_t>(frame)])) {
+                return false;
+            }
+        }
+
+        std::vector<uint16_t> stackedChunk;
+        if (originals) {
+            std::vector<std::vector<uint16_t>> originalChunk(
+                static_cast<size_t>(originals->frameCount()));
+            for (int frame = 0; frame < originals->frameCount(); ++frame) {
+                if (!originals->readRows(frame, width, startRow, rowCount,
+                                         originalChunk[static_cast<size_t>(frame)])) {
+                    return false;
+                }
+            }
+            std::vector<uint8_t> maskChunk(
+                mask->begin() + static_cast<size_t>(startRow) * width,
+                mask->begin() + static_cast<size_t>(startRow + rowCount) * width);
+            if (!stackRgbWithMask(stacker, alignedChunk, originalChunk, width,
+                                  rowCount, method, kappa, maskChunk, stackedChunk)) {
+                return false;
+            }
+        } else if (!stacker.stackRgb(alignedChunk, width, rowCount, method,
+                                     kappa, stackedChunk, true)) {
+            return false;
+        }
+
+        const size_t destination = static_cast<size_t>(startRow) * width * 3;
+        std::memcpy(output.data() + destination, stackedChunk.data(),
+                    stackedChunk.size() * sizeof(uint16_t));
+        rowsCompleted(startRow + rowCount);
+    }
+    return true;
 }
 
 StackingEngine::Method stackMethodFromName(const QString& name) {
@@ -154,6 +255,7 @@ void ProcessingWorker::run() {
     m_height = 0;
     m_frameCount = 0;
     m_wasCancelled = false;
+    m_outputFile.clear();
     emit progress(0);
 
     if (m_files.isEmpty()) {
@@ -201,42 +303,45 @@ void ProcessingWorker::run() {
                             .arg(budgetBytes / kGiB, 0, 'f', 1);
         return;
     }
-
-    emit stageMessage("加载 RAW 文件...");
-    std::vector<LoadedFrame> frames;
-    frames.reserve(static_cast<size_t>(m_files.size()));
-
-    for (int i = 0; i < m_files.size(); ++i) {
-        if (stopIfCancelled()) return;
-        RawImageLoader::ImageData image;
-        if (!loader.loadRaw(m_files[i].toStdString(), image)) {
-            m_errorString = QString("无法加载: %1").arg(QFileInfo(m_files[i]).fileName());
-            return;
-        }
-        LoadedFrame frame;
-        frame.path = m_files[i];
-        frame.width = image.width;
-        frame.height = image.height;
-        frame.rgb = std::move(image.data);
-        frames.push_back(std::move(frame));
-        emit progress(static_cast<int>((i + 1) * 10.0 / m_files.size()));
-    }
-
-    if (frames.empty()) {
-        m_errorString = "没有成功加载任何图像";
+    const uint64_t scratchBytes = ProcessingMemoryEstimator::estimateScratchDiskBytes(
+        metadataWidth, metadataHeight, m_files.size(), m_params.skyGroundSepEnabled);
+    const QStorageInfo temporaryStorage(QDir::tempPath());
+    const qint64 availableScratchBytes = temporaryStorage.bytesAvailable();
+    // Keep 10% headroom for filesystem metadata and the final exported image.
+    if (scratchBytes == 0 || !temporaryStorage.isValid() || availableScratchBytes <= 0 ||
+        static_cast<uint64_t>(availableScratchBytes) < scratchBytes / 10 * 11) {
+        constexpr double kGiB = 1024.0 * 1024.0 * 1024.0;
+        m_errorString = QString("临时磁盘空间不足：处理缓存约需 %1 GB。")
+                            .arg(scratchBytes / kGiB, 0, 'f', 1);
         return;
     }
 
-    // LibRaw applies the camera orientation during dcraw_process(). Portrait
-    // files can therefore swap the header dimensions; all pixel algorithms
-    // must use the dimensions of the processed reference buffer.
-    const int width = frames[referenceIndex].width;
-    const int height = frames[referenceIndex].height;
+    DiskFrameStore alignedCache("starprocessor-aligned");
+    DiskFrameStore originalCache("starprocessor-original");
+    if (!alignedCache.isValid() ||
+        (m_params.skyGroundSepEnabled && !originalCache.isValid())) {
+        m_errorString = "无法创建处理临时目录";
+        return;
+    }
+
+    emit stageMessage("加载参考帧...");
+    RawImageLoader::ImageData referenceImage;
+    if (!loader.loadRaw(m_files[static_cast<int>(referenceIndex)].toStdString(),
+                        referenceImage)) {
+        m_errorString = QString("无法加载参考帧: %1")
+                            .arg(QFileInfo(m_files[static_cast<int>(referenceIndex)]).fileName());
+        return;
+    }
+
+    // LibRaw applies camera orientation during dcraw_process(). Pixel algorithms
+    // must therefore use processed dimensions rather than header dimensions.
+    const int width = referenceImage.width;
+    const int height = referenceImage.height;
     m_width = width;
     m_height = height;
 
     std::vector<uint16_t> referenceLuminance;
-    if (!ImageBufferUtils::extractLuminance(frames[referenceIndex].rgb, width, height,
+    if (!ImageBufferUtils::extractLuminance(referenceImage.data, width, height,
                                             referenceLuminance)) {
         m_errorString = "参考帧 RGB 数据无效";
         return;
@@ -256,82 +361,79 @@ void ProcessingWorker::run() {
     }
     emit progress(20);
 
-    emit stageMessage("对齐图像...");
-    ImageAligner aligner;
-    std::vector<std::vector<uint16_t>> alignedRgb;
-    std::vector<std::vector<uint16_t>> originalRgb;
-    alignedRgb.reserve(frames.size());
-    if (m_params.skyGroundSepEnabled) originalRgb.reserve(frames.size());
-
-    if (m_params.skyGroundSepEnabled) {
-        originalRgb.push_back(std::move(frames[referenceIndex].rgb));
-        alignedRgb.push_back(originalRgb.back());
-    } else {
-        alignedRgb.push_back(std::move(frames[referenceIndex].rgb));
+    // Full-resolution aligned frames are cached on disk. Keeping both decoded
+    // and aligned sequences resident makes peak RAM grow linearly twice and is
+    // unsafe for ordinary 30-60 MP sequences.
+    if (!alignedCache.append(referenceImage.data) ||
+        (m_params.skyGroundSepEnabled && !originalCache.append(referenceImage.data))) {
+        m_errorString = "无法写入参考帧临时缓存（请检查磁盘空间）";
+        return;
+    }
+    referenceImage.data.clear();
+    referenceImage.data.shrink_to_fit();
+    if (!m_params.skyGroundSepEnabled) {
+        referenceLuminance.clear();
+        referenceLuminance.shrink_to_fit();
     }
 
-    for (size_t i = 0; i < frames.size(); ++i) {
+    emit stageMessage("逐帧加载与对齐...");
+    ImageAligner aligner;
+    for (int i = 0; i < m_files.size(); ++i) {
         if (stopIfCancelled()) return;
-        if (i == referenceIndex) continue;
-        if (frames[i].width != width || frames[i].height != height) {
+        if (static_cast<size_t>(i) == referenceIndex) continue;
+
+        RawImageLoader::ImageData sourceImage;
+        if (!loader.loadRaw(m_files[i].toStdString(), sourceImage)) {
+            qWarning() << "RAW 加载失败，跳过:" << m_files[i];
+            continue;
+        }
+        if (sourceImage.width != width || sourceImage.height != height) {
             m_errorString = QString("图像尺寸不匹配: %1")
-                                .arg(QFileInfo(frames[i].path).fileName());
+                                .arg(QFileInfo(m_files[i]).fileName());
             return;
         }
 
         std::vector<uint16_t> sourceLuminance;
-        if (!ImageBufferUtils::extractLuminance(frames[i].rgb, width, height,
+        if (!ImageBufferUtils::extractLuminance(sourceImage.data, width, height,
                                                 sourceLuminance)) {
             m_errorString = QString("RGB 数据无效: %1")
-                                .arg(QFileInfo(frames[i].path).fileName());
+                                .arg(QFileInfo(m_files[i]).fileName());
             return;
         }
         std::vector<StarPoint> sourceStars;
         if (!detector.detect(sourceLuminance, width, height,
                              sourceStars, alignmentOptions)) {
-            qWarning() << "星点检测失败，跳过:" << frames[i].path;
+            qWarning() << "星点检测失败，跳过:" << m_files[i];
             continue;
         }
 
         AlignmentTransform transform;
         if (!aligner.align(referenceStars, sourceStars, transform)) {
-            qWarning() << "对齐失败，跳过:" << frames[i].path;
+            qWarning() << "对齐失败，跳过:" << m_files[i];
             continue;
         }
-
-        ImageBufferUtils::RgbChannels sourceChannels;
-        if (!ImageBufferUtils::splitRgb(frames[i].rgb, width, height, sourceChannels)) {
-            m_errorString = QString("RGB 数据无效: %1")
-                                .arg(QFileInfo(frames[i].path).fileName());
-            return;
-        }
-        ImageBufferUtils::RgbChannels alignedChannels;
-        if (!aligner.applyTransform(sourceChannels.red, width, height, transform,
-                                    alignedChannels.red) ||
-            !aligner.applyTransform(sourceChannels.green, width, height, transform,
-                                    alignedChannels.green) ||
-            !aligner.applyTransform(sourceChannels.blue, width, height, transform,
-                                    alignedChannels.blue)) {
-            qWarning() << "变换应用失败，跳过:" << frames[i].path;
-            continue;
-        }
+        sourceLuminance.clear();
+        sourceLuminance.shrink_to_fit();
 
         std::vector<uint16_t> alignedFrame;
-        if (!ImageBufferUtils::mergeRgb(alignedChannels, width, height, alignedFrame)) {
-            m_errorString = "对齐后 RGB 数据无效";
+        if (!aligner.applyTransformRgb(sourceImage.data, width, height, transform,
+                                       alignedFrame)) {
+            qWarning() << "变换应用失败，跳过:" << m_files[i];
+            continue;
+        }
+        if (!alignedCache.append(alignedFrame) ||
+            (m_params.skyGroundSepEnabled && !originalCache.append(sourceImage.data))) {
+            m_errorString = "无法写入对齐临时缓存（请检查磁盘空间）";
             return;
         }
-        alignedRgb.push_back(std::move(alignedFrame));
-        if (m_params.skyGroundSepEnabled) {
-            originalRgb.push_back(std::move(frames[i].rgb));
-        } else {
-            frames[i].rgb.clear();
-            frames[i].rgb.shrink_to_fit();
-        }
-        emit progress(20 + static_cast<int>((i + 1) * 30.0 / frames.size()));
+        alignedFrame.clear();
+        alignedFrame.shrink_to_fit();
+        sourceImage.data.clear();
+        sourceImage.data.shrink_to_fit();
+        emit progress(20 + static_cast<int>((i + 1) * 30.0 / m_files.size()));
     }
 
-    if (alignedRgb.size() < 2) {
+    if (alignedCache.frameCount() < 2) {
         m_errorString = "对齐后可用帧数不足（<2），无法堆栈";
         return;
     }
@@ -342,9 +444,9 @@ void ProcessingWorker::run() {
     StackingEngine stacker;
     const StackingEngine::Method method = stackMethodFromName(m_params.stackMethod);
     std::vector<uint16_t> resultRgb;
+    std::vector<uint8_t> mask;
     if (m_params.skyGroundSepEnabled) {
         emit stageMessage("生成天地蒙版...");
-        std::vector<uint8_t> mask;
         const bool maskReady = m_params.skyGroundMode == SkyGroundMask::AutoDetect
             ? SkyGroundMask::autoDetect(referenceLuminance, width, height, mask,
                                         m_params.featherRadius)
@@ -356,17 +458,23 @@ void ProcessingWorker::run() {
             return;
         }
         emit stageMessage("天地分离堆栈...");
-        if (!stackRgbWithMask(stacker, alignedRgb, originalRgb, width, height,
-                              method, m_params.kappaValue, mask, resultRgb)) {
-            m_errorString = "天地分离堆栈失败";
-            return;
-        }
-    } else if (!stackRgb(stacker, alignedRgb, width, height, method,
-                         m_params.kappaValue, resultRgb)) {
-        m_errorString = "堆栈失败";
+    }
+    const bool stacked = stackCachedRgb(
+        stacker, alignedCache,
+        m_params.skyGroundSepEnabled ? &originalCache : nullptr,
+        width, height, method, m_params.kappaValue,
+        m_params.skyGroundSepEnabled ? &mask : nullptr, resultRgb,
+        [this]() { return stopIfCancelled(); },
+        [this, height](int rows) {
+            emit progress(55 + static_cast<int>(rows * 25.0 / height));
+        });
+    if (!stacked) {
+        if (m_wasCancelled) return;
+        m_errorString = m_params.skyGroundSepEnabled
+            ? "天地分离堆栈失败" : "堆栈失败";
         return;
     }
-    m_frameCount = static_cast<int>(alignedRgb.size());
+    m_frameCount = alignedCache.frameCount();
     emit progress(80);
     if (stopIfCancelled()) return;
 
@@ -430,11 +538,12 @@ void ProcessingWorker::run() {
     QDir().mkpath(outputPath);
     const bool png = m_params.outputFormat == "png8";
     const QString extension = png ? ".png" : ".tiff";
-    const QString outputFile = outputPath + "/" +
+    m_outputFile = outputPath + "/" +
         QDateTime::currentDateTime().toString("yyyyMMdd_hhmmss") + "_stacked" + extension;
     if (!ImageExporter::exportRgb16(m_stackedData, width, height,
-                                    outputFile.toStdString(),
+                                    m_outputFile.toStdString(),
                                     png ? ImageExporter::Png8 : ImageExporter::Tiff16)) {
+        m_outputFile.clear();
         m_errorString = "导出失败";
         return;
     }

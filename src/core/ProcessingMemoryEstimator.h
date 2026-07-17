@@ -9,6 +9,11 @@ public:
     static uint64_t estimatePeakBytes(int width, int height, int frameCount,
                                       bool skyGroundSeparation);
 
+    // Disk-backed alignment stores one RGB16 frame per accepted input, or two
+    // when sky/ground separation also preserves the unaligned originals.
+    static uint64_t estimateScratchDiskBytes(int width, int height, int frameCount,
+                                             bool skyGroundSeparation);
+
     // Uses 65% of physical RAM so the OS, Qt and LibRaw retain working space.
     // Falls back to 8 GiB when the platform query is unavailable.
     static uint64_t recommendedBudgetBytes();

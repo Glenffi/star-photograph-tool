@@ -37,14 +37,29 @@ uint64_t ProcessingMemoryEstimator::estimatePeakBytes(int width, int height,
         return 0;
     }
 
-    // Normal stacking peaks while aligned RGB frames and their split channels
-    // coexist. Sky/ground stacking additionally keeps original frames and a
-    // second split-channel set. Fixed terms cover outputs and temporary frames.
+    // Frames are disk-backed and stacked in row chunks, so peak image memory no
+    // longer grows with sequence length. These conservative equivalents cover
+    // LibRaw decode, source/reference luminance, resampling and final output.
     const uint64_t frameEquivalents = skyGroundSeparation
-        ? static_cast<uint64_t>(frameCount) * 4 + 6
-        : static_cast<uint64_t>(frameCount) * 2 + 4;
+        ? 10ULL : 8ULL;
     uint64_t estimate = 0;
     return checkedMultiply(frameBytes, frameEquivalents, estimate) ? estimate : 0;
+}
+
+uint64_t ProcessingMemoryEstimator::estimateScratchDiskBytes(
+    int width, int height, int frameCount, bool skyGroundSeparation) {
+    if (width <= 0 || height <= 0 || frameCount <= 0) return 0;
+    uint64_t pixels = 0;
+    uint64_t frameBytes = 0;
+    uint64_t allFrames = 0;
+    if (!checkedMultiply(static_cast<uint64_t>(width), static_cast<uint64_t>(height), pixels) ||
+        !checkedMultiply(pixels, 3ULL * sizeof(uint16_t), frameBytes) ||
+        !checkedMultiply(frameBytes, static_cast<uint64_t>(frameCount), allFrames)) {
+        return 0;
+    }
+    if (!skyGroundSeparation) return allFrames;
+    uint64_t doubled = 0;
+    return checkedMultiply(allFrames, 2, doubled) ? doubled : 0;
 }
 
 uint64_t ProcessingMemoryEstimator::totalPhysicalMemoryBytes() {

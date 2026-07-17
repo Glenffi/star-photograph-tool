@@ -185,6 +185,11 @@ if(BUILD_SAMPLE_TOOLS)
     target_compile_definitions(StarProcessorSampleRegression PRIVATE
         STARPROCESSOR_VERSION="${PROJECT_VERSION}")
     target_link_libraries(StarProcessorSampleRegression PRIVATE StarProcessorCore)
+
+    add_executable(StarProcessorPipelineRunner tools/RawPipelineRunner.cpp)
+    target_compile_definitions(StarProcessorPipelineRunner PRIVATE
+        STARPROCESSOR_VERSION="${PROJECT_VERSION}")
+    target_link_libraries(StarProcessorPipelineRunner PRIVATE StarProcessorWorkers)
 endif()
 
 # macOS 特定设置

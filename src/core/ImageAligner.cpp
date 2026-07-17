@@ -560,3 +560,64 @@ bool ImageAligner::applyTransform(const std::vector<uint16_t>& src, int w, int h
 
     return true;
 }
+
+bool ImageAligner::applyTransformRgb(const std::vector<uint16_t>& src, int w, int h,
+                                     const AlignmentTransform& t,
+                                     std::vector<uint16_t>& dst) {
+    if (w <= 1 || h <= 1 ||
+        static_cast<size_t>(w) > std::numeric_limits<size_t>::max() /
+                                     static_cast<size_t>(h)) {
+        return false;
+    }
+    const size_t pixelCount = static_cast<size_t>(w) * static_cast<size_t>(h);
+    if (pixelCount > std::numeric_limits<size_t>::max() / 3 ||
+        src.size() != pixelCount * 3) {
+        return false;
+    }
+
+    const double det = t.a * t.e - t.b * t.d;
+    if (!std::isfinite(det) || std::abs(det) < 1e-12) return false;
+    const double sourceXFromX = t.e / det;
+    const double sourceXFromY = -t.b / det;
+    const double sourceXOffset = (t.b * t.f - t.e * t.c) / det;
+    const double sourceYFromX = -t.d / det;
+    const double sourceYFromY = t.a / det;
+    const double sourceYOffset = (t.d * t.c - t.a * t.f) / det;
+
+    dst.resize(pixelCount * 3);
+    for (int y = 0; y < h; ++y) {
+        for (int x = 0; x < w; ++x) {
+            const double sx = sourceXFromX * x + sourceXFromY * y + sourceXOffset;
+            const double sy = sourceYFromX * x + sourceYFromY * y + sourceYOffset;
+            const int ix = static_cast<int>(std::floor(sx));
+            const int iy = static_cast<int>(std::floor(sy));
+            const size_t destination = (static_cast<size_t>(y) * w + x) * 3;
+            if (ix < 0 || ix >= w - 1 || iy < 0 || iy >= h - 1) {
+                dst[destination] = 0;
+                dst[destination + 1] = 0;
+                dst[destination + 2] = 0;
+                continue;
+            }
+
+            const double fx = sx - ix;
+            const double fy = sy - iy;
+            const double weight00 = (1.0 - fx) * (1.0 - fy);
+            const double weight10 = fx * (1.0 - fy);
+            const double weight01 = (1.0 - fx) * fy;
+            const double weight11 = fx * fy;
+            const size_t topLeft = (static_cast<size_t>(iy) * w + ix) * 3;
+            const size_t topRight = topLeft + 3;
+            const size_t bottomLeft = topLeft + static_cast<size_t>(w) * 3;
+            const size_t bottomRight = bottomLeft + 3;
+            for (size_t channel = 0; channel < 3; ++channel) {
+                const double value = weight00 * src[topLeft + channel] +
+                    weight10 * src[topRight + channel] +
+                    weight01 * src[bottomLeft + channel] +
+                    weight11 * src[bottomRight + channel];
+                dst[destination + channel] = static_cast<uint16_t>(
+                    std::clamp(value, 0.0, 65535.0));
+            }
+        }
+    }
+    return true;
+}

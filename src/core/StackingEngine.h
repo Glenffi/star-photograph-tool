@@ -32,6 +32,18 @@ public:
                bool ignoreZero = false);
 
     /**
+     * @brief Stack interleaved RGB frames without creating three planar copies.
+     *
+     * Each input frame must contain exactly width * height * 3 values in RGB
+     * order. This is the preferred entry point for the processing pipeline.
+     */
+    bool stackRgb(const std::vector<std::vector<uint16_t>>& images,
+                  int width, int height,
+                  Method method, double kappa,
+                  std::vector<uint16_t>& result,
+                  bool ignoreZero = false);
+
+    /**
      * @brief 天地分离堆栈
      *
      * 天空区域用对齐后图像堆栈，地景区域用原始图像直接堆栈（不移动），边界羽化融合。
@@ -58,15 +70,4 @@ public:
      */
     static Method recommendMethod(int frameCount);
 
-private:
-    void stackAverage(const std::vector<std::vector<uint16_t>>& images,
-                      int w, int h, std::vector<uint16_t>& result, bool ignoreZero);
-    void stackMedian(const std::vector<std::vector<uint16_t>>& images,
-                     int w, int h, std::vector<uint16_t>& result, bool ignoreZero);
-    void stackKappaSigma(const std::vector<std::vector<uint16_t>>& images,
-                          int w, int h, double kappa,
-                          std::vector<uint16_t>& result, bool ignoreZero);
-    void stackWinsorized(const std::vector<std::vector<uint16_t>>& images,
-                          int w, int h, double kappa,
-                          std::vector<uint16_t>& result, bool ignoreZero);
 };

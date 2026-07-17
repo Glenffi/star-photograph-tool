@@ -13,22 +13,22 @@
 - 星点遮罩、形态学腐蚀和羽化混合的自动缩星
 - 线性 sRGB 16-bit TIFF（嵌入 ICC）和 sRGB 8-bit PNG 导出
 - 内嵌 RAW 缩略图优先、half-size 快速回退的浏览预览
-- 处理前内存预算检查，以及受控分辨率的 16-bit 结果预览
+- 磁盘缓存分块堆栈、处理前内存/临时磁盘预检，以及受控分辨率结果预览
 
 ## 规划中
 
 - 校准帧（Dark / Flat / Bias）
 - 延时图片序列降噪、星轨合成
 - 云端 AI 参数建议
-- GPU 加速和磁盘分块处理
+- GPU 加速
 - Windows 构建与 CI 持续验证
 
 ## 系统要求
 
 | 平台 | 最低版本 | 内存 | 磁盘空间 |
 |------|---------|------|---------|
-| macOS | 12+ (Monterey) | 8 GB | 2 GB |
-| Windows | 10/11 | 8 GB | 2 GB |
+| macOS | 12+ (Monterey) | 8 GB | 5 GB + 序列缓存 |
+| Windows | 10/11 | 8 GB | 5 GB + 序列缓存 |
 
 > 处理高分辨率 RAW 文件（如 60MP+）建议 16 GB 以上内存。
 
@@ -76,7 +76,8 @@ StarProcessor/
 │   ├── CoreTests.cpp            # 核心算法与 TIFF ICC 回归测试
 │   └── WorkerTests.cpp          # 任务取消与失败状态测试
 ├── tools/
-│   └── RawSampleRegression.cpp  # 真实 RAW 解码、星点与序列对齐回归工具
+│   ├── RawSampleRegression.cpp  # 真实 RAW 解码、星点与序列对齐回归工具
+│   └── RawPipelineRunner.cpp    # 复用生产 worker 的完整流程验证工具
 ├── build.sh                     # 一键构建/测试脚本（macOS）
 ├── run-sample-regression.sh     # 构建并运行本地样片回归
 ├── CMakeLists.txt               # CMake 构建配置
@@ -159,14 +160,27 @@ cmake --build . --config Release
 
 退出码 `4` 表示样片目录为空，`5` 表示基线文件无效，`6` 表示严格检查或基线比较失败。RAW 样片通常不应提交到公开仓库，报告中只记录相对文件路径。
 
+要验证与 GUI 完全相同的完整处理 worker，构建时启用
+`-DBUILD_SAMPLE_TOOLS=ON`，然后运行：
+
+```bash
+./build/StarProcessorPipelineRunner \
+  --input ../star-photograph-tool-samples/star-raw \
+  --output build/pipeline-output \
+  --limit 15 --reference-index 7 --method kappa-sigma --kappa 2.5
+```
+
+工具会生成完整分辨率 TIFF 和 `pipeline-report.json`。处理期间，对齐帧写入系统临时目录并按 32 行分块堆栈；任务正常、失败或取消后都会自动清理。
+
 ## 已知限制
 
 - **正式 RAW 解码**：LibRaw AHD + 相机白平衡 + 颜色矩阵，输出线性 sRGB 原色的 16-bit RGB
 - **浏览预览**：优先使用相机内嵌 JPEG，回退到 half-size 快速解码；预览不参与最终处理
-- **内存**：处理前按分辨率、帧数和天地分离模式估算峰值，默认最多使用物理内存的 65%；超高像素和大量帧仍需后续磁盘分块
+- **内存与磁盘**：完整处理采用磁盘缓存和 32 行分块堆栈，RAM 峰值不再随帧数线性增长；缓存约为每帧 `宽×高×3×2` 字节，天地分离约为两倍，启动前同时检查 RAM 与临时磁盘空间
 - **结果预览**：16-bit 处理结果会映射为最长边不超过 4096 px 的 8-bit 显示缓存；TIFF/PNG 导出始终使用完整分辨率结果
 - **预设**：当前仅提供“银河广角”和“深空天体”；单帧降噪与延时序列在专用流程完成前不显示
 - **天地检测**：传统 CV 自动蒙版需要人工预览确认，复杂山脊、云层和强光污染场景可能误判
+- **超广角长序列对齐**：当前使用全局仿射模型；14 mm 固定机位 15 张实测在画面边缘出现残余星轨，需升级为单应/畸变感知或局部形变模型后才能作为画质验收通过
 - **测试样片**：算法合成测试已接入；跨机型 RAW 样片集和 Windows CI 尚未建立
 
 ## 贡献指南

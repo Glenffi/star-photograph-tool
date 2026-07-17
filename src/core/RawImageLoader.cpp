@@ -7,6 +7,7 @@
 #include <ctime>
 #include <iostream>
 #include <limits>
+#include <memory>
 
 namespace {
 
@@ -84,15 +85,17 @@ bool copyBitmap8(const libraw_processed_image_t& image,
 
 bool loadFastHalfSize(const std::string& filePath,
                       RawImageLoader::PreviewData& out) {
-    LibRaw processor;
-    int result = processor.open_file(filePath.c_str());
+    // LibRaw contains large internal fixed-size tables. Keep it off the stack:
+    // Qt worker threads have a smaller default stack than the main thread.
+    auto processor = std::make_unique<LibRaw>();
+    int result = processor->open_file(filePath.c_str());
     if (result != LIBRAW_SUCCESS) return false;
-    result = processor.unpack();
+    result = processor->unpack();
     if (result != LIBRAW_SUCCESS) return false;
 
     // This fallback is display-oriented. half_size and bilinear demosaic keep
     // browsing responsive; the processing pipeline still uses 16-bit AHD.
-    auto& params = processor.imgdata.params;
+    auto& params = processor->imgdata.params;
     params.half_size = 1;
     params.user_qual = 0;
     params.use_camera_wb = 1;
@@ -101,10 +104,10 @@ bool loadFastHalfSize(const std::string& filePath,
     params.output_color = 1;
     params.no_auto_bright = 0;
 
-    result = processor.dcraw_process();
+    result = processor->dcraw_process();
     if (result != LIBRAW_SUCCESS) return false;
 
-    libraw_processed_image_t* image = processor.dcraw_make_mem_image(&result);
+    libraw_processed_image_t* image = processor->dcraw_make_mem_image(&result);
     if (!image || result != LIBRAW_SUCCESS) {
         if (image) LibRaw::dcraw_clear_mem(image);
         return false;
@@ -118,14 +121,14 @@ bool loadFastHalfSize(const std::string& filePath,
 
 bool RawImageLoader::loadMetadata(const std::string& filePath, Metadata& out) {
     out = {};
-    LibRaw processor;
-    const int result = processor.open_file(filePath.c_str());
+    auto processor = std::make_unique<LibRaw>();
+    const int result = processor->open_file(filePath.c_str());
     if (result != LIBRAW_SUCCESS) {
         std::cerr << "LibRaw open_file failed: " << filePath
                   << " (code: " << result << ")" << std::endl;
         return false;
     }
-    extractMetadata(processor, out);
+    extractMetadata(*processor, out);
     return true;
 }
 
@@ -134,8 +137,8 @@ bool RawImageLoader::loadPreview(const std::string& filePath, int requestedMaxSi
     out = {};
     if (requestedMaxSize <= 0) return false;
 
-    LibRaw processor;
-    int result = processor.open_file(filePath.c_str());
+    auto processor = std::make_unique<LibRaw>();
+    int result = processor->open_file(filePath.c_str());
     if (result != LIBRAW_SUCCESS) {
         std::cerr << "LibRaw open_file failed: " << filePath
                   << " (code: " << result << ")" << std::endl;
@@ -143,14 +146,14 @@ bool RawImageLoader::loadPreview(const std::string& filePath, int requestedMaxSi
     }
 
     Metadata localMetadata;
-    extractMetadata(processor, localMetadata);
+    extractMetadata(*processor, localMetadata);
     if (metadata) *metadata = localMetadata;
 
     PreviewData embeddedFallback;
     bool hasEmbeddedFallback = false;
-    result = processor.unpack_thumb();
+    result = processor->unpack_thumb();
     if (result == LIBRAW_SUCCESS) {
-        libraw_processed_image_t* image = processor.dcraw_make_mem_thumb(&result);
+        libraw_processed_image_t* image = processor->dcraw_make_mem_thumb(&result);
         if (image && result == LIBRAW_SUCCESS) {
             PreviewData embedded;
             bool usable = false;
@@ -198,9 +201,9 @@ bool RawImageLoader::loadPreview(const std::string& filePath, int requestedMaxSi
 
 bool RawImageLoader::loadRaw(const std::string& filePath, ImageData& out) {
     out = {};
-    LibRaw processor;
+    auto processor = std::make_unique<LibRaw>();
 
-    int result = processor.open_file(filePath.c_str());
+    int result = processor->open_file(filePath.c_str());
     if (result != LIBRAW_SUCCESS) {
         std::cerr << "LibRaw open_file failed: " << filePath
                   << " (code: " << result << ")" << std::endl;
@@ -208,18 +211,18 @@ bool RawImageLoader::loadRaw(const std::string& filePath, ImageData& out) {
     }
 
     Metadata metadata;
-    extractMetadata(processor, metadata);
+    extractMetadata(*processor, metadata);
     copyMetadata(metadata, out);
 
-    result = processor.unpack();
+    result = processor->unpack();
     if (result != LIBRAW_SUCCESS) {
         std::cerr << "LibRaw unpack failed: " << filePath
                   << " (code: " << result << ")" << std::endl;
         return false;
     }
 
-    auto& params = processor.imgdata.params;
-    if (processor.imgdata.idata.filters != 0) {
+    auto& params = processor->imgdata.params;
+    if (processor->imgdata.idata.filters != 0) {
         params.user_qual = 3; // AHD demosaic for the full processing path.
     }
     params.use_camera_wb = 1;
@@ -230,14 +233,14 @@ bool RawImageLoader::loadRaw(const std::string& filePath, ImageData& out) {
     params.gamm[0] = 1.0f;   // linear transfer function
     params.gamm[1] = 1.0f;
 
-    result = processor.dcraw_process();
+    result = processor->dcraw_process();
     if (result != LIBRAW_SUCCESS) {
         std::cerr << "LibRaw dcraw_process failed: " << filePath
                   << " (code: " << result << ")" << std::endl;
         return false;
     }
 
-    libraw_processed_image_t* image = processor.dcraw_make_mem_image(&result);
+    libraw_processed_image_t* image = processor->dcraw_make_mem_image(&result);
     if (!image || result != LIBRAW_SUCCESS || image->type != LIBRAW_IMAGE_BITMAP) {
         std::cerr << "LibRaw dcraw_make_mem_image failed: " << filePath << std::endl;
         if (image) LibRaw::dcraw_clear_mem(image);
