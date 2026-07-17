@@ -75,7 +75,10 @@ StarProcessor/
 ├── tests/
 │   ├── CoreTests.cpp            # 核心算法与 TIFF ICC 回归测试
 │   └── WorkerTests.cpp          # 任务取消与失败状态测试
+├── tools/
+│   └── RawSampleRegression.cpp  # 真实 RAW 解码、星点与序列对齐回归工具
 ├── build.sh                     # 一键构建/测试脚本（macOS）
+├── run-sample-regression.sh     # 构建并运行本地样片回归
 ├── CMakeLists.txt               # CMake 构建配置
 └── README.md                    # 本文件
 ```
@@ -132,6 +135,23 @@ cmake --build . --config Release
 ```
 
 > **注意**：当前 P2 阶段已实现核心处理链路（对齐 → 堆栈 → 自动优化 → 缩星 → 导出）。
+
+## 真实 RAW 样片回归
+
+样片默认放在代码目录旁的 `star-photograph-tool-samples`。完整模式会逐张执行正式 AHD 解码、星点检测和同目录序列对齐，并在 `build/sample-regression-output` 写入 `report.json` 与检查预览。
+
+```bash
+# 完整回归
+./run-sample-regression.sh
+
+# 只检查元数据和浏览预览
+./run-sample-regression.sh --quick
+
+# 将上一份报告作为基线；能力或结果退化时返回非零退出码
+./run-sample-regression.sh --baseline /path/to/baseline-report.json --strict
+```
+
+退出码 `4` 表示样片目录为空，`5` 表示基线文件无效，`6` 表示严格检查或基线比较失败。RAW 样片通常不应提交到公开仓库，报告中只记录相对文件路径。
 
 ## 已知限制
 

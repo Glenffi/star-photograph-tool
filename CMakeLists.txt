@@ -2,6 +2,7 @@ cmake_minimum_required(VERSION 3.20)
 project(StarProcessor VERSION 0.4.0 LANGUAGES CXX)
 
 include(CTest)
+option(BUILD_SAMPLE_TOOLS "Build local RAW sample regression tools" ON)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -177,6 +178,13 @@ if(BUILD_TESTING)
     add_executable(StarProcessorWorkerTests tests/WorkerTests.cpp)
     target_link_libraries(StarProcessorWorkerTests PRIVATE StarProcessorWorkers)
     add_test(NAME worker_lifecycle COMMAND StarProcessorWorkerTests)
+endif()
+
+if(BUILD_SAMPLE_TOOLS)
+    add_executable(StarProcessorSampleRegression tools/RawSampleRegression.cpp)
+    target_compile_definitions(StarProcessorSampleRegression PRIVATE
+        STARPROCESSOR_VERSION="${PROJECT_VERSION}")
+    target_link_libraries(StarProcessorSampleRegression PRIVATE StarProcessorCore)
 endif()
 
 # macOS 特定设置
