@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/SkyGroundMask.h"
+#include "core/StarReducer.h"
 
 #include <QThread>
 #include <QString>
@@ -50,6 +51,9 @@ public:
     double minimumAlignmentGridCoverage() const { return m_minimumGridCoverage; }
     qint64 stackingElapsedMs() const { return m_stackingElapsedMs; }
     bool wasCancelled() const { return m_wasCancelled; }
+    const StarReductionStats& starReductionStats() const {
+        return m_starReductionStats;
+    }
 
     void requestCancel();
 
@@ -82,4 +86,5 @@ private:
     qint64 m_stackingElapsedMs = 0;
     std::atomic<bool> m_cancelRequested{false};
     bool m_wasCancelled = false;
+    StarReductionStats m_starReductionStats;
 };

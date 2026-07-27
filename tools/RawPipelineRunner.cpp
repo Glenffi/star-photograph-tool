@@ -215,6 +215,16 @@ int main(int argc, char* argv[]) {
     report["dehazeStrength"] = dehazeStrength;
     report["stretchEnabled"] = stretchEnabled;
     report["starReduceStrength"] = starReduceStrength;
+    const StarReductionStats& reductionStats = worker.starReductionStats();
+    report["starReductionDetectedStars"] =
+        QString::number(reductionStats.detectedStars);
+    report["starReductionProcessedStars"] =
+        QString::number(reductionStats.processedStars);
+    report["starReductionAffectedPixels"] =
+        QString::number(reductionStats.affectedPixels);
+    report["starReductionAverageInputFwhm"] =
+        reductionStats.averageInputFwhm;
+    report["starReductionRadiusScale"] = reductionStats.radiusScale;
     report["estimatedPeakBytes"] = QString::number(estimatedBytes);
     report["estimatedScratchBytes"] = QString::number(scratchBytes);
     report["physicalMemoryBytes"] = QString::number(memoryInfo.totalBytes);

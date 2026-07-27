@@ -16,9 +16,11 @@ struct StarPoint {
  * @brief 星点检测选项
  *
  * 不同用途需要不同的检测策略：
- * - Alignment: 少量（~50）亮且空间均匀的星点，用于图像对齐
- * - Reduction: 最多 5000 个高质量星点，用于缩星处理
+ * - Alignment: 少量（~30）亮且空间均匀的星点，用于图像对齐
+ * - Reduction: 更大的候选预算，用于覆盖密集星场中的中小星点
  * - Density: 低成本局部极大值统计，用于天地分离蒙版
+ *
+ * 默认值只用于兼容旧调用。新调用方应按用途明确设置预算。
  */
 struct DetectionOptions {
     size_t maxCandidates = 5000;  // 最大候选数量（高斯拟合前）

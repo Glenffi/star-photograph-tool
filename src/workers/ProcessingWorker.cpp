@@ -308,6 +308,7 @@ void ProcessingWorker::run() {
     m_worstAlignmentP95 = 0.0;
     m_minimumGridCoverage = 0.0;
     m_stackingElapsedMs = 0;
+    m_starReductionStats = {};
     emit progress(0);
 
     if (m_files.isEmpty()) {
@@ -665,8 +666,13 @@ void ProcessingWorker::run() {
     if (m_params.starReduceEnabled && m_params.starReduceStrength > 0) {
         emit stageMessage("缩星处理...");
         if (!StarReducer::reduce(resultRgb, width, height,
-                                 m_params.starReduceStrength)) {
+                                 m_params.starReduceStrength,
+                                 &m_starReductionStats)) {
             qWarning() << "缩星处理失败，继续导出未缩星结果";
+        } else {
+            emit stageMessage(QString("缩星完成：处理 %1 颗星，影响 %2 个像素")
+                .arg(m_starReductionStats.processedStars)
+                .arg(m_starReductionStats.affectedPixels));
         }
         emit progress(95);
     }

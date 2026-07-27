@@ -334,12 +334,16 @@ void ParamsPanel::setupUI() {
     auto* strengthRow = new QHBoxLayout();
     auto* strengthLabel = new QLabel(QString::fromUtf8("强度:"), m_starReduceGroup);
     strengthLabel->setStyleSheet("font-size: 12px; color: #C9D1D9; background-color: transparent;");
-    strengthLabel->setToolTip(QString::fromUtf8("缩星强度：值越大星点越小\n推荐 30-70，过高会损失星点细节"));
+    strengthLabel->setToolTip(QString::fromUtf8(
+        "缩星强度：40 温和，60 明显，80 强烈\n"
+        "请在 100% 预览下判断，过高会损失星点细节"));
     strengthRow->addWidget(strengthLabel);
     m_starReduceSlider = createSlider(0, 100, 50);
     m_starReduceSlider->setEnabled(false);
     m_starReduceSlider->setFixedWidth(120);
-    m_starReduceSlider->setToolTip(QString::fromUtf8("拖动调整缩星强度"));
+    m_starReduceSlider->setToolTip(QString::fromUtf8(
+        "基于局部背景保护和星点轮廓收缩处理\n"
+        "推荐从 60 开始调整"));
     connect(m_starReduceSlider, &QSlider::valueChanged, this, &ParamsPanel::onSliderValueChanged);
     connect(m_starReduceSlider, &QSlider::sliderReleased, this, &ParamsPanel::onSliderReleased);
     strengthRow->addWidget(m_starReduceSlider);

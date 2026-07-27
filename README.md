@@ -2,7 +2,7 @@
 
 跨平台 RAW 图像处理软件，专注于星空摄影领域。
 
-> **当前阶段**：P2+。核心闭环、天地分离、形态学缩星、轻量 RAW 预览和核心自动化测试已经接入；Windows 仍需实机验证。
+> **当前阶段**：P2+。核心闭环、天地分离、局部 PSF 缩星、轻量 RAW 预览和核心自动化测试已经接入；Windows 仍需实机验证。
 
 ## 当前已实现
 
@@ -11,7 +11,7 @@
 - Average / Median / Kappa-Sigma / Winsorized 堆栈
 - 天空对齐、地景固定的天地分离堆栈
 - 亮度引导去雾、低频背景色偏校正与 RGB 联动 Arcsinh 拉伸
-- 星点遮罩、形态学腐蚀和羽化混合的自动缩星
+- 局部背景保护、PSF 径向收缩和亮度比例 RGB 重建的自动缩星
 - 线性 sRGB 16-bit TIFF（嵌入 ICC）和 sRGB 8-bit PNG 导出
 - 内嵌 RAW 缩略图优先、half-size 快速回退的浏览预览
 - 磁盘缓存分块堆栈、基于实时可用内存的处理前资源门禁，以及受控分辨率结果预览
@@ -40,7 +40,7 @@
 |------|------|---------|---------|
 | UI | Qt 6 | 6.2+ | LGPLv3 |
 | RAW 解码 | LibRaw | 0.21+ | LGPLv2.1/CDDL |
-| 图像处理（纯开源） | 自研算法（星点检测 + 形态学腐蚀） | — | MIT |
+| 图像处理（纯开源） | 自研算法（星点检测 + 局部背景估计 + PSF 收缩） | — | MIT |
 | 图像导出 | libtiff | — | BSD-2-Clause |
 | 构建 | CMake | 3.20+ | — |
 | AI 云端 | FastAPI + Docker | — | MIT/BSD |
@@ -60,7 +60,7 @@ StarProcessor/
 │   │   ├── StarDetector.h/cpp         # 星点检测与 2D 高斯拟合
 │   │   ├── ImageAligner.h/cpp         # 基于星点的图像对齐
 │   │   ├── StackingEngine.h/cpp       # 堆栈降噪（均值/中值/Kappa-Sigma/Winsorized）
-│   │   ├── StarReducer.h/cpp          # 缩星处理（星点检测 + 形态学腐蚀）
+│   │   ├── StarReducer.h/cpp          # 缩星处理（局部背景保护 + PSF 径向收缩）
 │   │   ├── ImageExporter.h/cpp        # 16-bit TIFF / PNG 8-bit 导出
 │   │   ├── AutoOptimizeEngine.h/cpp   # 自动优化：Dark Channel Prior 去雾 + Arcsinh 曲线拉伸
 │   │   └── PresetManager.h/cpp        # 内置预设与用户预设持久化

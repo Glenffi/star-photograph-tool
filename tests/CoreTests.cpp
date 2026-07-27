@@ -638,12 +638,31 @@ void testStarDetectionAndReduction() {
     }
     const uint16_t peakBefore = rgb[(16 * width + 18) * 3];
     const uint16_t backgroundBefore = rgb[(65 * width + 5) * 3];
-    check(StarReducer::reduce(rgb, width, height, 70),
+    const size_t brightPixelsBefore = static_cast<size_t>(std::count_if(
+        luminance.begin(), luminance.end(),
+        [](uint16_t value) { return value > 5000; }));
+    StarReductionStats reductionStats;
+    check(StarReducer::reduce(rgb, width, height, 70, &reductionStats),
           "Star reduction should accept a valid RGB buffer");
     check(rgb[(16 * width + 18) * 3] < peakBefore,
           "Star reduction should lower a detected star peak");
     check(rgb[(65 * width + 5) * 3] == backgroundBefore,
           "Star reduction should preserve pixels outside star masks");
+    const size_t brightPixelsAfter = static_cast<size_t>(std::count_if(
+        rgb.begin(), rgb.end(),
+        [](uint16_t value) { return value > 5000; })) / 3;
+    check(brightPixelsAfter < brightPixelsBefore,
+          "PSF contraction should reduce the bright star footprint");
+    check(reductionStats.detectedStars >= 3 &&
+              reductionStats.processedStars >= 3 &&
+              reductionStats.affectedPixels > 0 &&
+              reductionStats.radiusScale < 1.0,
+          "Star reduction should report useful processing diagnostics");
+    check(std::all_of(rgb.begin(), rgb.end(),
+                      [backgroundBefore](uint16_t value) {
+                          return value >= backgroundBefore;
+                      }),
+          "Local-background reduction should not create black holes");
     check(!StarReducer::reduce(rgb, width + 1, height, 50),
           "Star reduction should reject mismatched dimensions");
 }
