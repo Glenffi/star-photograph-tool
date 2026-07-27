@@ -38,6 +38,8 @@ public:
     std::vector<uint16_t> takeStackedData();
     int stackedWidth() const { return m_width; }
     int stackedHeight() const { return m_height; }
+    int cropOffsetX() const { return m_cropOffsetX; }
+    int cropOffsetY() const { return m_cropOffsetY; }
     int stackedFrameCount() const { return m_frameCount; }
     QString errorString() const { return m_errorString; }
     QString outputFile() const { return m_outputFile; }
@@ -67,6 +69,8 @@ private:
     std::vector<uint16_t> m_stackedData;
     int m_width = 0;
     int m_height = 0;
+    int m_cropOffsetX = 0;
+    int m_cropOffsetY = 0;
     int m_frameCount = 0;
     QString m_errorString;
     QString m_outputFile;

@@ -13,8 +13,10 @@ QList<Preset> PresetManager::builtinPresets() {
     milkyWay.alignMethod = "star";
     milkyWay.stackMethod = "median";
     milkyWay.kappaValue = 2.5;
-    milkyWay.dewarpEnabled = true;
-    milkyWay.dewarpStrength = 50;
+    // Traditional DCP can suppress real dark nebula structure. Keep it an
+    // explicit correction instead of applying it to every nightscape.
+    milkyWay.dewarpEnabled = false;
+    milkyWay.dewarpStrength = 25;
     milkyWay.stretchEnabled = true;
     milkyWay.starReduceEnabled = false;
     milkyWay.starReduceStrength = 50;
@@ -27,8 +29,8 @@ QList<Preset> PresetManager::builtinPresets() {
     deepSky.alignMethod = "star";
     deepSky.stackMethod = "winsorized";
     deepSky.kappaValue = 2.5;
-    deepSky.dewarpEnabled = true;
-    deepSky.dewarpStrength = 70;
+    deepSky.dewarpEnabled = false;
+    deepSky.dewarpStrength = 20;
     deepSky.stretchEnabled = true;
     deepSky.starReduceEnabled = false;
     deepSky.starReduceStrength = 50;

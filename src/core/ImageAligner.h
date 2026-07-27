@@ -76,6 +76,13 @@ struct AlignmentOptions {
     const std::vector<StarPoint>* evaluationSourceStars = nullptr;
 };
 
+struct AlignmentBounds {
+    int x = 0;
+    int y = 0;
+    int width = 0;
+    int height = 0;
+};
+
 /**
  * @brief 图像对齐器
  *
@@ -125,6 +132,14 @@ public:
     bool applyTransformRgb(const std::vector<uint16_t>& src, int w, int h,
                            const AlignmentTransform& t,
                            std::vector<uint16_t>& dst);
+
+    /**
+     * Finds a conservative axis-aligned rectangle covered by every accepted
+     * source-to-reference transform. The result excludes resampling borders.
+     */
+    bool commonValidBounds(const std::vector<AlignmentTransform>& transforms,
+                           int width, int height,
+                           AlignmentBounds& bounds) const;
 
 private:
     bool triangleMatch(const std::vector<StarPoint>& refStars,

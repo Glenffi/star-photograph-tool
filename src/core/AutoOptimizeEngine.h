@@ -10,6 +10,21 @@
  */
 class AutoOptimizeEngine {
 public:
+    // RGB-aware path used by the production pipeline. Dehaze derives one
+    // transmission map from luminance and applies it to all channels, avoiding
+    // the color shifts caused by independent per-channel processing.
+    static bool dehazeRgb(const std::vector<uint16_t>& src, int w, int h,
+                          int strength, std::vector<uint16_t>& dst);
+
+    // Removes a robust additive background cast, then applies one linked
+    // luminance curve to RGB so star colors and white balance remain coherent.
+    static bool stretchRgb(const std::vector<uint16_t>& src, int w, int h,
+                           std::vector<uint16_t>& dst);
+
+    static bool neutralizeBackgroundRgb(const std::vector<uint16_t>& src,
+                                        int w, int h,
+                                        std::vector<uint16_t>& dst);
+
     // 去雾：Dark Channel Prior + Guided Filter
     // 输入/输出：16-bit 单通道图像
     static bool dehaze(const std::vector<uint16_t>& src, int w, int h,
@@ -28,6 +43,4 @@ private:
                              std::vector<float>& dst,
                              int w, int h, int r, float eps);
 
-    // 计算百分位数
-    static float percentile(const std::vector<float>& data, float p);
 };

@@ -277,7 +277,9 @@ void ParamsPanel::setupUI() {
     auto* dewarpRow = new QHBoxLayout();
     m_dewarpCheck = new QCheckBox(QString::fromUtf8("去雾"), m_optimizeGroup);
     m_dewarpCheck->setEnabled(true);
-    m_dewarpCheck->setToolTip(QString::fromUtf8("Dark Channel Prior 去雾，改善大气光污染"));
+    m_dewarpCheck->setToolTip(QString::fromUtf8(
+        "亮度引导的 Dark Channel Prior 去雾\n"
+        "适合明显薄雾；银河暗尘丰富时建议关闭"));
     m_dewarpCheck->setStyleSheet(
         "QCheckBox { font-size: 12px; color: #C9D1D9; background-color: transparent; }"
         "QCheckBox::indicator { width: 14px; height: 14px; }"
@@ -294,7 +296,9 @@ void ParamsPanel::setupUI() {
 
     m_stretchCheck = new QCheckBox(QString::fromUtf8("曲线拉伸"), m_optimizeGroup);
     m_stretchCheck->setEnabled(true);
-    m_stretchCheck->setToolTip(QString::fromUtf8("Arcsinh 曲线拉伸，增强暗部细节"));
+    m_stretchCheck->setToolTip(QString::fromUtf8(
+        "背景色偏中和 + RGB 联动 Arcsinh 拉伸\n"
+        "增强暗部并保留星点颜色"));
     m_stretchCheck->setStyleSheet(m_dewarpCheck->styleSheet());
     connect(m_stretchCheck, &QCheckBox::toggled, this, &ParamsPanel::onCheckChanged);
     optimizeLayout->addWidget(m_stretchCheck);

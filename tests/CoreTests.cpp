@@ -1,6 +1,7 @@
 #include "core/ImageAligner.h"
 #include "core/ImageBufferUtils.h"
 #include "core/ImageExporter.h"
+#include "core/AutoOptimizeEngine.h"
 #include "core/RawImageLoader.h"
 #include "core/ProcessingMemoryEstimator.h"
 #include "core/PreviewToneMapper.h"
@@ -235,6 +236,108 @@ void testImageBufferUtils() {
           "A failed buffer conversion should leave its output unchanged");
 }
 
+void testRgbAutoOptimize() {
+    constexpr int width = 8;
+    constexpr int height = 8;
+    std::vector<uint16_t> castRgb(width * height * 3);
+    for (int i = 0; i < width * height; ++i) {
+        const uint16_t detail = static_cast<uint16_t>((i % width) * 40);
+        castRgb[i * 3] = static_cast<uint16_t>(6000 + detail);
+        castRgb[i * 3 + 1] = static_cast<uint16_t>(2200 + detail);
+        castRgb[i * 3 + 2] = static_cast<uint16_t>(1200 + detail);
+    }
+    castRgb[3 * 3] = 36000;
+    castRgb[3 * 3 + 1] = 18000;
+    castRgb[3 * 3 + 2] = 9000;
+
+    std::vector<uint16_t> neutralized;
+    check(AutoOptimizeEngine::neutralizeBackgroundRgb(
+              castRgb, width, height, neutralized),
+          "RGB background neutralization should accept an exact buffer");
+    check(std::abs(static_cast<int>(neutralized[0]) -
+                   static_cast<int>(neutralized[1])) <= 1 &&
+              std::abs(static_cast<int>(neutralized[1]) -
+                       static_cast<int>(neutralized[2])) <= 1,
+          "Background neutralization should remove an additive channel cast");
+    check(neutralized[3 * 3] > neutralized[3 * 3 + 1] &&
+              neutralized[3 * 3 + 1] > neutralized[3 * 3 + 2],
+          "Background neutralization should retain colored star ordering");
+
+    std::vector<uint16_t> stretched;
+    check(AutoOptimizeEngine::stretchRgb(
+              castRgb, width, height, stretched),
+          "Linked RGB stretch should process a valid image");
+    check(stretched[3 * 3] > stretched[3 * 3 + 1] &&
+              stretched[3 * 3 + 1] > stretched[3 * 3 + 2],
+          "Linked RGB stretch should preserve strong star color ordering");
+
+    std::vector<uint16_t> gray(width * height * 3);
+    for (int i = 0; i < width * height; ++i) {
+        const uint16_t value = static_cast<uint16_t>(500 + i * 500);
+        gray[i * 3] = gray[i * 3 + 1] = gray[i * 3 + 2] = value;
+    }
+    check(AutoOptimizeEngine::stretchRgb(gray, width, height, stretched),
+          "Linked RGB stretch should process neutral data");
+    for (size_t i = 0; i < stretched.size(); i += 3) {
+        check(stretched[i] == stretched[i + 1] &&
+                  stretched[i + 1] == stretched[i + 2],
+              "Linked RGB stretch should keep neutral pixels neutral");
+    }
+
+    std::vector<uint16_t> dehazed;
+    check(AutoOptimizeEngine::dehazeRgb(castRgb, width, height, 0, dehazed) &&
+              dehazed == castRgb,
+          "Zero-strength RGB dehaze should be an exact no-op");
+    std::vector<uint16_t> flatMono(32 * 32, 5000);
+    std::vector<uint16_t> flatDehazed;
+    check(AutoOptimizeEngine::dehaze(
+              flatMono, 32, 32, 50, flatDehazed) &&
+              std::all_of(flatDehazed.begin(), flatDehazed.end(),
+                          [](uint16_t value) {
+                              return std::abs(static_cast<int>(value) - 5000) <= 1;
+                          }),
+          "Guided dehaze should keep a flat field spatially uniform");
+    const std::vector<uint16_t> previous = {42};
+    dehazed = previous;
+    check(!AutoOptimizeEngine::dehazeRgb(
+              castRgb, width + 1, height, 20, dehazed) &&
+              dehazed == previous,
+          "Failed RGB optimization should leave output unchanged");
+
+    constexpr int gradientWidth = 64;
+    constexpr int gradientHeight = 64;
+    std::vector<uint16_t> gradient(
+        gradientWidth * gradientHeight * 3);
+    for (int y = 0; y < gradientHeight; ++y) {
+        for (int x = 0; x < gradientWidth; ++x) {
+            const size_t base =
+                (static_cast<size_t>(y) * gradientWidth + x) * 3;
+            gradient[base] = static_cast<uint16_t>(5000 + x * 20 + y * 8);
+            gradient[base + 1] =
+                static_cast<uint16_t>(2400 + x * 10 + y * 4);
+            gradient[base + 2] =
+                static_cast<uint16_t>(1300 + x * 5 + y * 2);
+        }
+    }
+    check(AutoOptimizeEngine::neutralizeBackgroundRgb(
+              gradient, gradientWidth, gradientHeight, neutralized),
+          "Spatial background neutralization should process a smooth gradient");
+    int maximumAdjacentJump = 0;
+    for (int x = 1; x < gradientWidth; ++x) {
+        const size_t previousPixel =
+            (static_cast<size_t>(gradientHeight / 2) * gradientWidth + x - 1) * 3;
+        const size_t currentPixel = previousPixel + 3;
+        for (size_t channel = 0; channel < 3; ++channel) {
+            maximumAdjacentJump = std::max(
+                maximumAdjacentJump,
+                std::abs(static_cast<int>(neutralized[currentPixel + channel]) -
+                         static_cast<int>(neutralized[previousPixel + channel])));
+        }
+    }
+    check(maximumAdjacentJump < 64,
+          "Spatial background interpolation should remain continuous at grid edges");
+}
+
 void testRgbTransform() {
     const int width = 3;
     const int height = 2;
@@ -395,6 +498,21 @@ void testTransformDirection() {
               rgbDestination[singularPixel + 1] == 0 &&
               rgbDestination[singularPixel + 2] == 0,
           "RGB resampling should zero pixels whose inverse map is undefined");
+
+    AlignmentTransform translated;
+    translated.c = 10.0;
+    translated.f = 5.0;
+    AlignmentBounds commonBounds;
+    check(aligner.commonValidBounds(
+              {translated}, 100, 80, commonBounds),
+          "Alignment should find a common valid crop for translated frames");
+    check(commonBounds.x >= 10 && commonBounds.x <= 12 &&
+              commonBounds.y >= 5 && commonBounds.y <= 7 &&
+              commonBounds.x + commonBounds.width <= 99 &&
+              commonBounds.y + commonBounds.height <= 79,
+          "Common crop should exclude inverse-mapping padding with safety margin");
+    check(!aligner.commonValidBounds({}, 100, 80, commonBounds),
+          "Common crop should reject an empty transform set");
 }
 
 void testAlignmentEstimation() {
@@ -581,6 +699,7 @@ int main(int argc, char* argv[]) {
     QCoreApplication application(argc, argv);
     testStacking();
     testImageBufferUtils();
+    testRgbAutoOptimize();
     testRgbTransform();
     testMemoryEstimator();
     testPreviewToneMapper();

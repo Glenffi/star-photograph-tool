@@ -68,8 +68,20 @@ int main(int argc, char* argv[]) {
         "memory-budget-mib",
         "Override the automatic memory budget in MiB; 0 keeps automatic mode.",
         "mib", "0");
+    const QCommandLineOption dehazeOption(
+        "dehaze-strength",
+        "Enable RGB-linked dehaze at strength 1-100; 0 disables it.",
+        "value", "0");
+    const QCommandLineOption stretchOption(
+        "stretch",
+        "Apply background neutralization and linked RGB Arcsinh stretch.");
+    const QCommandLineOption starReduceOption(
+        "star-reduce-strength",
+        "Enable star reduction at strength 1-100; 0 disables it.",
+        "value", "0");
     parser.addOptions({inputOption, outputOption, limitOption, referenceOption,
-                       methodOption, kappaOption, memoryBudgetOption});
+                       methodOption, kappaOption, memoryBudgetOption,
+                       dehazeOption, stretchOption, starReduceOption});
     parser.process(application);
 
     const QString input = QDir(parser.value(inputOption)).absolutePath();
@@ -94,14 +106,24 @@ int main(int argc, char* argv[]) {
     bool memoryBudgetOk = false;
     const qulonglong memoryBudgetMiB =
         parser.value(memoryBudgetOption).toULongLong(&memoryBudgetOk);
+    bool dehazeOk = false;
+    const int dehazeStrength = parser.value(dehazeOption).toInt(&dehazeOk);
+    bool starReduceOk = false;
+    const int starReduceStrength =
+        parser.value(starReduceOption).toInt(&starReduceOk);
+    const bool stretchEnabled = parser.isSet(stretchOption);
     const QString method = parser.value(methodOption).toLower();
     if (!limitOk || limit < 0 || !referenceOk || referenceIndex < -1 ||
         !kappaOk || kappa <= 0.0 || !memoryBudgetOk ||
+        !dehazeOk || dehazeStrength < 0 || dehazeStrength > 100 ||
+        !starReduceOk || starReduceStrength < 0 ||
+        starReduceStrength > 100 ||
         memoryBudgetMiB >
             std::numeric_limits<uint64_t>::max() / (1024ULL * 1024ULL) ||
         !validMethod(method)) {
         std::cerr << "Invalid --limit, --reference-index, --method, --kappa, "
-                     "or --memory-budget-mib.\n";
+                     "--memory-budget-mib, --dehaze-strength, or "
+                     "--star-reduce-strength.\n";
         return 2;
     }
     const uint64_t requestedMemoryBudgetBytes =
@@ -125,8 +147,14 @@ int main(int argc, char* argv[]) {
         std::cerr << "Cannot read first-frame metadata.\n";
         return 3;
     }
-    const uint64_t estimatedBytes = ProcessingMemoryEstimator::estimatePeakBytes(
-        metadata.width, metadata.height, files.size(), false);
+    ProcessingMemoryEstimator::EstimateOptions estimateOptions;
+    estimateOptions.frameCount = files.size();
+    estimateOptions.dehaze = dehazeStrength > 0;
+    estimateOptions.stretch = stretchEnabled;
+    estimateOptions.starReduction = starReduceStrength > 0;
+    const uint64_t estimatedBytes =
+        ProcessingMemoryEstimator::estimatePeakBytes(
+            metadata.width, metadata.height, estimateOptions);
     const uint64_t scratchBytes = ProcessingMemoryEstimator::estimateScratchDiskBytes(
         metadata.width, metadata.height, files.size(), false);
 
@@ -136,6 +164,11 @@ int main(int argc, char* argv[]) {
     params.outputFormat = "tiff16";
     params.outputPath = output;
     params.memoryBudgetBytes = requestedMemoryBudgetBytes;
+    params.dewarpEnabled = dehazeStrength > 0;
+    params.dewarpStrength = dehazeStrength;
+    params.stretchEnabled = stretchEnabled;
+    params.starReduceEnabled = starReduceStrength > 0;
+    params.starReduceStrength = starReduceStrength;
 
     ProcessingWorker worker(files, files[referenceIndex], params);
     QObject::connect(&worker, &ProcessingWorker::stageMessage, &application,
@@ -179,6 +212,9 @@ int main(int argc, char* argv[]) {
     report["referenceFile"] = QFileInfo(files[referenceIndex]).fileName();
     report["method"] = method;
     report["kappa"] = kappa;
+    report["dehazeStrength"] = dehazeStrength;
+    report["stretchEnabled"] = stretchEnabled;
+    report["starReduceStrength"] = starReduceStrength;
     report["estimatedPeakBytes"] = QString::number(estimatedBytes);
     report["estimatedScratchBytes"] = QString::number(scratchBytes);
     report["physicalMemoryBytes"] = QString::number(memoryInfo.totalBytes);
@@ -206,6 +242,8 @@ int main(int argc, char* argv[]) {
         worker.minimumAlignmentGridCoverage();
     report["width"] = worker.stackedWidth();
     report["height"] = worker.stackedHeight();
+    report["cropOffsetX"] = worker.cropOffsetX();
+    report["cropOffsetY"] = worker.cropOffsetY();
     report["outputFile"] = worker.outputFile();
     report["error"] = worker.errorString();
     report["success"] = worker.errorString().isEmpty() && !worker.outputFile().isEmpty();

@@ -1321,3 +1321,131 @@ bool ImageAligner::applyTransformRgb(const std::vector<uint16_t>& src, int w, in
     }
     return true;
 }
+
+bool ImageAligner::commonValidBounds(
+    const std::vector<AlignmentTransform>& transforms,
+    int width, int height, AlignmentBounds& bounds) const {
+    if (transforms.empty() || width <= 2 || height <= 2) return false;
+
+    std::vector<AlignmentTransform> inverses;
+    inverses.reserve(transforms.size());
+    for (const AlignmentTransform& transform : transforms) {
+        AlignmentTransform inverse;
+        if (!invertTransform(transform, inverse)) return false;
+        inverses.push_back(inverse);
+    }
+
+    auto validPoint = [&](double x, double y) {
+        for (const AlignmentTransform& inverse : inverses) {
+            double sourceX = 0.0;
+            double sourceY = 0.0;
+            if (!mapPoint(inverse, x, y, sourceX, sourceY) ||
+                sourceX < 0.0 || sourceX >= static_cast<double>(width - 1) ||
+                sourceY < 0.0 || sourceY >= static_cast<double>(height - 1)) {
+                return false;
+            }
+        }
+        return true;
+    };
+
+    constexpr int kGridLimit = 256;
+    const int columns = std::min(kGridLimit, width);
+    const int rows = std::min(kGridLimit, height);
+    std::vector<int> heights(static_cast<size_t>(columns), 0);
+    int bestArea = 0;
+    int bestLeft = 0;
+    int bestRight = -1;
+    int bestTop = 0;
+    int bestBottom = -1;
+
+    for (int row = 0; row < rows; ++row) {
+        const double y = static_cast<double>(row) * (height - 1) / (rows - 1);
+        for (int column = 0; column < columns; ++column) {
+            const double x =
+                static_cast<double>(column) * (width - 1) / (columns - 1);
+            heights[static_cast<size_t>(column)] =
+                validPoint(x, y)
+                    ? heights[static_cast<size_t>(column)] + 1 : 0;
+        }
+
+        std::vector<int> stack;
+        stack.reserve(static_cast<size_t>(columns) + 1);
+        for (int column = 0; column <= columns; ++column) {
+            const int currentHeight =
+                column < columns ? heights[static_cast<size_t>(column)] : 0;
+            while (!stack.empty() &&
+                   heights[static_cast<size_t>(stack.back())] > currentHeight) {
+                const int bar = stack.back();
+                stack.pop_back();
+                const int rectangleHeight =
+                    heights[static_cast<size_t>(bar)];
+                const int left = stack.empty() ? 0 : stack.back() + 1;
+                const int right = column - 1;
+                const int area = rectangleHeight * (right - left + 1);
+                if (area > bestArea) {
+                    bestArea = area;
+                    bestLeft = left;
+                    bestRight = right;
+                    bestBottom = row;
+                    bestTop = row - rectangleHeight + 1;
+                }
+            }
+            if (column < columns) stack.push_back(column);
+        }
+    }
+    if (bestArea == 0) return false;
+
+    int left = static_cast<int>(std::ceil(
+        static_cast<double>(bestLeft) * (width - 1) / (columns - 1)));
+    int right = static_cast<int>(std::floor(
+        static_cast<double>(bestRight) * (width - 1) / (columns - 1)));
+    int top = static_cast<int>(std::ceil(
+        static_cast<double>(bestTop) * (height - 1) / (rows - 1)));
+    int bottom = static_cast<int>(std::floor(
+        static_cast<double>(bestBottom) * (height - 1) / (rows - 1)));
+
+    auto validCorners = [&](int candidateLeft, int candidateTop,
+                            int candidateRight, int candidateBottom) {
+        return validPoint(candidateLeft, candidateTop) &&
+               validPoint(candidateRight, candidateTop) &&
+               validPoint(candidateLeft, candidateBottom) &&
+               validPoint(candidateRight, candidateBottom);
+    };
+    bool expanded = true;
+    while (expanded) {
+        expanded = false;
+        if (left > 0 &&
+            validCorners(left - 1, top, right, bottom)) {
+            --left;
+            expanded = true;
+        }
+        if (right < width - 1 &&
+            validCorners(left, top, right + 1, bottom)) {
+            ++right;
+            expanded = true;
+        }
+        if (top > 0 &&
+            validCorners(left, top - 1, right, bottom)) {
+            --top;
+            expanded = true;
+        }
+        if (bottom < height - 1 &&
+            validCorners(left, top, right, bottom + 1)) {
+            ++bottom;
+            expanded = true;
+        }
+    }
+
+    // Keep one pixel inside the bilinear validity boundary.
+    ++left;
+    ++top;
+    --right;
+    --bottom;
+    if (right < left || bottom < top ||
+        right - left + 1 < width / 2 ||
+        bottom - top + 1 < height / 2) {
+        return false;
+    }
+    bounds = {left, top, right - left + 1, bottom - top + 1};
+    return true;
+}

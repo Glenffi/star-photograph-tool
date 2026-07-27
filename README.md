@@ -10,11 +10,12 @@
 - 星点检测、Affine / Homography 自动选择、全画幅 3×3 网格质量门禁
 - Average / Median / Kappa-Sigma / Winsorized 堆栈
 - 天空对齐、地景固定的天地分离堆栈
-- Dark Channel Prior 去雾与 Arcsinh 曲线拉伸
+- 亮度引导去雾、低频背景色偏校正与 RGB 联动 Arcsinh 拉伸
 - 星点遮罩、形态学腐蚀和羽化混合的自动缩星
 - 线性 sRGB 16-bit TIFF（嵌入 ICC）和 sRGB 8-bit PNG 导出
 - 内嵌 RAW 缩略图优先、half-size 快速回退的浏览预览
 - 磁盘缓存分块堆栈、基于实时可用内存的处理前资源门禁，以及受控分辨率结果预览
+- 基于全部对齐变换的共同有效区域自动裁切，避免少帧覆盖边界进入成片
 
 ## 规划中
 
@@ -168,10 +169,11 @@ cmake --build . --config Release
 ./build/StarProcessorPipelineRunner \
   --input ../star-photograph-tool-samples/star-raw \
   --output build/pipeline-output \
-  --limit 15 --reference-index 7 --method kappa-sigma --kappa 2.5
+  --limit 15 --reference-index 7 --method kappa-sigma --kappa 2.5 \
+  --stretch --star-reduce-strength 40
 ```
 
-工具会生成完整分辨率 TIFF 和 `pipeline-report.json`。报告分别记录全流程耗时、纯堆栈耗时和通道样本吞吐量。处理期间，对齐帧写入系统临时目录并按 32 行分块堆栈；任务正常、失败或取消后都会自动清理。
+工具会生成完整分辨率 TIFF 和 `pipeline-report.json`。报告分别记录全流程耗时、纯堆栈耗时、通道样本吞吐量、自动裁切偏移和画质选项。`--stretch` 启用背景校正与 RGB 联动拉伸；`--dehaze-strength` 和 `--star-reduce-strength` 接受 `0–100`。处理期间，对齐帧写入系统临时目录并按 32 行分块堆栈；任务正常、失败或取消后都会自动清理。
 
 `--memory-budget-mib` 可为测试或受控运行设置更低的内存上限。该值只能收紧平台安全预算，不能绕过实时内存门禁；传 `0` 或省略参数时使用自动预算。
 
@@ -183,6 +185,8 @@ cmake --build . --config Release
 - **结果预览**：16-bit 处理结果会映射为最长边不超过 4096 px 的 8-bit 显示缓存；TIFF/PNG 导出始终使用完整分辨率结果
 - **预设**：当前仅提供“银河广角”和“深空天体”；单帧降噪与延时序列在专用流程完成前不显示
 - **天地检测**：传统 CV 自动蒙版需要人工预览确认，复杂山脊、云层和强光污染场景可能误判
+- **自动优化**：背景校正使用低分辨率鲁棒网格拟合加性光污染与色偏，并与 RGB 联动 Arcsinh 拉伸组合；DCP 去雾只适合明显薄雾，银河暗尘丰富时应关闭
+- **自动裁切**：天空对齐后自动裁到所有成功帧的共同有效区域，避免零填充边界造成单帧/少帧接缝；长序列或大位移会相应损失少量画幅
 - **统计堆栈性能**：Kappa-Sigma 需要对每个通道样本排序和迭代裁剪；15 张 36 MP Sony RAW 实测完整流程约 30 秒，明显慢于 Average，但 RAM 峰值不随帧数线性增长
 - **超广角长序列对齐**：当前会在全局 Affine 与 Homography 之间自动选择；14 mm 固定机位 15 张实测已消除旧仿射结果的明显边缘多重拖线。Homography 仍不能校正镜头局部畸变、滚动快门或复杂局部形变，跨镜头和更长序列仍需样片验证
 - **测试样片**：算法合成测试已接入；跨机型 RAW 样片集和 Windows CI 尚未建立

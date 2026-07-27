@@ -40,6 +40,34 @@ QString formatMemoryBytes(uint64_t bytes) {
     return QString("%1 GB").arg(bytes / kGiB, 0, 'f', 1);
 }
 
+bool cropRgb(const std::vector<uint16_t>& source,
+             int sourceWidth, int sourceHeight,
+             const AlignmentBounds& bounds,
+             std::vector<uint16_t>& destination) {
+    if (sourceWidth <= 0 || sourceHeight <= 0 ||
+        bounds.x < 0 || bounds.y < 0 || bounds.width <= 0 ||
+        bounds.height <= 0 || bounds.x + bounds.width > sourceWidth ||
+        bounds.y + bounds.height > sourceHeight ||
+        source.size() !=
+            static_cast<size_t>(sourceWidth) * sourceHeight * 3) {
+        return false;
+    }
+    std::vector<uint16_t> cropped(
+        static_cast<size_t>(bounds.width) * bounds.height * 3);
+    const size_t rowValues = static_cast<size_t>(bounds.width) * 3;
+    for (int row = 0; row < bounds.height; ++row) {
+        const size_t sourceOffset =
+            (static_cast<size_t>(bounds.y + row) * sourceWidth + bounds.x) * 3;
+        const size_t destinationOffset =
+            static_cast<size_t>(row) * rowValues;
+        std::memcpy(cropped.data() + destinationOffset,
+                    source.data() + sourceOffset,
+                    rowValues * sizeof(uint16_t));
+    }
+    destination = std::move(cropped);
+    return true;
+}
+
 class DiskFrameStore {
 public:
     explicit DiskFrameStore(const QString& prefix)
@@ -269,6 +297,8 @@ void ProcessingWorker::run() {
     m_stackedData.clear();
     m_width = 0;
     m_height = 0;
+    m_cropOffsetX = 0;
+    m_cropOffsetY = 0;
     m_frameCount = 0;
     m_wasCancelled = false;
     m_outputFile.clear();
@@ -372,8 +402,8 @@ void ProcessingWorker::run() {
 
     // LibRaw applies camera orientation during dcraw_process(). Pixel algorithms
     // must therefore use processed dimensions rather than header dimensions.
-    const int width = referenceImage.width;
-    const int height = referenceImage.height;
+    int width = referenceImage.width;
+    int height = referenceImage.height;
     m_width = width;
     m_height = height;
     if (width != metadataWidth || height != metadataHeight) {
@@ -447,6 +477,8 @@ void ProcessingWorker::run() {
 
     emit stageMessage("逐帧加载与对齐...");
     ImageAligner aligner;
+    std::vector<AlignmentTransform> acceptedTransforms;
+    acceptedTransforms.reserve(static_cast<size_t>(m_files.size() - 1));
     for (int i = 0; i < m_files.size(); ++i) {
         if (stopIfCancelled()) return;
         if (static_cast<size_t>(i) == referenceIndex) continue;
@@ -521,6 +553,7 @@ void ProcessingWorker::run() {
         } else {
             ++m_affineFrameCount;
         }
+        acceptedTransforms.push_back(transform);
         m_alignmentRmsSum += alignmentQuality.rmsError;
         m_worstAlignmentP95 =
             std::max(m_worstAlignmentP95, alignmentQuality.p95Error);
@@ -585,43 +618,45 @@ void ProcessingWorker::run() {
     emit progress(80);
     if (stopIfCancelled()) return;
 
-    if (m_params.dewarpEnabled || m_params.stretchEnabled) {
-        emit stageMessage("自动优化...");
-        ImageBufferUtils::RgbChannels channels;
-        if (!ImageBufferUtils::splitRgb(resultRgb, width, height, channels)) {
-            m_errorString = "堆栈结果 RGB 数据无效";
+    AlignmentBounds commonBounds;
+    if (aligner.commonValidBounds(
+            acceptedTransforms, width, height, commonBounds) &&
+        (commonBounds.x != 0 || commonBounds.y != 0 ||
+         commonBounds.width != width || commonBounds.height != height)) {
+        emit stageMessage("裁切共同有效区域...");
+        std::vector<uint16_t> cropped;
+        if (!cropRgb(resultRgb, width, height, commonBounds, cropped)) {
+            m_errorString = "有效区域裁切失败";
             return;
         }
+        resultRgb = std::move(cropped);
+        m_cropOffsetX = commonBounds.x;
+        m_cropOffsetY = commonBounds.y;
+        width = commonBounds.width;
+        height = commonBounds.height;
+        m_width = width;
+        m_height = height;
+    }
+
+    if (m_params.dewarpEnabled || m_params.stretchEnabled) {
+        emit stageMessage("自动优化...");
         if (m_params.dewarpEnabled) {
             std::vector<uint16_t> output;
-            if (AutoOptimizeEngine::dehaze(channels.red, width, height,
-                                           m_params.dewarpStrength, output)) {
-                channels.red = std::move(output);
+            if (!AutoOptimizeEngine::dehazeRgb(
+                    resultRgb, width, height, m_params.dewarpStrength, output)) {
+                m_errorString = "RGB 去雾失败";
+                return;
             }
-            if (AutoOptimizeEngine::dehaze(channels.green, width, height,
-                                           m_params.dewarpStrength, output)) {
-                channels.green = std::move(output);
-            }
-            if (AutoOptimizeEngine::dehaze(channels.blue, width, height,
-                                           m_params.dewarpStrength, output)) {
-                channels.blue = std::move(output);
-            }
+            resultRgb = std::move(output);
         }
         if (m_params.stretchEnabled) {
             std::vector<uint16_t> output;
-            if (AutoOptimizeEngine::stretchCurve(channels.red, width, height, output)) {
-                channels.red = std::move(output);
+            if (!AutoOptimizeEngine::stretchRgb(
+                    resultRgb, width, height, output)) {
+                m_errorString = "RGB 曲线拉伸失败";
+                return;
             }
-            if (AutoOptimizeEngine::stretchCurve(channels.green, width, height, output)) {
-                channels.green = std::move(output);
-            }
-            if (AutoOptimizeEngine::stretchCurve(channels.blue, width, height, output)) {
-                channels.blue = std::move(output);
-            }
-        }
-        if (!ImageBufferUtils::mergeRgb(channels, width, height, resultRgb)) {
-            m_errorString = "自动优化结果 RGB 数据无效";
-            return;
+            resultRgb = std::move(output);
         }
         emit progress(90);
     }
