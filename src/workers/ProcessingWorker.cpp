@@ -13,6 +13,7 @@
 #include <QDateTime>
 #include <QDebug>
 #include <QDir>
+#include <QElapsedTimer>
 #include <QFile>
 #include <QFileInfo>
 #include <QStorageInfo>
@@ -175,11 +176,15 @@ bool stackCachedRgb(StackingEngine& stacker, const DiskFrameStore& aligned,
     }
     constexpr int kRowsPerChunk = 32;
     output.resize(static_cast<size_t>(width) * height * 3);
+    std::vector<std::vector<uint16_t>> alignedChunk(
+        static_cast<size_t>(aligned.frameCount()));
+    std::vector<std::vector<uint16_t>> originalChunk(
+        originals ? static_cast<size_t>(originals->frameCount()) : 0);
+    std::vector<uint8_t> maskChunk;
+    std::vector<uint16_t> stackedChunk;
     for (int startRow = 0; startRow < height; startRow += kRowsPerChunk) {
         if (cancelled()) return false;
         const int rowCount = std::min(kRowsPerChunk, height - startRow);
-        std::vector<std::vector<uint16_t>> alignedChunk(
-            static_cast<size_t>(aligned.frameCount()));
         for (int frame = 0; frame < aligned.frameCount(); ++frame) {
             if (!aligned.readRows(frame, width, startRow, rowCount,
                                   alignedChunk[static_cast<size_t>(frame)])) {
@@ -187,17 +192,14 @@ bool stackCachedRgb(StackingEngine& stacker, const DiskFrameStore& aligned,
             }
         }
 
-        std::vector<uint16_t> stackedChunk;
         if (originals) {
-            std::vector<std::vector<uint16_t>> originalChunk(
-                static_cast<size_t>(originals->frameCount()));
             for (int frame = 0; frame < originals->frameCount(); ++frame) {
                 if (!originals->readRows(frame, width, startRow, rowCount,
                                          originalChunk[static_cast<size_t>(frame)])) {
                     return false;
                 }
             }
-            std::vector<uint8_t> maskChunk(
+            maskChunk.assign(
                 mask->begin() + static_cast<size_t>(startRow) * width,
                 mask->begin() + static_cast<size_t>(startRow + rowCount) * width);
             if (!stackRgbWithMask(stacker, alignedChunk, originalChunk, width,
@@ -266,6 +268,7 @@ void ProcessingWorker::run() {
     m_alignmentRmsSum = 0.0;
     m_worstAlignmentP95 = 0.0;
     m_minimumGridCoverage = 0.0;
+    m_stackingElapsedMs = 0;
     emit progress(0);
 
     if (m_files.isEmpty()) {
@@ -518,6 +521,8 @@ void ProcessingWorker::run() {
         }
         emit stageMessage("天地分离堆栈...");
     }
+    QElapsedTimer stackingTimer;
+    stackingTimer.start();
     const bool stacked = stackCachedRgb(
         stacker, alignedCache,
         m_params.skyGroundSepEnabled ? &originalCache : nullptr,
@@ -527,6 +532,7 @@ void ProcessingWorker::run() {
         [this, height](int rows) {
             emit progress(55 + static_cast<int>(rows * 25.0 / height));
         });
+    m_stackingElapsedMs = stackingTimer.elapsed();
     if (!stacked) {
         if (m_wasCancelled) return;
         m_errorString = m_params.skyGroundSepEnabled

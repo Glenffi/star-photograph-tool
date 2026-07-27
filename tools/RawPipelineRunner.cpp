@@ -159,6 +159,13 @@ int main(int argc, char* argv[]) {
     report["estimatedPeakBytes"] = QString::number(estimatedBytes);
     report["estimatedScratchBytes"] = QString::number(scratchBytes);
     report["elapsedMs"] = timer.elapsed();
+    report["stackingElapsedMs"] = worker.stackingElapsedMs();
+    const double stackedChannelSamples =
+        static_cast<double>(worker.stackedWidth()) * worker.stackedHeight() * 3.0;
+    report["stackingMillionChannelSamplesPerSecond"] =
+        worker.stackingElapsedMs() > 0
+            ? stackedChannelSamples / worker.stackingElapsedMs() / 1000.0
+            : 0.0;
     report["processedFrames"] = worker.stackedFrameCount();
     report["referenceFrames"] = worker.stackedFrameCount() > 0 ? 1 : 0;
     report["transformedSourceFrames"] =

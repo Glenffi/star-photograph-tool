@@ -19,6 +19,7 @@
 #include <cmath>
 #include <cstdint>
 #include <iostream>
+#include <random>
 #include <string>
 #include <vector>
 
@@ -47,6 +48,49 @@ void addGaussianStar(std::vector<uint16_t>& image, int width, int height,
             image[index] = static_cast<uint16_t>(std::min(65535.0, image[index] + value));
         }
     }
+}
+
+uint16_t legacyKappaSigma(std::vector<uint16_t> values, double kappa,
+                          bool ignoreZero) {
+    if (ignoreZero) {
+        values.erase(std::remove(values.begin(), values.end(), 0), values.end());
+    }
+    if (values.empty()) return 0;
+
+    std::vector<uint16_t> active = values;
+    std::vector<uint16_t> ordered;
+    std::vector<uint16_t> filtered;
+    ordered.reserve(values.size());
+    filtered.reserve(values.size());
+    for (int iteration = 0; iteration < 3; ++iteration) {
+        ordered.assign(active.begin(), active.end());
+        const size_t middle = ordered.size() / 2;
+        std::nth_element(ordered.begin(), ordered.begin() + middle, ordered.end());
+        double median = ordered[middle];
+        if (ordered.size() % 2 == 0) {
+            median = (median + *std::max_element(
+                                   ordered.begin(), ordered.begin() + middle)) / 2.0;
+        }
+        double squaredSum = 0.0;
+        for (uint16_t value : active) {
+            const double delta = static_cast<double>(value) - median;
+            squaredSum += delta * delta;
+        }
+        const double deviation = std::sqrt(squaredSum / active.size());
+        if (deviation == 0.0) break;
+        const double threshold = kappa * deviation;
+        filtered.clear();
+        for (uint16_t value : active) {
+            if (std::abs(static_cast<double>(value) - median) <= threshold) {
+                filtered.push_back(value);
+            }
+        }
+        if (filtered.empty() || filtered.size() == active.size()) break;
+        active.swap(filtered);
+    }
+    uint64_t sum = 0;
+    for (uint16_t value : active) sum += value;
+    return static_cast<uint16_t>(sum / active.size());
 }
 
 void testStacking() {
@@ -108,11 +152,57 @@ void testStacking() {
         {100}, {102}, {99}, {101}, {50000}
     };
     check(engine.stack(outlierFrames, 1, 1, StackingEngine::KappaSigma, 1.5,
-                       result) && result[0] < 200,
-          "Kappa-Sigma should reject a strong positive outlier");
+                       result) && result == std::vector<uint16_t>({100}),
+          "Kappa-Sigma should iteratively reject an outlier and average survivors");
     check(engine.stack(outlierFrames, 1, 1, StackingEngine::Winsorized, 1.5,
                        result) && result[0] < 200,
           "Winsorized stacking should clamp a strong positive outlier");
+    const std::vector<std::vector<uint16_t>> paddedOutlierFrames = {
+        {0}, {100}, {102}, {50000}
+    };
+    check(engine.stack(paddedOutlierFrames, 1, 1, StackingEngine::KappaSigma,
+                       1.0, result, true) &&
+              result == std::vector<uint16_t>({101}),
+          "Kappa-Sigma should exclude alignment padding before clipping");
+    check(!engine.stack(outlierFrames, 1, 1, StackingEngine::KappaSigma,
+                        0.0, result),
+          "Kappa-Sigma should reject a non-positive kappa");
+
+    // Differential coverage protects the optimized sorted-range kernel against
+    // subtle clipping changes across frame counts, kappa values and zero padding.
+    std::mt19937 random(0x4b415050U);
+    std::uniform_int_distribution<int> valueDistribution(0, 65535);
+    constexpr int sampleCount = 256;
+    for (int frameCount = 2; frameCount <= 32; ++frameCount) {
+        std::vector<std::vector<uint16_t>> randomFrames(
+            static_cast<size_t>(frameCount),
+            std::vector<uint16_t>(sampleCount));
+        for (auto& frame : randomFrames) {
+            for (uint16_t& value : frame) {
+                value = static_cast<uint16_t>(valueDistribution(random));
+                if (valueDistribution(random) % 17 == 0) value = 0;
+            }
+        }
+        for (double testKappa : {1.0, 1.5, 2.5, 4.0}) {
+            for (bool ignorePadding : {false, true}) {
+                check(engine.stack(randomFrames, sampleCount, 1,
+                                   StackingEngine::KappaSigma, testKappa,
+                                   result, ignorePadding),
+                      "Random Kappa-Sigma differential input should stack");
+                for (int sample = 0; sample < sampleCount; ++sample) {
+                    std::vector<uint16_t> values;
+                    values.reserve(static_cast<size_t>(frameCount));
+                    for (const auto& frame : randomFrames) {
+                        values.push_back(frame[static_cast<size_t>(sample)]);
+                    }
+                    check(result[static_cast<size_t>(sample)] ==
+                              legacyKappaSigma(
+                                  std::move(values), testKappa, ignorePadding),
+                          "Optimized Kappa-Sigma should match the legacy kernel");
+                }
+            }
+        }
+    }
 }
 
 void testImageBufferUtils() {

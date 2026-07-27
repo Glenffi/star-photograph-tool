@@ -46,6 +46,7 @@ public:
     double averageAlignmentRms() const;
     double worstAlignmentP95() const { return m_worstAlignmentP95; }
     double minimumAlignmentGridCoverage() const { return m_minimumGridCoverage; }
+    qint64 stackingElapsedMs() const { return m_stackingElapsedMs; }
     bool wasCancelled() const { return m_wasCancelled; }
 
     void requestCancel();
@@ -74,6 +75,7 @@ private:
     double m_alignmentRmsSum = 0.0;
     double m_worstAlignmentP95 = 0.0;
     double m_minimumGridCoverage = 0.0;
+    qint64 m_stackingElapsedMs = 0;
     std::atomic<bool> m_cancelRequested{false};
     bool m_wasCancelled = false;
 };

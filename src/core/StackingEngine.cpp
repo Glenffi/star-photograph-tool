@@ -29,26 +29,23 @@ bool validFrames(const std::vector<std::vector<uint16_t>>& images,
     });
 }
 
-double medianOf(const std::vector<uint16_t>& values,
-                std::vector<uint16_t>& ordered) {
-    ordered.assign(values.begin(), values.end());
-    const size_t middle = ordered.size() / 2;
-    std::nth_element(ordered.begin(), ordered.begin() + middle, ordered.end());
-    double median = ordered[middle];
-    if (ordered.size() % 2 == 0) {
-        median = (median + *std::max_element(ordered.begin(),
-                                             ordered.begin() + middle)) / 2.0;
-    }
-    return median;
+double medianOfSorted(const std::vector<uint16_t>& values,
+                      size_t begin, size_t end) {
+    const size_t count = end - begin;
+    const size_t middle = begin + count / 2;
+    if (count % 2 != 0) return values[middle];
+    return (static_cast<double>(values[middle - 1]) + values[middle]) / 2.0;
 }
 
-double standardDeviation(const std::vector<uint16_t>& values, double center) {
+double standardDeviation(const std::vector<uint16_t>& values,
+                         size_t begin, size_t end, double center) {
     double sum = 0.0;
-    for (uint16_t value : values) {
+    for (size_t index = begin; index < end; ++index) {
+        const uint16_t value = values[index];
         const double delta = static_cast<double>(value) - center;
         sum += delta * delta;
     }
-    return std::sqrt(sum / values.size());
+    return std::sqrt(sum / (end - begin));
 }
 
 double medianAbsoluteDeviation(const std::vector<uint16_t>& values, double median,
@@ -95,13 +92,8 @@ bool stackSamples(const std::vector<std::vector<uint16_t>>& images,
     // allocating them inside the pixel loop would cause hundreds of millions of
     // small heap operations.
     std::vector<uint16_t> values;
-    std::vector<uint16_t> active;
-    std::vector<uint16_t> ordered;
-    std::vector<uint16_t> filtered;
     std::vector<double> deviations;
-    for (auto* buffer : {&values, &active, &ordered, &filtered}) {
-        buffer->reserve(images.size());
-    }
+    values.reserve(images.size());
     deviations.reserve(images.size());
 
     constexpr double kMadToStdDev = 1.4826;
@@ -115,14 +107,16 @@ bool stackSamples(const std::vector<std::vector<uint16_t>>& images,
             result[sample] = 0;
             continue;
         }
+        std::sort(values.begin(), values.end());
 
         if (method == StackingEngine::Median) {
-            result[sample] = static_cast<uint16_t>(std::lround(medianOf(values, ordered)));
+            result[sample] = static_cast<uint16_t>(
+                std::lround(medianOfSorted(values, 0, values.size())));
             continue;
         }
 
         if (method == StackingEngine::Winsorized) {
-            const double median = medianOf(values, ordered);
+            const double median = medianOfSorted(values, 0, values.size());
             const double threshold = kappa *
                 medianAbsoluteDeviation(values, median, deviations) * kMadToStdDev;
             const double lower = median - threshold;
@@ -136,24 +130,40 @@ bool stackSamples(const std::vector<std::vector<uint16_t>>& images,
             continue;
         }
 
-        active.assign(values.begin(), values.end());
+        // Values stay sorted while sigma clipping shrinks the accepted range.
+        // This replaces three median copies/nth_element calls and two filter
+        // buffers per sample with index updates into one reusable vector.
+        size_t activeBegin = 0;
+        size_t activeEnd = values.size();
         for (int iteration = 0; iteration < 3; ++iteration) {
-            const double median = medianOf(active, ordered);
-            const double deviation = standardDeviation(active, median);
+            const double median = medianOfSorted(values, activeBegin, activeEnd);
+            const double deviation =
+                standardDeviation(values, activeBegin, activeEnd, median);
             if (deviation == 0.0) break;
             const double threshold = kappa * deviation;
-            filtered.clear();
-            for (uint16_t value : active) {
-                if (std::abs(static_cast<double>(value) - median) <= threshold) {
-                    filtered.push_back(value);
-                }
+            const double lower = median - threshold;
+            const double upper = median + threshold;
+            const auto beginIterator = values.begin() +
+                static_cast<std::ptrdiff_t>(activeBegin);
+            const auto endIterator = values.begin() +
+                static_cast<std::ptrdiff_t>(activeEnd);
+            const size_t clippedBegin = static_cast<size_t>(
+                std::lower_bound(beginIterator, endIterator, lower) - values.begin());
+            const size_t clippedEnd = static_cast<size_t>(
+                std::upper_bound(beginIterator, endIterator, upper) - values.begin());
+            if (clippedBegin == clippedEnd ||
+                (clippedBegin == activeBegin && clippedEnd == activeEnd)) {
+                break;
             }
-            if (filtered.empty() || filtered.size() == active.size()) break;
-            active.swap(filtered);
+            activeBegin = clippedBegin;
+            activeEnd = clippedEnd;
         }
         uint64_t sum = 0;
-        for (uint16_t value : active) sum += value;
-        result[sample] = static_cast<uint16_t>(sum / active.size());
+        for (size_t index = activeBegin; index < activeEnd; ++index) {
+            sum += values[index];
+        }
+        result[sample] = static_cast<uint16_t>(
+            sum / (activeEnd - activeBegin));
     }
     return true;
 }
