@@ -338,7 +338,7 @@ void ParamsPanel::setupUI() {
         "缩星强度：40 温和，60 明显，80 强烈\n"
         "请在 100% 预览下判断，过高会损失星点细节"));
     strengthRow->addWidget(strengthLabel);
-    m_starReduceSlider = createSlider(0, 100, 50);
+    m_starReduceSlider = createSlider(0, 100, 70);
     m_starReduceSlider->setEnabled(false);
     m_starReduceSlider->setFixedWidth(120);
     m_starReduceSlider->setToolTip(QString::fromUtf8(
@@ -620,7 +620,7 @@ void ParamsPanel::onRestoreDefaults() {
     m_dewarpSlider->setValue(30);
     m_stretchCheck->setChecked(false);
     m_starReduceCheck->setChecked(false);
-    m_starReduceSlider->setValue(50);
+    m_starReduceSlider->setValue(70);
     m_outputFormat->setCurrentIndex(0);
     // 重置天地分离
     m_skyGroundCheck->setChecked(false);
@@ -734,7 +734,7 @@ void ParamsPanel::loadPreset() {
     int dewarpStrength = settings.value("dewarpStrength", 30).toInt();
     bool stretch = settings.value("stretchEnabled", false).toBool();
     bool starReduce = settings.value("starReduceEnabled", false).toBool();
-    int starReduceStrength = settings.value("starReduceStrength", 50).toInt();
+    int starReduceStrength = settings.value("starReduceStrength", 70).toInt();
     int outputFormat = settings.value("outputFormat", 0).toInt();
     QString outputPath = settings.value("outputPath", QDir::homePath() + "/StarProcessor/Output").toString();
     int lastPresetIndex = settings.value("lastPresetIndex", 0).toInt();
@@ -817,7 +817,7 @@ void ParamsPanel::onPresetChanged(int index) {
             preset.dewarpStrength = settings.value("dewarpStrength", 30).toInt();
             preset.stretchEnabled = settings.value("stretchEnabled", false).toBool();
             preset.starReduceEnabled = settings.value("starReduceEnabled", false).toBool();
-            preset.starReduceStrength = settings.value("starReduceStrength", 50).toInt();
+            preset.starReduceStrength = settings.value("starReduceStrength", 70).toInt();
             preset.outputFormat = settings.value("outputFormat", 0).toInt() == 0 ? "tiff16" : "png8";
             applyPreset(preset);
 

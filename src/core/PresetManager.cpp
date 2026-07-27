@@ -19,7 +19,7 @@ QList<Preset> PresetManager::builtinPresets() {
     milkyWay.dewarpStrength = 25;
     milkyWay.stretchEnabled = true;
     milkyWay.starReduceEnabled = false;
-    milkyWay.starReduceStrength = 50;
+    milkyWay.starReduceStrength = 70;
     milkyWay.outputFormat = "tiff16";
     presets.append(milkyWay);
 
@@ -33,7 +33,7 @@ QList<Preset> PresetManager::builtinPresets() {
     deepSky.dewarpStrength = 20;
     deepSky.stretchEnabled = true;
     deepSky.starReduceEnabled = false;
-    deepSky.starReduceStrength = 50;
+    deepSky.starReduceStrength = 70;
     deepSky.outputFormat = "tiff16";
     presets.append(deepSky);
 
@@ -78,7 +78,7 @@ Preset PresetManager::loadPreset(const QString& path) {
     preset.dewarpStrength = obj["dewarpStrength"].toInt(30);
     preset.stretchEnabled = obj["stretchEnabled"].toBool(false);
     preset.starReduceEnabled = obj["starReduceEnabled"].toBool(false);
-    preset.starReduceStrength = obj["starReduceStrength"].toInt(50);
+    preset.starReduceStrength = obj["starReduceStrength"].toInt(70);
     preset.outputFormat = obj["outputFormat"].toString("tiff16");
 
     return preset;

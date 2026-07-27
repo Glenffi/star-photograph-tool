@@ -11,7 +11,7 @@
 - Average / Median / Kappa-Sigma / Winsorized 堆栈
 - 天空对齐、地景固定的天地分离堆栈
 - 亮度引导去雾、低频背景色偏校正与 RGB 联动 Arcsinh 拉伸
-- 局部背景保护、PSF 径向收缩和亮度比例 RGB 重建的自动缩星
+- 局部背景保护、亮星 PSF 收缩、暗弱小星渐隐和亮度比例 RGB 重建的自动缩星
 - 线性 sRGB 16-bit TIFF（嵌入 ICC）和 sRGB 8-bit PNG 导出
 - 内嵌 RAW 缩略图优先、half-size 快速回退的浏览预览
 - 磁盘缓存分块堆栈、基于实时可用内存的处理前资源门禁，以及受控分辨率结果预览

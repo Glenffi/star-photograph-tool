@@ -670,9 +670,10 @@ void ProcessingWorker::run() {
                                  &m_starReductionStats)) {
             qWarning() << "缩星处理失败，继续导出未缩星结果";
         } else {
-            emit stageMessage(QString("缩星完成：处理 %1 颗星，影响 %2 个像素")
+            emit stageMessage(QString(
+                "缩星完成：处理 %1 颗星，其中 %2 颗小星被显著压低")
                 .arg(m_starReductionStats.processedStars)
-                .arg(m_starReductionStats.affectedPixels));
+                .arg(m_starReductionStats.stronglySuppressedStars));
         }
         emit progress(95);
     }

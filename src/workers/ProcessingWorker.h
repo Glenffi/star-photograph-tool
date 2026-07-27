@@ -22,7 +22,7 @@ public:
         int dewarpStrength = 30;
         bool stretchEnabled = false;
         bool starReduceEnabled = false;
-        int starReduceStrength = 50;
+        int starReduceStrength = 70;
         QString outputFormat = "tiff16";
         QString outputPath;
         bool skyGroundSepEnabled = false;

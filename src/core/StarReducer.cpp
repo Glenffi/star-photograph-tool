@@ -77,6 +77,11 @@ double smoothMask(double distance, double radius) {
     return 1.0 - smoothstep;
 }
 
+double smoothstep01(double value) {
+    const double clamped = std::clamp(value, 0.0, 1.0);
+    return clamped * clamped * (3.0 - 2.0 * clamped);
+}
+
 } // namespace
 
 bool StarReducer::reduce(std::vector<uint16_t>& image, int width, int height,
@@ -133,14 +138,43 @@ bool StarReducer::reduce(std::vector<uint16_t>& image, int width, int height,
     if (filteredStars.empty()) return true;
 
     const double normalizedStrength = strength / 100.0;
-    const double radiusScale = 1.0 - normalizedStrength * 0.5;
-    const double amplitudeScale = 1.0 - normalizedStrength * 0.25;
+    // Radius contraction alone does not remove tiny stars because their center
+    // remains a bright sample. Reduce the common bright-star amplitude and add
+    // a rank-aware fade for the numerous faint stars. This mirrors the normal
+    // photographic goal: retain prominent stars while simplifying dense fields.
+    const double radiusScale = 1.0 - normalizedStrength * 0.75;
+    const double brightStarAmplitude = 1.0 - normalizedStrength * 0.55;
+    const double fadeProgress = std::clamp(
+        (normalizedStrength - 0.20) / 0.65, 0.0, 1.0);
     if (stats) stats->radiusScale = radiusScale;
 
     // Every proposal is derived from the immutable source. Overlapping masks
     // keep the strongest reduction, so processing order cannot create rings.
     std::vector<uint16_t> outputLuminance = originalLuminance;
-    for (const StarPoint& star : filteredStars) {
+    for (size_t starIndex = 0;
+         starIndex < filteredStars.size(); ++starIndex) {
+        const StarPoint& star = filteredStars[starIndex];
+        const double rank = filteredStars.size() <= 1
+            ? 0.0
+            : static_cast<double>(starIndex) /
+                static_cast<double>(filteredStars.size() - 1);
+        // The detector returns stars in descending flux order. The smooth
+        // transition avoids a visible threshold between retained and removed
+        // stars. Compactness helps suppress genuinely tiny stars without
+        // erasing an unusually bright compact star outright.
+        const double faintness = smoothstep01((rank - 0.15) / 0.70);
+        const double compactness =
+            1.0 - smoothstep01((star.fwhm - 1.5) / 4.0);
+        const double smallStarScore = std::max(
+            faintness, compactness * (0.25 + 0.75 * faintness));
+        const double survival = std::clamp(
+            1.0 - fadeProgress * 1.35 * smallStarScore, 0.0, 1.0);
+        const double amplitudeScale =
+            brightStarAmplitude * survival;
+        if (stats && survival <= 0.15) {
+            ++stats->stronglySuppressedStars;
+        }
+
         const double maskRadius = std::clamp(star.fwhm * 2.5, 3.0, 24.0);
         const double backgroundInner =
             std::clamp(star.fwhm * 1.6, 1.5, maskRadius * 0.8);

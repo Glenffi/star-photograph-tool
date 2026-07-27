@@ -616,6 +616,14 @@ void testStarDetectionAndReduction() {
     addGaussianStar(luminance, width, height, 18.0, 16.0, 1.4, 42000.0);
     addGaussianStar(luminance, width, height, 70.0, 20.0, 1.7, 36000.0);
     addGaussianStar(luminance, width, height, 48.0, 54.0, 1.5, 40000.0);
+    const std::vector<std::pair<int, int>> faintStarCenters = {
+        {8, 8}, {32, 9}, {52, 10}, {86, 9},
+        {9, 38}, {30, 35}, {60, 37}, {86, 39},
+        {13, 63}, {35, 64}, {66, 63}, {86, 62}
+    };
+    for (const auto& [x, y] : faintStarCenters) {
+        addGaussianStar(luminance, width, height, x, y, 0.85, 8000.0);
+    }
 
     DetectionOptions options;
     options.maxCandidates = 2;
@@ -637,17 +645,26 @@ void testStarDetectionAndReduction() {
         rgb[i * 3 + 2] = luminance[i];
     }
     const uint16_t peakBefore = rgb[(16 * width + 18) * 3];
+    const size_t faintCenterIndex =
+        static_cast<size_t>(62 * width + 86) * 3;
+    const uint16_t faintPeakBefore = rgb[faintCenterIndex];
     const uint16_t backgroundBefore = rgb[(65 * width + 5) * 3];
     const size_t brightPixelsBefore = static_cast<size_t>(std::count_if(
         luminance.begin(), luminance.end(),
         [](uint16_t value) { return value > 5000; }));
     StarReductionStats reductionStats;
-    check(StarReducer::reduce(rgb, width, height, 70, &reductionStats),
+    check(StarReducer::reduce(rgb, width, height, 90, &reductionStats),
           "Star reduction should accept a valid RGB buffer");
     check(rgb[(16 * width + 18) * 3] < peakBefore,
           "Star reduction should lower a detected star peak");
     check(rgb[(65 * width + 5) * 3] == backgroundBefore,
           "Star reduction should preserve pixels outside star masks");
+    check(rgb[faintCenterIndex] <
+              backgroundBefore +
+                  (faintPeakBefore - backgroundBefore) / 4,
+          "Strong reduction should fade faint compact stars into the background");
+    check(rgb[(16 * width + 18) * 3] > backgroundBefore + 1000,
+          "Strong reduction should retain a visible core for prominent stars");
     const size_t brightPixelsAfter = static_cast<size_t>(std::count_if(
         rgb.begin(), rgb.end(),
         [](uint16_t value) { return value > 5000; })) / 3;
@@ -655,6 +672,7 @@ void testStarDetectionAndReduction() {
           "PSF contraction should reduce the bright star footprint");
     check(reductionStats.detectedStars >= 3 &&
               reductionStats.processedStars >= 3 &&
+              reductionStats.stronglySuppressedStars > 0 &&
               reductionStats.affectedPixels > 0 &&
               reductionStats.radiusScale < 1.0,
           "Star reduction should report useful processing diagnostics");

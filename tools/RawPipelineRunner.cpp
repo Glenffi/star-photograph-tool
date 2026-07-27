@@ -220,6 +220,8 @@ int main(int argc, char* argv[]) {
         QString::number(reductionStats.detectedStars);
     report["starReductionProcessedStars"] =
         QString::number(reductionStats.processedStars);
+    report["starReductionStronglySuppressedStars"] =
+        QString::number(reductionStats.stronglySuppressedStars);
     report["starReductionAffectedPixels"] =
         QString::number(reductionStats.affectedPixels);
     report["starReductionAverageInputFwhm"] =
