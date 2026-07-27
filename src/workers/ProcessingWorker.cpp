@@ -31,6 +31,15 @@
 
 namespace {
 
+QString formatMemoryBytes(uint64_t bytes) {
+    constexpr double kMiB = 1024.0 * 1024.0;
+    constexpr double kGiB = 1024.0 * 1024.0 * 1024.0;
+    if (bytes < static_cast<uint64_t>(kGiB / 10.0)) {
+        return QString("%1 MB").arg(bytes / kMiB, 0, 'f', 0);
+    }
+    return QString("%1 GB").arg(bytes / kGiB, 0, 'f', 1);
+}
+
 class DiskFrameStore {
 public:
     explicit DiskFrameStore(const QString& prefix)
@@ -303,17 +312,26 @@ void ProcessingWorker::run() {
         }
     }
 
+    ProcessingMemoryEstimator::EstimateOptions estimateOptions;
+    estimateOptions.frameCount = m_files.size();
+    estimateOptions.skyGroundSeparation = m_params.skyGroundSepEnabled;
+    estimateOptions.dehaze = m_params.dewarpEnabled;
+    estimateOptions.stretch = m_params.stretchEnabled;
+    estimateOptions.starReduction = m_params.starReduceEnabled;
     const uint64_t estimatedBytes = ProcessingMemoryEstimator::estimatePeakBytes(
-        metadataWidth, metadataHeight, m_files.size(), m_params.skyGroundSepEnabled);
-    const uint64_t budgetBytes = m_params.memoryBudgetBytes > 0
-        ? m_params.memoryBudgetBytes
-        : ProcessingMemoryEstimator::recommendedBudgetBytes();
+        metadataWidth, metadataHeight, estimateOptions);
+    const ProcessingMemoryEstimator::SystemMemoryInfo memoryInfo =
+        ProcessingMemoryEstimator::systemMemoryInfo();
+    const uint64_t budgetBytes =
+        ProcessingMemoryEstimator::calculateEffectiveBudgetBytes(
+            memoryInfo.safeBudgetBytes, m_params.memoryBudgetBytes);
     if (estimatedBytes == 0 || estimatedBytes > budgetBytes) {
-        constexpr double kGiB = 1024.0 * 1024.0 * 1024.0;
-        m_errorString = QString("预计需要约 %1 GB 内存，当前安全预算为 %2 GB。"
+        m_errorString = QString("预计需要约 %1 内存，当前安全预算为 %2"
+                                "（系统当前可用约 %3）。"
                                 "请减少帧数或关闭天地分离。")
-                            .arg(estimatedBytes / kGiB, 0, 'f', 1)
-                            .arg(budgetBytes / kGiB, 0, 'f', 1);
+                            .arg(formatMemoryBytes(estimatedBytes))
+                            .arg(formatMemoryBytes(budgetBytes))
+                            .arg(formatMemoryBytes(memoryInfo.availableBytes));
         return;
     }
     const uint64_t scratchBytes = ProcessingMemoryEstimator::estimateScratchDiskBytes(
@@ -321,8 +339,14 @@ void ProcessingWorker::run() {
     const QStorageInfo temporaryStorage(QDir::tempPath());
     const qint64 availableScratchBytes = temporaryStorage.bytesAvailable();
     // Keep 10% headroom for filesystem metadata and the final exported image.
-    if (scratchBytes == 0 || !temporaryStorage.isValid() || availableScratchBytes <= 0 ||
-        static_cast<uint64_t>(availableScratchBytes) < scratchBytes / 10 * 11) {
+    const uint64_t scratchHeadroom =
+        scratchBytes / 10 + (scratchBytes % 10 == 0 ? 0 : 1);
+    const bool scratchRequirementOverflow =
+        scratchBytes > std::numeric_limits<uint64_t>::max() - scratchHeadroom;
+    if (scratchBytes == 0 || !temporaryStorage.isValid() ||
+        availableScratchBytes <= 0 || scratchRequirementOverflow ||
+        static_cast<uint64_t>(availableScratchBytes) <
+            scratchBytes + scratchHeadroom) {
         constexpr double kGiB = 1024.0 * 1024.0 * 1024.0;
         m_errorString = QString("临时磁盘空间不足：处理缓存约需 %1 GB。")
                             .arg(scratchBytes / kGiB, 0, 'f', 1);
@@ -352,6 +376,24 @@ void ProcessingWorker::run() {
     const int height = referenceImage.height;
     m_width = width;
     m_height = height;
+    if (width != metadataWidth || height != metadataHeight) {
+        const uint64_t actualEstimatedBytes =
+            ProcessingMemoryEstimator::estimatePeakBytes(
+                width, height, estimateOptions);
+        const ProcessingMemoryEstimator::SystemMemoryInfo actualMemoryInfo =
+            ProcessingMemoryEstimator::systemMemoryInfo();
+        const uint64_t actualBudgetBytes =
+            ProcessingMemoryEstimator::calculateEffectiveBudgetBytes(
+                actualMemoryInfo.safeBudgetBytes, m_params.memoryBudgetBytes);
+        if (actualEstimatedBytes == 0 ||
+            actualEstimatedBytes > actualBudgetBytes) {
+            m_errorString = QString(
+                "RAW 实际解码尺寸需要约 %1 内存，当前安全预算为 %2。")
+                .arg(formatMemoryBytes(actualEstimatedBytes))
+                .arg(formatMemoryBytes(actualBudgetBytes));
+            return;
+        }
+    }
 
     std::vector<uint16_t> referenceLuminance;
     if (!ImageBufferUtils::extractLuminance(referenceImage.data, width, height,

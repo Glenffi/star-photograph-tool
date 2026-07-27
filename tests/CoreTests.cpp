@@ -273,8 +273,52 @@ void testMemoryEstimator() {
           "Sky/ground stacking should reserve aligned and original caches");
     check(ProcessingMemoryEstimator::estimatePeakBytes(0, 4000, 20, false) == 0,
           "Memory estimator should reject invalid dimensions");
-    check(ProcessingMemoryEstimator::recommendedBudgetBytes() > 0,
-          "Memory estimator should always provide a usable default budget");
+    constexpr uint64_t gib = 1024ULL * 1024ULL * 1024ULL;
+    const uint64_t reserve16GiB = (16 * gib * 10) / 100;
+    check(ProcessingMemoryEstimator::calculateSafeBudgetBytes(16 * gib, 12 * gib) ==
+              ((12 * gib - reserve16GiB) * 85) / 100,
+          "Memory budget should reserve OS headroom from current availability");
+    check(ProcessingMemoryEstimator::calculateSafeBudgetBytes(16 * gib, 4 * gib) ==
+              ((4 * gib - reserve16GiB) * 85) / 100,
+          "Memory budget should shrink when current availability is lower");
+    check(ProcessingMemoryEstimator::calculateSafeBudgetBytes(
+              16 * gib, gib / 2) == 0,
+          "Memory budget should saturate at zero below the system reserve");
+    check(ProcessingMemoryEstimator::calculateSafeBudgetBytes(0, 0) == 8 * gib,
+          "Memory budget should use the documented fallback when queries fail");
+    check(ProcessingMemoryEstimator::calculateEffectiveBudgetBytes(
+              4 * gib, 10 * gib) == 4 * gib &&
+              ProcessingMemoryEstimator::calculateEffectiveBudgetBytes(
+                  4 * gib, 2 * gib) == 2 * gib,
+          "User memory limits should tighten but never bypass the platform budget");
+    ProcessingMemoryEstimator::EstimateOptions baseOptions;
+    baseOptions.frameCount = 20;
+    const uint64_t baseEstimate =
+        ProcessingMemoryEstimator::estimatePeakBytes(6000, 4000, baseOptions);
+    ProcessingMemoryEstimator::EstimateOptions dehazeOptions = baseOptions;
+    dehazeOptions.dehaze = true;
+    check(ProcessingMemoryEstimator::estimatePeakBytes(
+              6000, 4000, dehazeOptions) > baseEstimate,
+          "Dehaze should increase the estimated peak for full-resolution float planes");
+    ProcessingMemoryEstimator::EstimateOptions largerChunkOptions = baseOptions;
+    largerChunkOptions.frameCount = 200;
+    largerChunkOptions.chunkRows = 128;
+    check(ProcessingMemoryEstimator::estimatePeakBytes(
+              6000, 4000, largerChunkOptions) >= baseEstimate,
+          "Chunk memory estimate should grow monotonically with frames and rows");
+    const ProcessingMemoryEstimator::SystemMemoryInfo memoryInfo =
+        ProcessingMemoryEstimator::systemMemoryInfo();
+    if (memoryInfo.availableBytes == 0) {
+        check(memoryInfo.safeBudgetBytes > 0,
+              "Memory budget should fall back when availability is unavailable");
+    } else {
+        check(memoryInfo.safeBudgetBytes <= memoryInfo.availableBytes,
+              "System memory budget should not exceed available RAM");
+        if (memoryInfo.totalBytes > 0) {
+            check(memoryInfo.safeBudgetBytes <= memoryInfo.totalBytes,
+                  "System memory budget should not exceed total RAM");
+        }
+    }
 }
 
 void testPreviewToneMapper() {

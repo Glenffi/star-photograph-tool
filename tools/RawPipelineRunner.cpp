@@ -14,7 +14,9 @@
 #include <QJsonObject>
 #include <QSet>
 
+#include <algorithm>
 #include <iostream>
+#include <limits>
 
 namespace {
 
@@ -62,8 +64,12 @@ int main(int argc, char* argv[]) {
         "name", "kappa-sigma");
     const QCommandLineOption kappaOption("kappa", "Sigma clipping kappa.",
                                          "value", "2.5");
+    const QCommandLineOption memoryBudgetOption(
+        "memory-budget-mib",
+        "Override the automatic memory budget in MiB; 0 keeps automatic mode.",
+        "mib", "0");
     parser.addOptions({inputOption, outputOption, limitOption, referenceOption,
-                       methodOption, kappaOption});
+                       methodOption, kappaOption, memoryBudgetOption});
     parser.process(application);
 
     const QString input = QDir(parser.value(inputOption)).absolutePath();
@@ -85,12 +91,21 @@ int main(int argc, char* argv[]) {
     int referenceIndex = parser.value(referenceOption).toInt(&referenceOk);
     bool kappaOk = false;
     const double kappa = parser.value(kappaOption).toDouble(&kappaOk);
+    bool memoryBudgetOk = false;
+    const qulonglong memoryBudgetMiB =
+        parser.value(memoryBudgetOption).toULongLong(&memoryBudgetOk);
     const QString method = parser.value(methodOption).toLower();
     if (!limitOk || limit < 0 || !referenceOk || referenceIndex < -1 ||
-        !kappaOk || kappa <= 0.0 || !validMethod(method)) {
-        std::cerr << "Invalid --limit, --reference-index, --method, or --kappa.\n";
+        !kappaOk || kappa <= 0.0 || !memoryBudgetOk ||
+        memoryBudgetMiB >
+            std::numeric_limits<uint64_t>::max() / (1024ULL * 1024ULL) ||
+        !validMethod(method)) {
+        std::cerr << "Invalid --limit, --reference-index, --method, --kappa, "
+                     "or --memory-budget-mib.\n";
         return 2;
     }
+    const uint64_t requestedMemoryBudgetBytes =
+        static_cast<uint64_t>(memoryBudgetMiB) * 1024ULL * 1024ULL;
 
     QStringList files = rawFiles(input);
     if (limit > 0 && files.size() > limit) files = files.mid(0, limit);
@@ -120,6 +135,7 @@ int main(int argc, char* argv[]) {
     params.kappaValue = kappa;
     params.outputFormat = "tiff16";
     params.outputPath = output;
+    params.memoryBudgetBytes = requestedMemoryBudgetBytes;
 
     ProcessingWorker worker(files, files[referenceIndex], params);
     QObject::connect(&worker, &ProcessingWorker::stageMessage, &application,
@@ -136,10 +152,17 @@ int main(int argc, char* argv[]) {
                      }, Qt::DirectConnection);
 
     constexpr double kGiB = 1024.0 * 1024.0 * 1024.0;
+    const ProcessingMemoryEstimator::SystemMemoryInfo memoryInfo =
+        ProcessingMemoryEstimator::systemMemoryInfo();
+    const uint64_t effectiveMemoryBudget =
+        ProcessingMemoryEstimator::calculateEffectiveBudgetBytes(
+            memoryInfo.safeBudgetBytes, requestedMemoryBudgetBytes);
     std::cout << "Frames: " << files.size()
               << ", reference: " << QFileInfo(files[referenceIndex]).fileName().toStdString()
               << ", method: " << method.toStdString()
               << ", estimated peak: " << estimatedBytes / kGiB << " GiB"
+              << ", available memory: " << memoryInfo.availableBytes / kGiB << " GiB"
+              << ", budget: " << effectiveMemoryBudget / kGiB << " GiB"
               << ", scratch: " << scratchBytes / kGiB << " GiB\n";
     QElapsedTimer timer;
     timer.start();
@@ -158,6 +181,11 @@ int main(int argc, char* argv[]) {
     report["kappa"] = kappa;
     report["estimatedPeakBytes"] = QString::number(estimatedBytes);
     report["estimatedScratchBytes"] = QString::number(scratchBytes);
+    report["physicalMemoryBytes"] = QString::number(memoryInfo.totalBytes);
+    report["availableMemoryBytes"] = QString::number(memoryInfo.availableBytes);
+    report["memoryBudgetBytes"] = QString::number(effectiveMemoryBudget);
+    report["memoryBudgetMode"] =
+        requestedMemoryBudgetBytes > 0 ? "override" : "automatic";
     report["elapsedMs"] = timer.elapsed();
     report["stackingElapsedMs"] = worker.stackingElapsedMs();
     const double stackedChannelSamples =

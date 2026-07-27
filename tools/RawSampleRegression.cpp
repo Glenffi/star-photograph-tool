@@ -496,10 +496,12 @@ int main(int argc, char* argv[]) {
     report["categoryFilter"] = parser.value(categoryOption);
     report["fileLimitPerCategory"] = fileLimit;
     report["requestedReferenceIndex"] = requestedReferenceIndex;
-    report["physicalMemoryBytes"] = QString::number(
-        ProcessingMemoryEstimator::totalPhysicalMemoryBytes());
-    report["recommendedBudgetBytes"] = QString::number(
-        ProcessingMemoryEstimator::recommendedBudgetBytes());
+    const ProcessingMemoryEstimator::SystemMemoryInfo memoryInfo =
+        ProcessingMemoryEstimator::systemMemoryInfo();
+    report["physicalMemoryBytes"] = QString::number(memoryInfo.totalBytes);
+    report["availableMemoryBytes"] = QString::number(memoryInfo.availableBytes);
+    report["recommendedBudgetBytes"] =
+        QString::number(memoryInfo.safeBudgetBytes);
 
     Summary total;
     QJsonArray categories;
