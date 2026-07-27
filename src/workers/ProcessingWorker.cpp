@@ -238,6 +238,11 @@ std::vector<uint16_t> ProcessingWorker::takeStackedData() {
     return std::move(m_stackedData);
 }
 
+double ProcessingWorker::averageAlignmentRms() const {
+    const int alignedSources = m_affineFrameCount + m_homographyFrameCount;
+    return alignedSources > 0 ? m_alignmentRmsSum / alignedSources : 0.0;
+}
+
 void ProcessingWorker::requestCancel() {
     m_cancelRequested.store(true);
 }
@@ -256,6 +261,11 @@ void ProcessingWorker::run() {
     m_frameCount = 0;
     m_wasCancelled = false;
     m_outputFile.clear();
+    m_affineFrameCount = 0;
+    m_homographyFrameCount = 0;
+    m_alignmentRmsSum = 0.0;
+    m_worstAlignmentP95 = 0.0;
+    m_minimumGridCoverage = 0.0;
     emit progress(0);
 
     if (m_files.isEmpty()) {
@@ -349,16 +359,30 @@ void ProcessingWorker::run() {
 
     emit stageMessage("参考帧星点检测...");
     StarDetector detector;
-    DetectionOptions alignmentOptions;
-    alignmentOptions.spatiallyBalanced = true;
-    alignmentOptions.maxCandidates = 50;
-    alignmentOptions.maxStars = 50;
-    std::vector<StarPoint> referenceStars;
+    DetectionOptions evaluationDetectionOptions;
+    evaluationDetectionOptions.spatiallyBalanced = true;
+    evaluationDetectionOptions.maxCandidates = 300;
+    evaluationDetectionOptions.maxStars = 250;
+    std::vector<StarPoint> referenceDetectedStars;
     if (!detector.detect(referenceLuminance, width, height,
-                         referenceStars, alignmentOptions)) {
+                         referenceDetectedStars, evaluationDetectionOptions)) {
         m_errorString = "参考帧星点检测失败";
         return;
     }
+    const size_t referenceFitCount =
+        std::min<size_t>(50, referenceDetectedStars.size());
+    std::vector<StarPoint> referenceStars(
+        referenceDetectedStars.begin(),
+        referenceDetectedStars.begin() + referenceFitCount);
+    // Keep model fitting and quality evaluation disjoint when the field has
+    // enough stars. Sparse fields fall back to reuse so legacy small inputs
+    // can still be aligned and judged by the reduced-sample gates.
+    std::vector<StarPoint> referenceEvaluationStars =
+        referenceDetectedStars.size() >= referenceFitCount + 12
+            ? std::vector<StarPoint>(
+                  referenceDetectedStars.begin() + referenceFitCount,
+                  referenceDetectedStars.end())
+            : referenceDetectedStars;
     emit progress(20);
 
     // Full-resolution aligned frames are cached on disk. Keeping both decoded
@@ -400,15 +424,34 @@ void ProcessingWorker::run() {
                                 .arg(QFileInfo(m_files[i]).fileName());
             return;
         }
-        std::vector<StarPoint> sourceStars;
+        std::vector<StarPoint> sourceDetectedStars;
         if (!detector.detect(sourceLuminance, width, height,
-                             sourceStars, alignmentOptions)) {
+                             sourceDetectedStars, evaluationDetectionOptions)) {
             qWarning() << "星点检测失败，跳过:" << m_files[i];
             continue;
         }
+        const size_t sourceFitCount =
+            std::min<size_t>(50, sourceDetectedStars.size());
+        std::vector<StarPoint> sourceStars(
+            sourceDetectedStars.begin(),
+            sourceDetectedStars.begin() + sourceFitCount);
+        std::vector<StarPoint> sourceEvaluationStars =
+            sourceDetectedStars.size() >= sourceFitCount + 12
+                ? std::vector<StarPoint>(
+                      sourceDetectedStars.begin() + sourceFitCount,
+                      sourceDetectedStars.end())
+                : sourceDetectedStars;
 
         AlignmentTransform transform;
-        if (!aligner.align(referenceStars, sourceStars, transform)) {
+        AlignmentQuality alignmentQuality;
+        AlignmentOptions alignmentModelOptions;
+        alignmentModelOptions.imageWidth = width;
+        alignmentModelOptions.imageHeight = height;
+        alignmentModelOptions.evaluationReferenceStars =
+            &referenceEvaluationStars;
+        alignmentModelOptions.evaluationSourceStars = &sourceEvaluationStars;
+        if (!aligner.align(referenceStars, sourceStars, transform,
+                           &alignmentQuality, alignmentModelOptions)) {
             qWarning() << "对齐失败，跳过:" << m_files[i];
             continue;
         }
@@ -425,6 +468,22 @@ void ProcessingWorker::run() {
             (m_params.skyGroundSepEnabled && !originalCache.append(sourceImage.data))) {
             m_errorString = "无法写入对齐临时缓存（请检查磁盘空间）";
             return;
+        }
+        // Only report frames that were successfully resampled and persisted.
+        // This keeps diagnostics consistent with the frames consumed by stacking.
+        if (transform.model == AlignmentModel::Homography) {
+            ++m_homographyFrameCount;
+        } else {
+            ++m_affineFrameCount;
+        }
+        m_alignmentRmsSum += alignmentQuality.rmsError;
+        m_worstAlignmentP95 =
+            std::max(m_worstAlignmentP95, alignmentQuality.p95Error);
+        if (m_affineFrameCount + m_homographyFrameCount == 1) {
+            m_minimumGridCoverage = alignmentQuality.gridCoverage;
+        } else {
+            m_minimumGridCoverage =
+                std::min(m_minimumGridCoverage, alignmentQuality.gridCoverage);
         }
         alignedFrame.clear();
         alignedFrame.shrink_to_fit();

@@ -233,6 +233,34 @@ void testTransformDirection() {
           "Affine resampling should reject a singular transform");
     check(!aligner.applyTransform(source, width + 1, height, transform, destination),
           "Affine resampling should reject a mismatched source buffer");
+
+    std::vector<uint16_t> projectiveSource(width * height, 0);
+    projectiveSource[2] = 42000;
+    AlignmentTransform projective;
+    projective.a = 1.0;
+    projective.c = 2.8;
+    projective.g = 0.1;
+    projective.model = AlignmentModel::Homography;
+    check(aligner.applyTransform(projectiveSource, width, height,
+                                 projective, destination),
+          "Projective resampling should accept a valid homography");
+    check(destination[4] > 41000,
+          "Projective resampling should use the inverse source mapping");
+
+    std::vector<uint16_t> rgbSource(
+        static_cast<size_t>(width) * height * 3, 1000);
+    std::vector<uint16_t> rgbDestination;
+    AlignmentTransform denominatorAtPixel;
+    denominatorAtPixel.g = 0.25;
+    denominatorAtPixel.model = AlignmentModel::Homography;
+    check(aligner.applyTransformRgb(
+              rgbSource, width, height, denominatorAtPixel, rgbDestination),
+          "RGB resampling should safely handle an inverse-map singular line");
+    const size_t singularPixel = static_cast<size_t>(4) * 3;
+    check(rgbDestination[singularPixel] == 0 &&
+              rgbDestination[singularPixel + 1] == 0 &&
+              rgbDestination[singularPixel + 2] == 0,
+          "RGB resampling should zero pixels whose inverse map is undefined");
 }
 
 void testAlignmentEstimation() {
@@ -261,6 +289,8 @@ void testAlignmentEstimation() {
     check(quality.matchedStars == static_cast<int>(reference.size()) &&
               quality.rmsError < 0.01,
           "Independent alignment verification should match every synthetic star");
+    check(transform.model == AlignmentModel::Affine,
+          "Auto model selection should keep affine for a true translation");
 
     std::vector<StarPoint> implausiblyScaled = reference;
     for (StarPoint& star : implausiblyScaled) {
@@ -269,6 +299,62 @@ void testAlignmentEstimation() {
     }
     check(!aligner.align(reference, implausiblyScaled, transform),
           "Alignment should reject a physically implausible scale change");
+
+    std::vector<StarPoint> projectiveSource;
+    std::vector<StarPoint> projectiveReference;
+    for (int row = 0; row < 6; ++row) {
+        for (int column = 0; column < 6; ++column) {
+            StarPoint sourcePoint;
+            sourcePoint.x = 70.0 + column * 130.0 + row * 3.0;
+            sourcePoint.y = 60.0 + row * 95.0 + column * 2.0;
+            const double denominator =
+                1.0 + 0.000035 * sourcePoint.x - 0.000025 * sourcePoint.y;
+            StarPoint referencePoint;
+            referencePoint.x =
+                (1.002 * sourcePoint.x - 0.012 * sourcePoint.y + 9.0) /
+                denominator;
+            referencePoint.y =
+                (0.009 * sourcePoint.x + 0.998 * sourcePoint.y - 6.0) /
+                denominator;
+            projectiveSource.push_back(sourcePoint);
+            projectiveReference.push_back(referencePoint);
+        }
+    }
+    AlignmentOptions projectiveOptions;
+    projectiveOptions.imageWidth = 800;
+    projectiveOptions.imageHeight = 600;
+    check(aligner.align(projectiveReference, projectiveSource, transform,
+                        &quality, projectiveOptions),
+          "Alignment should recover a mildly projective synthetic star field");
+    check(transform.model == AlignmentModel::Homography,
+          "Auto model selection should choose homography for spatially varying residuals");
+    check(quality.matchedStars == static_cast<int>(projectiveSource.size()) &&
+              quality.p95Error < 0.1 && quality.gridCoverage >= 0.75,
+          "Homography diagnostics should cover the field with low tail error");
+
+    std::vector<StarPoint> concentratedReference;
+    std::vector<StarPoint> concentratedSource;
+    for (int row = 0; row < 5; ++row) {
+        for (int column = 0; column < 6; ++column) {
+            StarPoint point;
+            point.x = 300.0 + column * 28.0;
+            point.y = 225.0 + row * 30.0;
+            concentratedReference.push_back(point);
+            point.x -= 12.5;
+            point.y += 7.25;
+            concentratedSource.push_back(point);
+        }
+    }
+    AlignmentOptions concentratedOptions;
+    concentratedOptions.imageWidth = 800;
+    concentratedOptions.imageHeight = 600;
+    concentratedOptions.evaluationReferenceStars = &concentratedReference;
+    concentratedOptions.evaluationSourceStars = &concentratedSource;
+    check(!aligner.align(reference, source, transform, &quality,
+                         concentratedOptions),
+          "Alignment quality should reject evaluation stars confined to one grid cell");
+    check(!quality.selected,
+          "Failed model selection should be explicit in alignment diagnostics");
 }
 
 void testStarDetectionAndReduction() {

@@ -1,24 +1,79 @@
 #pragma once
 
 #include <cstdint>
+#include <string>
 #include <vector>
 #include "StarDetector.h"
 
 /**
  * @brief 图像对齐变换矩阵
  *
- * 仿射变换：
- *   x' = a*x + b*y + c
- *   y' = d*x + e*y + f
+ * Source-to-reference projective transform:
+ *   x' = (a*x + b*y + c) / (g*x + h*y + 1)
+ *   y' = (d*x + e*y + f) / (g*x + h*y + 1)
+ *
+ * Affine transforms are represented by g = h = 0.
  */
+enum class AlignmentModel {
+    Affine,
+    Homography
+};
+
 struct AlignmentTransform {
     double a = 1.0, b = 0.0, c = 0.0;
     double d = 0.0, e = 1.0, f = 0.0;
+    double g = 0.0, h = 0.0;
+    AlignmentModel model = AlignmentModel::Affine;
 };
 
-struct AlignmentQuality {
+struct AlignmentGridCell {
+    int referenceStars = 0;
     int matchedStars = 0;
+    double matchCoverage = 0.0;
     double rmsError = 0.0;
+    double medianError = 0.0;
+    double p95Error = 0.0;
+    double maxError = 0.0;
+    bool eligible = false;
+    bool covered = false;
+};
+
+struct AlignmentMetrics {
+    int evaluationReferenceStars = 0;
+    int matchedStars = 0;
+    double matchCoverage = 0.0;
+    double rmsError = 0.0;
+    double medianError = 0.0;
+    double p95Error = 0.0;
+    double outerGridP95Error = 0.0;
+    int gridColumns = 3;
+    int gridRows = 3;
+    int eligibleCells = 0;
+    int coveredCells = 0;
+    int outerEligibleCells = 0;
+    int outerCoveredCells = 0;
+    double gridCoverage = 0.0;
+    bool qualityPassed = false;
+    std::vector<std::string> failureReasons;
+    std::vector<AlignmentGridCell> gridCells;
+};
+
+struct AlignmentQuality : AlignmentMetrics {
+    bool selected = false;
+    AlignmentModel model = AlignmentModel::Affine;
+    std::string selectionReason;
+    bool affineEvaluated = false;
+    bool homographyEvaluated = false;
+    AlignmentMetrics affineCandidate;
+    AlignmentMetrics homographyCandidate;
+};
+
+struct AlignmentOptions {
+    int imageWidth = 0;
+    int imageHeight = 0;
+    bool allowHomography = true;
+    const std::vector<StarPoint>* evaluationReferenceStars = nullptr;
+    const std::vector<StarPoint>* evaluationSourceStars = nullptr;
 };
 
 /**
@@ -34,16 +89,19 @@ public:
      * @param refStars  参考帧的星点列表
      * @param srcStars  源帧的星点列表
      * @param out       输出变换矩阵
-     * @param quality   可选的独立最近邻匹配数与 RMS 质量指标
+     * @param quality   可选的独立星点与全画幅网格质量指标
+     * @param options   图像尺寸、候选模型及独立评估星点；启用
+     *                  Homography 时必须提供有效图像尺寸
      * @return true 对齐成功
      */
     bool align(const std::vector<StarPoint>& refStars,
                const std::vector<StarPoint>& srcStars,
                AlignmentTransform& out,
-               AlignmentQuality* quality = nullptr);
+               AlignmentQuality* quality = nullptr,
+               const AlignmentOptions& options = {});
 
     /**
-     * @brief 应用仿射变换到图像
+     * @brief 应用 Affine 或 Homography 变换到图像
      *
      * 使用双线性插值重采样。
      *
@@ -76,11 +134,18 @@ private:
                               const std::vector<StarPoint>& srcStars,
                               std::vector<std::pair<int, int>>& matches);
     bool ransacAffine(const std::vector<StarPoint>& refStars,
-                        const std::vector<StarPoint>& srcStars,
-                        const std::vector<std::pair<int, int>>& matches,
-                        AlignmentTransform& out);
-    AlignmentQuality evaluateTransform(const std::vector<StarPoint>& refStars,
+                      const std::vector<StarPoint>& srcStars,
+                      const std::vector<std::pair<int, int>>& matches,
+                      AlignmentTransform& out);
+    bool ransacHomography(const std::vector<StarPoint>& refStars,
+                          const std::vector<StarPoint>& srcStars,
+                          const std::vector<std::pair<int, int>>& matches,
+                          int imageWidth, int imageHeight,
+                          AlignmentTransform& out);
+    AlignmentMetrics evaluateTransform(const std::vector<StarPoint>& refStars,
                                        const std::vector<StarPoint>& srcStars,
                                        const AlignmentTransform& transform,
-                                       double matchRadius) const;
+                                       double matchRadius,
+                                       int imageWidth,
+                                       int imageHeight) const;
 };

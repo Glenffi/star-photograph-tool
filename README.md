@@ -7,7 +7,8 @@
 ## 当前已实现
 
 - 多张 RAW 图片叠加堆栈降噪
-- 星点检测、仿射对齐、Average / Median / Kappa-Sigma / Winsorized 堆栈
+- 星点检测、Affine / Homography 自动选择、全画幅 3×3 网格质量门禁
+- Average / Median / Kappa-Sigma / Winsorized 堆栈
 - 天空对齐、地景固定的天地分离堆栈
 - Dark Channel Prior 去雾与 Arcsinh 曲线拉伸
 - 星点遮罩、形态学腐蚀和羽化混合的自动缩星
@@ -139,7 +140,7 @@ cmake --build . --config Release
 
 ## 真实 RAW 样片回归
 
-样片默认放在代码目录旁的 `star-photograph-tool-samples`。工具优先识别约定的五类目录，也会自动发现其他包含 RAW 的一级目录。完整模式会逐张执行正式 AHD 解码、星点检测和同目录序列对齐，并在 `build/sample-regression-output` 写入 `report.json` 与检查预览。
+样片默认放在代码目录旁的 `star-photograph-tool-samples`。工具优先识别约定的五类目录，也会自动发现其他包含 RAW 的一级目录。完整模式会逐张执行正式 AHD 解码、星点检测和同目录序列对齐，并在 `build/sample-regression-output` 写入 `report.json` 与检查预览。对齐使用独立于拟合星点的评估星点集，报告 Affine 与 Homography 两个候选模型的 RMS、P95、外圈 P95、匹配覆盖率和 3×3 网格指标。
 
 ```bash
 # 完整回归
@@ -180,7 +181,7 @@ cmake --build . --config Release
 - **结果预览**：16-bit 处理结果会映射为最长边不超过 4096 px 的 8-bit 显示缓存；TIFF/PNG 导出始终使用完整分辨率结果
 - **预设**：当前仅提供“银河广角”和“深空天体”；单帧降噪与延时序列在专用流程完成前不显示
 - **天地检测**：传统 CV 自动蒙版需要人工预览确认，复杂山脊、云层和强光污染场景可能误判
-- **超广角长序列对齐**：当前使用全局仿射模型；14 mm 固定机位 15 张实测在画面边缘出现残余星轨，需升级为单应/畸变感知或局部形变模型后才能作为画质验收通过
+- **超广角长序列对齐**：当前会在全局 Affine 与 Homography 之间自动选择；14 mm 固定机位 15 张实测已消除旧仿射结果的明显边缘多重拖线。Homography 仍不能校正镜头局部畸变、滚动快门或复杂局部形变，跨镜头和更长序列仍需样片验证
 - **测试样片**：算法合成测试已接入；跨机型 RAW 样片集和 Windows CI 尚未建立
 
 ## 贡献指南

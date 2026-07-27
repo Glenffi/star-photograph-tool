@@ -1,4 +1,5 @@
 #include "ImageAligner.h"
+#include <array>
 #include <cmath>
 #include <algorithm>
 #include <limits>
@@ -254,6 +255,8 @@ static bool solveAffine(const std::vector<StarPoint>& refStars,
 
     t.a = sol[0]; t.b = sol[1]; t.c = sol[2];
     t.d = sol[3]; t.e = sol[4]; t.f = sol[5];
+    t.g = 0.0; t.h = 0.0;
+    t.model = AlignmentModel::Affine;
     return true;
 }
 
@@ -331,18 +334,203 @@ static bool solveAffineLeastSquares(
 
     out.a = sol[0]; out.b = sol[1]; out.c = sol[2];
     out.d = sol[3]; out.e = sol[4]; out.f = sol[5];
+    out.g = 0.0; out.h = 0.0;
+    out.model = AlignmentModel::Affine;
     return true;
 }
 
-static bool isInlier(const StarPoint& ref, const StarPoint& src, const AlignmentTransform& t, double threshold) {
-    double dx = t.a * src.x + t.b * src.y + t.c - ref.x;
-    double dy = t.d * src.x + t.e * src.y + t.f - ref.y;
+static bool mapPoint(const AlignmentTransform& transform, double x, double y,
+                     double& mappedX, double& mappedY) {
+    const double denominator = transform.g * x + transform.h * y + 1.0;
+    if (!std::isfinite(denominator) || std::abs(denominator) < 1e-10) return false;
+    mappedX = (transform.a * x + transform.b * y + transform.c) / denominator;
+    mappedY = (transform.d * x + transform.e * y + transform.f) / denominator;
+    return std::isfinite(mappedX) && std::isfinite(mappedY);
+}
+
+static bool invertTransform(const AlignmentTransform& transform,
+                            AlignmentTransform& inverse);
+
+struct PointNormalization {
+    double centerX = 0.0;
+    double centerY = 0.0;
+    double scale = 1.0;
+};
+
+static PointNormalization normalizationForMatches(
+    const std::vector<StarPoint>& stars,
+    const std::vector<std::pair<int, int>>& matches,
+    bool referencePoints) {
+    PointNormalization normalization;
+    for (const auto& match : matches) {
+        const StarPoint& point = stars[referencePoints ? match.first : match.second];
+        normalization.centerX += point.x;
+        normalization.centerY += point.y;
+    }
+    normalization.centerX /= matches.size();
+    normalization.centerY /= matches.size();
+    double squaredDistance = 0.0;
+    for (const auto& match : matches) {
+        const StarPoint& point = stars[referencePoints ? match.first : match.second];
+        const double dx = point.x - normalization.centerX;
+        const double dy = point.y - normalization.centerY;
+        squaredDistance += dx * dx + dy * dy;
+    }
+    const double rmsDistance = std::sqrt(squaredDistance / matches.size());
+    if (rmsDistance > 1e-9) normalization.scale = std::sqrt(2.0) / rmsDistance;
+    return normalization;
+}
+
+static void multiplyMatrix3(const double left[3][3], const double right[3][3],
+                            double output[3][3]) {
+    for (int row = 0; row < 3; ++row) {
+        for (int column = 0; column < 3; ++column) {
+            output[row][column] = 0.0;
+            for (int index = 0; index < 3; ++index) {
+                output[row][column] += left[row][index] * right[index][column];
+            }
+        }
+    }
+}
+
+static bool solveHomographyLeastSquares(
+    const std::vector<StarPoint>& refStars,
+    const std::vector<StarPoint>& srcStars,
+    const std::vector<std::pair<int, int>>& matches,
+    AlignmentTransform& output) {
+    if (matches.size() < 4) return false;
+
+    const PointNormalization sourceNormalization =
+        normalizationForMatches(srcStars, matches, false);
+    const PointNormalization referenceNormalization =
+        normalizationForMatches(refStars, matches, true);
+    std::vector<std::array<double, 8>> equations;
+    std::vector<double> targets;
+    equations.reserve(matches.size() * 2);
+    targets.reserve(matches.size() * 2);
+
+    for (const auto& match : matches) {
+        const StarPoint& source = srcStars[match.second];
+        const StarPoint& reference = refStars[match.first];
+        const double x = (source.x - sourceNormalization.centerX) *
+            sourceNormalization.scale;
+        const double y = (source.y - sourceNormalization.centerY) *
+            sourceNormalization.scale;
+        const double u = (reference.x - referenceNormalization.centerX) *
+            referenceNormalization.scale;
+        const double v = (reference.y - referenceNormalization.centerY) *
+            referenceNormalization.scale;
+        equations.push_back({x, y, 1.0, 0.0, 0.0, 0.0, -u * x, -u * y});
+        targets.push_back(u);
+        equations.push_back({0.0, 0.0, 0.0, x, y, 1.0, -v * x, -v * y});
+        targets.push_back(v);
+    }
+
+    // Householder QR solves the normalized least-squares system directly.
+    // Avoiding A^T A matters because normal equations square the condition number.
+    const size_t rowCount = equations.size();
+    for (size_t column = 0; column < 8; ++column) {
+        double norm = 0.0;
+        for (size_t row = column; row < rowCount; ++row) {
+            norm = std::hypot(norm, equations[row][column]);
+        }
+        if (norm < 1e-10) return false;
+        const double alpha = equations[column][column] >= 0.0 ? -norm : norm;
+        std::vector<double> householder(rowCount - column);
+        householder[0] = equations[column][column] - alpha;
+        for (size_t row = column + 1; row < rowCount; ++row) {
+            householder[row - column] = equations[row][column];
+        }
+        double squaredNorm = 0.0;
+        for (double value : householder) squaredNorm += value * value;
+        if (squaredNorm < 1e-20) return false;
+        const double beta = 2.0 / squaredNorm;
+        for (size_t targetColumn = column; targetColumn < 8; ++targetColumn) {
+            double projection = 0.0;
+            for (size_t row = column; row < rowCount; ++row) {
+                projection += householder[row - column] *
+                              equations[row][targetColumn];
+            }
+            projection *= beta;
+            for (size_t row = column; row < rowCount; ++row) {
+                equations[row][targetColumn] -=
+                    projection * householder[row - column];
+            }
+        }
+        double targetProjection = 0.0;
+        for (size_t row = column; row < rowCount; ++row) {
+            targetProjection += householder[row - column] * targets[row];
+        }
+        targetProjection *= beta;
+        for (size_t row = column; row < rowCount; ++row) {
+            targets[row] -= targetProjection * householder[row - column];
+        }
+    }
+    double parameters[8] = {};
+    for (int row = 7; row >= 0; --row) {
+        double value = targets[static_cast<size_t>(row)];
+        for (int column = row + 1; column < 8; ++column) {
+            value -= equations[static_cast<size_t>(row)]
+                              [static_cast<size_t>(column)] * parameters[column];
+        }
+        const double diagonal =
+            equations[static_cast<size_t>(row)][static_cast<size_t>(row)];
+        if (std::abs(diagonal) < 1e-10) return false;
+        parameters[row] = value / diagonal;
+    }
+    const double normalizedHomography[3][3] = {
+        {parameters[0], parameters[1], parameters[2]},
+        {parameters[3], parameters[4], parameters[5]},
+        {parameters[6], parameters[7], 1.0}
+    };
+    const double sourceTransform[3][3] = {
+        {sourceNormalization.scale, 0.0,
+         -sourceNormalization.scale * sourceNormalization.centerX},
+        {0.0, sourceNormalization.scale,
+         -sourceNormalization.scale * sourceNormalization.centerY},
+        {0.0, 0.0, 1.0}
+    };
+    const double referenceInverse[3][3] = {
+        {1.0 / referenceNormalization.scale, 0.0,
+         referenceNormalization.centerX},
+        {0.0, 1.0 / referenceNormalization.scale,
+         referenceNormalization.centerY},
+        {0.0, 0.0, 1.0}
+    };
+    double intermediate[3][3] = {};
+    double homography[3][3] = {};
+    multiplyMatrix3(normalizedHomography, sourceTransform, intermediate);
+    multiplyMatrix3(referenceInverse, intermediate, homography);
+    if (!std::isfinite(homography[2][2]) || std::abs(homography[2][2]) < 1e-12) {
+        return false;
+    }
+    const double scale = homography[2][2];
+    output.a = homography[0][0] / scale;
+    output.b = homography[0][1] / scale;
+    output.c = homography[0][2] / scale;
+    output.d = homography[1][0] / scale;
+    output.e = homography[1][1] / scale;
+    output.f = homography[1][2] / scale;
+    output.g = homography[2][0] / scale;
+    output.h = homography[2][1] / scale;
+    output.model = AlignmentModel::Homography;
+    return true;
+}
+
+static bool isInlier(const StarPoint& ref, const StarPoint& src,
+                     const AlignmentTransform& transform, double threshold) {
+    double x = 0.0;
+    double y = 0.0;
+    if (!mapPoint(transform, src.x, src.y, x, y)) return false;
+    const double dx = x - ref.x;
+    const double dy = y - ref.y;
     return (dx * dx + dy * dy) < (threshold * threshold);
 }
 
-static bool isPlausibleTransform(const AlignmentTransform& t) {
+static bool isPlausibleAffine(const AlignmentTransform& t) {
     if (!std::isfinite(t.a) || !std::isfinite(t.b) || !std::isfinite(t.c) ||
-        !std::isfinite(t.d) || !std::isfinite(t.e) || !std::isfinite(t.f)) {
+        !std::isfinite(t.d) || !std::isfinite(t.e) || !std::isfinite(t.f) ||
+        std::abs(t.g) > 1e-12 || std::abs(t.h) > 1e-12) {
         return false;
     }
     const double scaleX = std::hypot(t.a, t.d);
@@ -354,6 +542,169 @@ static bool isPlausibleTransform(const AlignmentTransform& t) {
     }
     const double normalizedDot = (t.a * t.b + t.d * t.e) / (scaleX * scaleY);
     return std::abs(normalizedDot) < 0.15;
+}
+
+static bool isPlausibleHomography(const AlignmentTransform& transform,
+                                  int width, int height) {
+    if (width <= 1 || height <= 1) return false;
+    for (double value : {transform.a, transform.b, transform.c, transform.d,
+                         transform.e, transform.f, transform.g, transform.h}) {
+        if (!std::isfinite(value)) return false;
+    }
+    const double input[5][2] = {
+        {0.0, 0.0}, {static_cast<double>(width - 1), 0.0},
+        {static_cast<double>(width - 1), static_cast<double>(height - 1)},
+        {0.0, static_cast<double>(height - 1)},
+        {0.5 * (width - 1), 0.5 * (height - 1)}
+    };
+    double mapped[5][2] = {};
+    const double diagonal = std::hypot(static_cast<double>(width),
+                                       static_cast<double>(height));
+    for (int point = 0; point < 5; ++point) {
+        if (!mapPoint(transform, input[point][0], input[point][1],
+                      mapped[point][0], mapped[point][1])) {
+            return false;
+        }
+        if (std::hypot(mapped[point][0] - input[point][0],
+                       mapped[point][1] - input[point][1]) > diagonal * 0.4) {
+            return false;
+        }
+    }
+    double orientation = 0.0;
+    double cornerCrossProducts[4] = {};
+    for (int corner = 0; corner < 4; ++corner) {
+        const int next = (corner + 1) % 4;
+        const int nextNext = (corner + 2) % 4;
+        orientation += mapped[corner][0] * mapped[next][1] -
+                       mapped[next][0] * mapped[corner][1];
+        const double edgeX = mapped[next][0] - mapped[corner][0];
+        const double edgeY = mapped[next][1] - mapped[corner][1];
+        const double nextEdgeX = mapped[nextNext][0] - mapped[next][0];
+        const double nextEdgeY = mapped[nextNext][1] - mapped[next][1];
+        cornerCrossProducts[corner] =
+            edgeX * nextEdgeY - edgeY * nextEdgeX;
+        const double sourceEdge = std::hypot(
+            input[next][0] - input[corner][0],
+            input[next][1] - input[corner][1]);
+        const double mappedEdge = std::hypot(
+            mapped[next][0] - mapped[corner][0],
+            mapped[next][1] - mapped[corner][1]);
+        const double ratio = mappedEdge / sourceEdge;
+        if (ratio < 0.7 || ratio > 1.3) return false;
+    }
+    if (orientation <= 0.0 ||
+        std::any_of(std::begin(cornerCrossProducts),
+                    std::end(cornerCrossProducts),
+                    [](double cross) { return cross <= 0.0; })) {
+        return false;
+    }
+
+    double denominatorSign = 0.0;
+    for (int row = 0; row < 5; ++row) {
+        for (int column = 0; column < 5; ++column) {
+            const double x = (width - 1) * column / 4.0;
+            const double y = (height - 1) * row / 4.0;
+            const double denominator = transform.g * x + transform.h * y + 1.0;
+            if (!std::isfinite(denominator) || std::abs(denominator) < 0.5) {
+                return false;
+            }
+            const double sign = denominator > 0.0 ? 1.0 : -1.0;
+            if (denominatorSign == 0.0) denominatorSign = sign;
+            if (sign != denominatorSign) return false;
+
+            double centerX = 0.0;
+            double centerY = 0.0;
+            double xStepX = 0.0;
+            double xStepY = 0.0;
+            double yStepX = 0.0;
+            double yStepY = 0.0;
+            if (!mapPoint(transform, x, y, centerX, centerY) ||
+                !mapPoint(transform, x + 1.0, y, xStepX, xStepY) ||
+                !mapPoint(transform, x, y + 1.0, yStepX, yStepY)) {
+                return false;
+            }
+            const double axisXX = xStepX - centerX;
+            const double axisXY = xStepY - centerY;
+            const double axisYX = yStepX - centerX;
+            const double axisYY = yStepY - centerY;
+            const double scaleX = std::hypot(axisXX, axisXY);
+            const double scaleY = std::hypot(axisYX, axisYY);
+            const double jacobian = axisXX * axisYY - axisXY * axisYX;
+            if (scaleX < 0.8 || scaleX > 1.2 ||
+                scaleY < 0.8 || scaleY > 1.2 || jacobian <= 0.0) {
+                return false;
+            }
+            const double normalizedDot =
+                (axisXX * axisYX + axisXY * axisYY) / (scaleX * scaleY);
+            if (std::abs(normalizedDot) > 0.2) return false;
+        }
+    }
+    return true;
+}
+
+static bool homographySampleHasCoverage(
+    const std::vector<StarPoint>& refStars,
+    const std::vector<StarPoint>& srcStars,
+    const std::vector<std::pair<int, int>>& sample,
+    int width, int height) {
+    if (sample.size() != 4 || width <= 0 || height <= 0) return false;
+    const double imageArea = static_cast<double>(width) * height;
+    auto covered = [&](const std::vector<StarPoint>& stars, bool reference) {
+        double minimumX = std::numeric_limits<double>::max();
+        double minimumY = std::numeric_limits<double>::max();
+        double maximumX = std::numeric_limits<double>::lowest();
+        double maximumY = std::numeric_limits<double>::lowest();
+        for (const auto& match : sample) {
+            const StarPoint& point = stars[reference ? match.first : match.second];
+            minimumX = std::min(minimumX, point.x);
+            minimumY = std::min(minimumY, point.y);
+            maximumX = std::max(maximumX, point.x);
+            maximumY = std::max(maximumY, point.y);
+        }
+        if ((maximumX - minimumX) * (maximumY - minimumY) < imageArea * 0.01) {
+            return false;
+        }
+        for (int first = 0; first < 4; ++first) {
+            for (int second = first + 1; second < 4; ++second) {
+                for (int third = second + 1; third < 4; ++third) {
+                    const StarPoint& a = stars[reference
+                        ? sample[first].first : sample[first].second];
+                    const StarPoint& b = stars[reference
+                        ? sample[second].first : sample[second].second];
+                    const StarPoint& c = stars[reference
+                        ? sample[third].first : sample[third].second];
+                    const double areaTwice = std::abs(
+                        (b.x - a.x) * (c.y - a.y) -
+                        (b.y - a.y) * (c.x - a.x));
+                    if (areaTwice < imageArea * 0.0001) return false;
+                }
+            }
+        }
+        return true;
+    };
+    return covered(refStars, true) && covered(srcStars, false);
+}
+
+static double symmetricSquaredError(const StarPoint& reference,
+                                    const StarPoint& source,
+                                    const AlignmentTransform& transform,
+                                    const AlignmentTransform& inverse) {
+    double mappedReferenceX = 0.0;
+    double mappedReferenceY = 0.0;
+    double mappedSourceX = 0.0;
+    double mappedSourceY = 0.0;
+    if (!mapPoint(transform, source.x, source.y,
+                  mappedReferenceX, mappedReferenceY) ||
+        !mapPoint(inverse, reference.x, reference.y,
+                  mappedSourceX, mappedSourceY)) {
+        return std::numeric_limits<double>::max();
+    }
+    const double referenceDx = mappedReferenceX - reference.x;
+    const double referenceDy = mappedReferenceY - reference.y;
+    const double sourceDx = mappedSourceX - source.x;
+    const double sourceDy = mappedSourceY - source.y;
+    return 0.5 * (referenceDx * referenceDx + referenceDy * referenceDy +
+                  sourceDx * sourceDx + sourceDy * sourceDy);
 }
 
 bool ImageAligner::ransacAffine(const std::vector<StarPoint>& refStars,
@@ -385,7 +736,7 @@ bool ImageAligner::ransacAffine(const std::vector<StarPoint>& refStars,
         }
 
         AlignmentTransform t;
-        if (!solveAffine(refStars, srcStars, sample, t) || !isPlausibleTransform(t)) continue;
+        if (!solveAffine(refStars, srcStars, sample, t) || !isPlausibleAffine(t)) continue;
 
         // 验证内点率
         int inliers = 0;
@@ -395,8 +746,11 @@ bool ImageAligner::ransacAffine(const std::vector<StarPoint>& refStars,
                 inliers++;
                 const auto& ref = refStars[m.first];
                 const auto& src = srcStars[m.second];
-                const double dx = t.a * src.x + t.b * src.y + t.c - ref.x;
-                const double dy = t.d * src.x + t.e * src.y + t.f - ref.y;
+                double mappedX = 0.0;
+                double mappedY = 0.0;
+                mapPoint(t, src.x, src.y, mappedX, mappedY);
+                const double dx = mappedX - ref.x;
+                const double dy = mappedY - ref.y;
                 squaredError += dx * dx + dy * dy;
             }
         }
@@ -429,15 +783,18 @@ bool ImageAligner::ransacAffine(const std::vector<StarPoint>& refStars,
     } else {
         out = bestT;
     }
-    if (!isPlausibleTransform(out)) return false;
+    if (!isPlausibleAffine(out)) return false;
 
     int finalInliers = 0;
     double finalSquaredError = 0.0;
     for (const auto& match : matches) {
         const auto& ref = refStars[match.first];
         const auto& src = srcStars[match.second];
-        const double dx = out.a * src.x + out.b * src.y + out.c - ref.x;
-        const double dy = out.d * src.x + out.e * src.y + out.f - ref.y;
+        double mappedX = 0.0;
+        double mappedY = 0.0;
+        if (!mapPoint(out, src.x, src.y, mappedX, mappedY)) continue;
+        const double dx = mappedX - ref.x;
+        const double dy = mappedY - ref.y;
         if (dx * dx + dy * dy < threshold * threshold) {
             ++finalInliers;
             finalSquaredError += dx * dx + dy * dy;
@@ -449,62 +806,411 @@ bool ImageAligner::ransacAffine(const std::vector<StarPoint>& refStars,
     return finalInliers >= minimumInliers && rms <= threshold;
 }
 
-AlignmentQuality ImageAligner::evaluateTransform(
+bool ImageAligner::ransacHomography(
+    const std::vector<StarPoint>& refStars,
+    const std::vector<StarPoint>& srcStars,
+    const std::vector<std::pair<int, int>>& matches,
+    int imageWidth, int imageHeight,
+    AlignmentTransform& out) {
+    if (matches.size() < 6 || imageWidth <= 1 || imageHeight <= 1) return false;
+
+    std::mt19937 rng(0x484f4d4fU);
+    std::uniform_int_distribution<int> distribution(
+        0, static_cast<int>(matches.size()) - 1);
+    constexpr double threshold = 2.5;
+    int bestInliers = 0;
+    double bestSquaredError = std::numeric_limits<double>::max();
+    AlignmentTransform bestTransform;
+
+    for (int iteration = 0; iteration < 1000; ++iteration) {
+        std::vector<std::pair<int, int>> sample;
+        std::vector<int> used;
+        sample.reserve(4);
+        used.reserve(4);
+        while (sample.size() < 4) {
+            const int index = distribution(rng);
+            if (std::find(used.begin(), used.end(), index) != used.end()) continue;
+            used.push_back(index);
+            sample.push_back(matches[static_cast<size_t>(index)]);
+        }
+        if (!homographySampleHasCoverage(
+                refStars, srcStars, sample, imageWidth, imageHeight)) {
+            continue;
+        }
+
+        AlignmentTransform candidate;
+        if (!solveHomographyLeastSquares(refStars, srcStars, sample, candidate) ||
+            !isPlausibleHomography(candidate, imageWidth, imageHeight)) {
+            continue;
+        }
+        AlignmentTransform candidateInverse;
+        if (!invertTransform(candidate, candidateInverse)) continue;
+
+        int inliers = 0;
+        double squaredError = 0.0;
+        for (const auto& match : matches) {
+            const StarPoint& reference = refStars[match.first];
+            const StarPoint& source = srcStars[match.second];
+            const double error = symmetricSquaredError(
+                reference, source, candidate, candidateInverse);
+            if (error < threshold * threshold) {
+                ++inliers;
+                squaredError += error;
+            }
+        }
+        if (inliers > bestInliers ||
+            (inliers == bestInliers && squaredError < bestSquaredError)) {
+            bestInliers = inliers;
+            bestSquaredError = squaredError;
+            bestTransform = candidate;
+        }
+    }
+
+    const int minimumInliers = std::max(
+        6, std::min(10, static_cast<int>(std::ceil(matches.size() * 0.35))));
+    if (bestInliers < minimumInliers) return false;
+    AlignmentTransform bestInverse;
+    if (!invertTransform(bestTransform, bestInverse)) return false;
+    std::vector<std::pair<int, int>> inliers;
+    inliers.reserve(matches.size());
+    for (const auto& match : matches) {
+        const double error = symmetricSquaredError(
+            refStars[match.first], srcStars[match.second],
+            bestTransform, bestInverse);
+        if (error < threshold * threshold) {
+            inliers.push_back(match);
+        }
+    }
+    if (!solveHomographyLeastSquares(refStars, srcStars, inliers, out)) {
+        out = bestTransform;
+    }
+    if (!isPlausibleHomography(out, imageWidth, imageHeight)) return false;
+    AlignmentTransform outputInverse;
+    if (!invertTransform(out, outputInverse)) return false;
+
+    int finalInliers = 0;
+    double finalSquaredError = 0.0;
+    for (const auto& match : matches) {
+        const StarPoint& reference = refStars[match.first];
+        const StarPoint& source = srcStars[match.second];
+        const double error = symmetricSquaredError(
+            reference, source, out, outputInverse);
+        if (error < threshold * threshold) {
+            ++finalInliers;
+            finalSquaredError += error;
+        }
+    }
+    const double rms = finalInliers > 0
+        ? std::sqrt(finalSquaredError / finalInliers)
+        : std::numeric_limits<double>::max();
+    return finalInliers >= minimumInliers && rms <= threshold;
+}
+
+AlignmentMetrics ImageAligner::evaluateTransform(
     const std::vector<StarPoint>& refStars,
     const std::vector<StarPoint>& srcStars,
     const AlignmentTransform& transform,
-    double matchRadius) const {
-    AlignmentQuality quality;
-    if (matchRadius <= 0.0) return quality;
-    std::vector<bool> refUsed(refStars.size(), false);
-    double squaredError = 0.0;
-    const double radiusSquared = matchRadius * matchRadius;
-
-    for (const StarPoint& src : srcStars) {
-        const double x = transform.a * src.x + transform.b * src.y + transform.c;
-        const double y = transform.d * src.x + transform.e * src.y + transform.f;
-        int nearestRef = -1;
-        double nearestDistance = radiusSquared;
-        for (size_t refIndex = 0; refIndex < refStars.size(); ++refIndex) {
-            if (refUsed[refIndex]) continue;
-            const double dx = refStars[refIndex].x - x;
-            const double dy = refStars[refIndex].y - y;
-            const double distance = dx * dx + dy * dy;
-            if (distance < nearestDistance) {
-                nearestDistance = distance;
-                nearestRef = static_cast<int>(refIndex);
-            }
-        }
-        if (nearestRef >= 0) {
-            refUsed[static_cast<size_t>(nearestRef)] = true;
-            ++quality.matchedStars;
-            squaredError += nearestDistance;
+    double matchRadius,
+    int imageWidth,
+    int imageHeight) const {
+    AlignmentMetrics metrics;
+    metrics.evaluationReferenceStars = static_cast<int>(refStars.size());
+    metrics.gridCells.resize(
+        static_cast<size_t>(metrics.gridColumns * metrics.gridRows));
+    if (matchRadius <= 0.0) return metrics;
+    if (imageWidth <= 0 || imageHeight <= 0) {
+        for (const StarPoint& star : refStars) {
+            imageWidth = std::max(imageWidth, static_cast<int>(std::ceil(star.x)) + 1);
+            imageHeight = std::max(imageHeight, static_cast<int>(std::ceil(star.y)) + 1);
         }
     }
-    quality.rmsError = quality.matchedStars > 0
-        ? std::sqrt(squaredError / quality.matchedStars)
+    if (imageWidth <= 0 || imageHeight <= 0) return metrics;
+
+    auto cellIndex = [&](const StarPoint& reference) {
+        const int column = std::clamp(
+            static_cast<int>(reference.x * metrics.gridColumns / imageWidth),
+            0, metrics.gridColumns - 1);
+        const int row = std::clamp(
+            static_cast<int>(reference.y * metrics.gridRows / imageHeight),
+            0, metrics.gridRows - 1);
+        return static_cast<size_t>(row * metrics.gridColumns + column);
+    };
+    for (const StarPoint& reference : refStars) {
+        ++metrics.gridCells[cellIndex(reference)].referenceStars;
+    }
+
+    struct CandidateEdge {
+        size_t source = 0;
+        size_t reference = 0;
+        double squaredError = 0.0;
+    };
+    std::vector<CandidateEdge> edges;
+    const double radiusSquared = matchRadius * matchRadius;
+    for (size_t sourceIndex = 0; sourceIndex < srcStars.size(); ++sourceIndex) {
+        double x = 0.0;
+        double y = 0.0;
+        if (!mapPoint(transform, srcStars[sourceIndex].x,
+                      srcStars[sourceIndex].y, x, y)) {
+            continue;
+        }
+        for (size_t referenceIndex = 0;
+             referenceIndex < refStars.size(); ++referenceIndex) {
+            const double dx = refStars[referenceIndex].x - x;
+            const double dy = refStars[referenceIndex].y - y;
+            const double error = dx * dx + dy * dy;
+            if (error <= radiusSquared) {
+                edges.push_back({sourceIndex, referenceIndex, error});
+            }
+        }
+    }
+    std::sort(edges.begin(), edges.end(),
+              [](const CandidateEdge& left, const CandidateEdge& right) {
+                  return left.squaredError < right.squaredError;
+              });
+
+    std::vector<bool> sourceUsed(srcStars.size(), false);
+    std::vector<bool> referenceUsed(refStars.size(), false);
+    double squaredError = 0.0;
+    std::vector<double> allErrors;
+    std::vector<std::vector<double>> cellErrors(metrics.gridCells.size());
+    for (const CandidateEdge& edge : edges) {
+        if (sourceUsed[edge.source] || referenceUsed[edge.reference]) continue;
+        sourceUsed[edge.source] = true;
+        referenceUsed[edge.reference] = true;
+        ++metrics.matchedStars;
+        squaredError += edge.squaredError;
+        const double error = std::sqrt(edge.squaredError);
+        allErrors.push_back(error);
+        cellErrors[cellIndex(refStars[edge.reference])].push_back(error);
+    }
+    metrics.matchCoverage = refStars.empty()
+        ? 0.0 : static_cast<double>(metrics.matchedStars) / refStars.size();
+    metrics.rmsError = metrics.matchedStars > 0
+        ? std::sqrt(squaredError / metrics.matchedStars)
         : std::numeric_limits<double>::max();
-    return quality;
+    auto percentile = [](std::vector<double> errors, double fraction) {
+        if (errors.empty()) return 0.0;
+        std::sort(errors.begin(), errors.end());
+        const size_t index = std::min(
+            errors.size() - 1,
+            static_cast<size_t>(std::ceil(errors.size() * fraction)) - 1);
+        return errors[index];
+    };
+    metrics.medianError = percentile(allErrors, 0.5);
+    metrics.p95Error = percentile(allErrors, 0.95);
+    std::vector<double> outerErrors;
+    for (size_t cell = 0; cell < cellErrors.size(); ++cell) {
+        AlignmentGridCell& outputCell = metrics.gridCells[cell];
+        outputCell.matchedStars = static_cast<int>(cellErrors[cell].size());
+        outputCell.matchCoverage = outputCell.referenceStars > 0
+            ? static_cast<double>(outputCell.matchedStars) /
+                  outputCell.referenceStars
+            : 0.0;
+        outputCell.eligible = outputCell.referenceStars >= 3;
+        outputCell.covered = outputCell.eligible &&
+            outputCell.matchedStars >= 3 && outputCell.matchCoverage >= 0.5;
+        if (outputCell.eligible) ++metrics.eligibleCells;
+        if (outputCell.covered) ++metrics.coveredCells;
+        if (!cellErrors[cell].empty()) {
+            double cellSquaredError = 0.0;
+            for (double error : cellErrors[cell]) cellSquaredError += error * error;
+            outputCell.rmsError =
+                std::sqrt(cellSquaredError / cellErrors[cell].size());
+            outputCell.medianError = percentile(cellErrors[cell], 0.5);
+            outputCell.p95Error = percentile(cellErrors[cell], 0.95);
+            outputCell.maxError =
+                *std::max_element(cellErrors[cell].begin(), cellErrors[cell].end());
+        }
+        const int row = static_cast<int>(cell) / metrics.gridColumns;
+        const int column = static_cast<int>(cell) % metrics.gridColumns;
+        if (!(row == 1 && column == 1)) {
+            if (outputCell.eligible) ++metrics.outerEligibleCells;
+            if (outputCell.covered) ++metrics.outerCoveredCells;
+            outerErrors.insert(outerErrors.end(),
+                               cellErrors[cell].begin(), cellErrors[cell].end());
+        }
+    }
+    metrics.gridCoverage = metrics.eligibleCells > 0
+        ? static_cast<double>(metrics.coveredCells) / metrics.eligibleCells : 0.0;
+    metrics.outerGridP95Error = percentile(outerErrors, 0.95);
+
+    const int requiredMatches = std::min(
+        12, static_cast<int>(std::min(refStars.size(), srcStars.size())));
+    auto fail = [&](bool condition, const char* reason) {
+        if (condition) metrics.failureReasons.emplace_back(reason);
+    };
+    fail(metrics.matchedStars < requiredMatches, "insufficient-matches");
+    fail(metrics.matchCoverage < 0.35, "low-match-coverage");
+    fail(metrics.rmsError > 2.0, "rms-above-2px");
+    fail(metrics.p95Error > 3.5, "p95-above-3.5px");
+    if (refStars.size() >= 18) {
+        fail(metrics.eligibleCells < 4, "insufficient-field-coverage");
+        // Landscapes can produce star-like detections in the fixed foreground.
+        // Six well-covered cells still constrain the complete sky region even
+        // when those foreground cells correctly do not follow the sky model.
+        fail(metrics.gridCoverage < 0.75 && metrics.coveredCells < 6,
+             "low-grid-coverage");
+        fail(metrics.outerEligibleCells < 3 || metrics.outerCoveredCells < 3,
+             "insufficient-outer-grid-coverage");
+    }
+    fail(metrics.outerGridP95Error > 4.0, "outer-p95-above-4px");
+    for (const AlignmentGridCell& cell : metrics.gridCells) {
+        if (!cell.covered) continue;
+        fail(cell.rmsError > 3.0, "cell-rms-above-3px");
+        fail(cell.p95Error > 4.5, "cell-p95-above-4.5px");
+    }
+    metrics.qualityPassed = metrics.failureReasons.empty();
+    return metrics;
 }
 
 bool ImageAligner::align(const std::vector<StarPoint>& refStars,
-                           const std::vector<StarPoint>& srcStars,
-                           AlignmentTransform& out,
-                           AlignmentQuality* quality) {
+    const std::vector<StarPoint>& srcStars,
+    AlignmentTransform& out,
+    AlignmentQuality* quality,
+    const AlignmentOptions& options) {
     std::vector<std::pair<int, int>> matches;
+    const std::vector<StarPoint>& evaluationReference =
+        options.evaluationReferenceStars
+            ? *options.evaluationReferenceStars : refStars;
+    const std::vector<StarPoint>& evaluationSource =
+        options.evaluationSourceStars
+            ? *options.evaluationSourceStars : srcStars;
+    auto fitBestModel = [&](AlignmentTransform& selected,
+                            AlignmentQuality& selectedQuality) {
+        AlignmentTransform affine;
+        AlignmentMetrics affineMetrics;
+        const bool affineFitted = ransacAffine(refStars, srcStars, matches, affine);
+        if (affineFitted) {
+            affineMetrics = evaluateTransform(
+                evaluationReference, evaluationSource, affine, 6.0,
+                options.imageWidth, options.imageHeight);
+        }
+
+        AlignmentTransform homography;
+        AlignmentMetrics homographyMetrics;
+        const bool homographyFitted = options.allowHomography &&
+            ransacHomography(refStars, srcStars, matches,
+                             options.imageWidth, options.imageHeight,
+                             homography);
+        if (homographyFitted) {
+            homographyMetrics = evaluateTransform(
+                evaluationReference, evaluationSource, homography, 6.0,
+                options.imageWidth, options.imageHeight);
+        }
+        selectedQuality.affineEvaluated = affineFitted;
+        selectedQuality.homographyEvaluated = homographyFitted;
+        selectedQuality.affineCandidate = affineMetrics;
+        selectedQuality.homographyCandidate = homographyMetrics;
+        const bool affineAccepted = affineFitted && affineMetrics.qualityPassed;
+        const bool homographyAccepted =
+            homographyFitted && homographyMetrics.qualityPassed;
+        if (!affineAccepted && !homographyAccepted) return false;
+
+        bool selectHomography = false;
+        if (homographyAccepted && !affineAccepted) {
+            selectHomography = true;
+            selectedQuality.selectionReason = "affine-failed-quality-gate";
+        } else if (homographyAccepted && affineAccepted) {
+            const bool preservesMatches =
+                homographyMetrics.matchedStars >=
+                    static_cast<int>(std::ceil(affineMetrics.matchedStars * 0.95));
+            const bool preservesGrid =
+                homographyMetrics.gridCoverage + 1e-9 >= affineMetrics.gridCoverage;
+            const bool preservesRms =
+                homographyMetrics.rmsError <= affineMetrics.rmsError * 1.05;
+            const bool globalTailImproved =
+                affineMetrics.p95Error - homographyMetrics.p95Error >= 0.3 &&
+                homographyMetrics.p95Error <= affineMetrics.p95Error * 0.85;
+            const bool outerTailImproved =
+                affineMetrics.outerGridP95Error -
+                    homographyMetrics.outerGridP95Error >= 0.5 &&
+                homographyMetrics.outerGridP95Error <=
+                    affineMetrics.outerGridP95Error * 0.8;
+            selectHomography = preservesMatches && preservesGrid && preservesRms &&
+                (globalTailImproved || outerTailImproved);
+            selectedQuality.selectionReason = selectHomography
+                ? (outerTailImproved ? "outer-p95-improved"
+                                     : "global-p95-improved")
+                : "affine-preferred-no-significant-gain";
+        } else {
+            selectedQuality.selectionReason = "affine-only-quality-pass";
+        }
+
+        if (selectHomography) {
+            selected = homography;
+            static_cast<AlignmentMetrics&>(selectedQuality) = homographyMetrics;
+            selectedQuality.selected = true;
+            selectedQuality.model = AlignmentModel::Homography;
+        } else {
+            selected = affine;
+            static_cast<AlignmentMetrics&>(selectedQuality) = affineMetrics;
+            selectedQuality.selected = true;
+            selectedQuality.model = AlignmentModel::Affine;
+        }
+        return true;
+    };
+
+    AlignmentQuality verified;
     bool aligned = triangleMatch(refStars, srcStars, matches) &&
-                   ransacAffine(refStars, srcStars, matches, out);
+                   fitBestModel(out, verified);
     if (!aligned) {
         aligned = translationSeedMatch(refStars, srcStars, matches) &&
-                  ransacAffine(refStars, srcStars, matches, out);
+                  fitBestModel(out, verified);
     }
-    if (!aligned) return false;
-
-    const AlignmentQuality verified = evaluateTransform(refStars, srcStars, out, 4.0);
     if (quality) *quality = verified;
-    const int minimumMatches = std::max(4, std::min(8,
-        static_cast<int>(std::ceil(std::min(refStars.size(), srcStars.size()) * 0.2))));
-    return verified.matchedStars >= minimumMatches && verified.rmsError <= 2.5;
+    return aligned;
+}
+
+static bool invertTransform(const AlignmentTransform& transform,
+                            AlignmentTransform& inverse) {
+    const double matrix[3][3] = {
+        {transform.a, transform.b, transform.c},
+        {transform.d, transform.e, transform.f},
+        {transform.g, transform.h, 1.0}
+    };
+    const double determinant =
+        matrix[0][0] * (matrix[1][1] * matrix[2][2] -
+                        matrix[1][2] * matrix[2][1]) -
+        matrix[0][1] * (matrix[1][0] * matrix[2][2] -
+                        matrix[1][2] * matrix[2][0]) +
+        matrix[0][2] * (matrix[1][0] * matrix[2][1] -
+                        matrix[1][1] * matrix[2][0]);
+    if (!std::isfinite(determinant) || std::abs(determinant) < 1e-12) return false;
+
+    double output[3][3] = {
+        {
+            matrix[1][1] * matrix[2][2] - matrix[1][2] * matrix[2][1],
+            matrix[0][2] * matrix[2][1] - matrix[0][1] * matrix[2][2],
+            matrix[0][1] * matrix[1][2] - matrix[0][2] * matrix[1][1]
+        },
+        {
+            matrix[1][2] * matrix[2][0] - matrix[1][0] * matrix[2][2],
+            matrix[0][0] * matrix[2][2] - matrix[0][2] * matrix[2][0],
+            matrix[0][2] * matrix[1][0] - matrix[0][0] * matrix[1][2]
+        },
+        {
+            matrix[1][0] * matrix[2][1] - matrix[1][1] * matrix[2][0],
+            matrix[0][1] * matrix[2][0] - matrix[0][0] * matrix[2][1],
+            matrix[0][0] * matrix[1][1] - matrix[0][1] * matrix[1][0]
+        }
+    };
+    const double normalization = output[2][2];
+    if (!std::isfinite(normalization) || std::abs(normalization) < 1e-12) {
+        return false;
+    }
+    for (auto& row : output) {
+        for (double& value : row) value /= normalization;
+    }
+    inverse.a = output[0][0];
+    inverse.b = output[0][1];
+    inverse.c = output[0][2];
+    inverse.d = output[1][0];
+    inverse.e = output[1][1];
+    inverse.f = output[1][2];
+    inverse.g = output[2][0];
+    inverse.h = output[2][1];
+    inverse.model = transform.model;
+    return true;
 }
 
 bool ImageAligner::applyTransform(const std::vector<uint16_t>& src, int w, int h,
@@ -516,22 +1222,20 @@ bool ImageAligner::applyTransform(const std::vector<uint16_t>& src, int w, int h
         return false;
     }
 
-    const double det = t.a * t.e - t.b * t.d;
-    if (!std::isfinite(det) || std::abs(det) < 1e-12) return false;
-    const double sourceXFromX = t.e / det;
-    const double sourceXFromY = -t.b / det;
-    const double sourceXOffset = (t.b * t.f - t.e * t.c) / det;
-    const double sourceYFromX = -t.d / det;
-    const double sourceYFromY = t.a / det;
-    const double sourceYOffset = (t.d * t.c - t.a * t.f) / det;
+    AlignmentTransform inverse;
+    if (!invertTransform(t, inverse)) return false;
 
     dst.resize(static_cast<size_t>(w) * h);
 
     for (int y = 0; y < h; ++y) {
         for (int x = 0; x < w; ++x) {
             // The transform maps source to destination, so resampling uses its inverse.
-            const double sx = sourceXFromX * x + sourceXFromY * y + sourceXOffset;
-            const double sy = sourceYFromX * x + sourceYFromY * y + sourceYOffset;
+            double sx = 0.0;
+            double sy = 0.0;
+            if (!mapPoint(inverse, x, y, sx, sy)) {
+                dst[static_cast<size_t>(y) * w + x] = 0;
+                continue;
+            }
 
             int ix = static_cast<int>(std::floor(sx));
             int iy = static_cast<int>(std::floor(sy));
@@ -575,29 +1279,25 @@ bool ImageAligner::applyTransformRgb(const std::vector<uint16_t>& src, int w, in
         return false;
     }
 
-    const double det = t.a * t.e - t.b * t.d;
-    if (!std::isfinite(det) || std::abs(det) < 1e-12) return false;
-    const double sourceXFromX = t.e / det;
-    const double sourceXFromY = -t.b / det;
-    const double sourceXOffset = (t.b * t.f - t.e * t.c) / det;
-    const double sourceYFromX = -t.d / det;
-    const double sourceYFromY = t.a / det;
-    const double sourceYOffset = (t.d * t.c - t.a * t.f) / det;
+    AlignmentTransform inverse;
+    if (!invertTransform(t, inverse)) return false;
 
     dst.resize(pixelCount * 3);
     for (int y = 0; y < h; ++y) {
         for (int x = 0; x < w; ++x) {
-            const double sx = sourceXFromX * x + sourceXFromY * y + sourceXOffset;
-            const double sy = sourceYFromX * x + sourceYFromY * y + sourceYOffset;
-            const int ix = static_cast<int>(std::floor(sx));
-            const int iy = static_cast<int>(std::floor(sy));
+            double sx = 0.0;
+            double sy = 0.0;
+            const bool mapped = mapPoint(inverse, x, y, sx, sy);
             const size_t destination = (static_cast<size_t>(y) * w + x) * 3;
-            if (ix < 0 || ix >= w - 1 || iy < 0 || iy >= h - 1) {
+            if (!mapped || sx < 0.0 || sx >= static_cast<double>(w - 1) ||
+                sy < 0.0 || sy >= static_cast<double>(h - 1)) {
                 dst[destination] = 0;
                 dst[destination + 1] = 0;
                 dst[destination + 2] = 0;
                 continue;
             }
+            const int ix = static_cast<int>(std::floor(sx));
+            const int iy = static_cast<int>(std::floor(sy));
 
             const double fx = sx - ix;
             const double fy = sy - iy;

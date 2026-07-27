@@ -147,7 +147,7 @@ int main(int argc, char* argv[]) {
     worker.wait();
 
     QJsonObject report;
-    report["schemaVersion"] = 1;
+    report["schemaVersion"] = 2;
     report["toolVersion"] = QCoreApplication::applicationVersion();
     report["generatedAt"] = QDateTime::currentDateTimeUtc().toString(Qt::ISODate);
     report["input"] = input;
@@ -160,6 +160,15 @@ int main(int argc, char* argv[]) {
     report["estimatedScratchBytes"] = QString::number(scratchBytes);
     report["elapsedMs"] = timer.elapsed();
     report["processedFrames"] = worker.stackedFrameCount();
+    report["referenceFrames"] = worker.stackedFrameCount() > 0 ? 1 : 0;
+    report["transformedSourceFrames"] =
+        worker.affineFrameCount() + worker.homographyFrameCount();
+    report["affineAlignedFrames"] = worker.affineFrameCount();
+    report["homographyAlignedFrames"] = worker.homographyFrameCount();
+    report["averageAlignmentRms"] = worker.averageAlignmentRms();
+    report["worstAlignmentP95"] = worker.worstAlignmentP95();
+    report["minimumAlignmentGridCoverage"] =
+        worker.minimumAlignmentGridCoverage();
     report["width"] = worker.stackedWidth();
     report["height"] = worker.stackedHeight();
     report["outputFile"] = worker.outputFile();

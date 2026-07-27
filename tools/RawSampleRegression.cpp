@@ -38,6 +38,7 @@ struct ReferenceFrame {
     int width = 0;
     int height = 0;
     std::vector<StarPoint> stars;
+    std::vector<StarPoint> evaluationStars;
 };
 
 struct Summary {
@@ -139,12 +140,77 @@ QJsonObject metadataJson(const RawImageLoader::Metadata& metadata) {
 
 QJsonObject transformJson(const AlignmentTransform& transform) {
     QJsonObject json;
+    json["model"] = transform.model == AlignmentModel::Homography
+        ? "homography" : "affine";
     json["a"] = transform.a;
     json["b"] = transform.b;
     json["c"] = transform.c;
     json["d"] = transform.d;
     json["e"] = transform.e;
     json["f"] = transform.f;
+    json["g"] = transform.g;
+    json["h"] = transform.h;
+    return json;
+}
+
+QJsonObject metricsJson(const AlignmentMetrics& metrics) {
+    QJsonObject json;
+    json["evaluationReferenceStars"] = metrics.evaluationReferenceStars;
+    json["matchedStars"] = metrics.matchedStars;
+    json["matchCoverage"] = metrics.matchCoverage;
+    json["rmsError"] = metrics.rmsError;
+    json["medianError"] = metrics.medianError;
+    json["p95Error"] = metrics.p95Error;
+    json["outerGridP95Error"] = metrics.outerGridP95Error;
+    json["gridColumns"] = metrics.gridColumns;
+    json["gridRows"] = metrics.gridRows;
+    json["eligibleCells"] = metrics.eligibleCells;
+    json["coveredCells"] = metrics.coveredCells;
+    json["outerEligibleCells"] = metrics.outerEligibleCells;
+    json["outerCoveredCells"] = metrics.outerCoveredCells;
+    json["gridCoverage"] = metrics.gridCoverage;
+    json["qualityPassed"] = metrics.qualityPassed;
+    QJsonArray failures;
+    for (const std::string& reason : metrics.failureReasons) {
+        failures.append(QString::fromStdString(reason));
+    }
+    json["failureReasons"] = failures;
+    QJsonArray cells;
+    for (size_t index = 0; index < metrics.gridCells.size(); ++index) {
+        const AlignmentGridCell& cell = metrics.gridCells[index];
+        QJsonObject cellJson;
+        cellJson["row"] = static_cast<int>(index) / metrics.gridColumns;
+        cellJson["column"] = static_cast<int>(index) % metrics.gridColumns;
+        cellJson["referenceStars"] = cell.referenceStars;
+        cellJson["matchedStars"] = cell.matchedStars;
+        cellJson["matchCoverage"] = cell.matchCoverage;
+        cellJson["rmsError"] = cell.rmsError;
+        cellJson["medianError"] = cell.medianError;
+        cellJson["p95Error"] = cell.p95Error;
+        cellJson["maxError"] = cell.maxError;
+        cellJson["eligible"] = cell.eligible;
+        cellJson["covered"] = cell.covered;
+        cells.append(cellJson);
+    }
+    json["gridCells"] = cells;
+    return json;
+}
+
+QJsonObject qualityJson(const AlignmentQuality& quality) {
+    QJsonObject json = metricsJson(quality);
+    json["selected"] = quality.selected;
+    json["model"] = quality.model == AlignmentModel::Homography
+        ? "homography" : "affine";
+    json["selectionReason"] =
+        QString::fromStdString(quality.selectionReason);
+    json["affineEvaluated"] = quality.affineEvaluated;
+    json["homographyEvaluated"] = quality.homographyEvaluated;
+    if (quality.affineEvaluated) {
+        json["affineCandidate"] = metricsJson(quality.affineCandidate);
+    }
+    if (quality.homographyEvaluated) {
+        json["homographyCandidate"] = metricsJson(quality.homographyCandidate);
+    }
     return json;
 }
 
@@ -225,16 +291,26 @@ QJsonObject inspectFile(const QString& sampleRoot,
 
     DetectionOptions options;
     options.spatiallyBalanced = true;
-    options.maxCandidates = 50;
-    options.maxStars = 50;
-    std::vector<StarPoint> stars;
+    options.maxCandidates = 300;
+    options.maxStars = 250;
+    std::vector<StarPoint> detectedStars;
     StarDetector detector;
     timer.restart();
     const bool starsOk = detector.detect(luminance, image.width, image.height,
-                                         stars, options);
+                                         detectedStars, options);
+    const size_t fitCount = std::min<size_t>(50, detectedStars.size());
+    const std::vector<StarPoint> stars(
+        detectedStars.begin(), detectedStars.begin() + fitCount);
+    const std::vector<StarPoint> evaluationStars =
+        detectedStars.size() >= fitCount + 12
+            ? std::vector<StarPoint>(
+                  detectedStars.begin() + fitCount, detectedStars.end())
+            : detectedStars;
     result["starDetectionMs"] = static_cast<double>(timer.elapsed());
     result["starDetectionOk"] = starsOk;
     result["alignmentStarCount"] = static_cast<int>(stars.size());
+    result["alignmentEvaluationStarCount"] =
+        static_cast<int>(evaluationStars.size());
     if (starsOk) ++summary.starDetectionPassed;
 
     if (!reference.valid && starsOk) {
@@ -243,6 +319,7 @@ QJsonObject inspectFile(const QString& sampleRoot,
         reference.width = image.width;
         reference.height = image.height;
         reference.stars = stars;
+        reference.evaluationStars = evaluationStars;
         result["alignment"] = "reference";
         result["alignmentReference"] = relativePath(sampleRoot, reference.path);
     } else if (reference.valid && starsOk) {
@@ -254,12 +331,20 @@ QJsonObject inspectFile(const QString& sampleRoot,
             AlignmentTransform transform;
             AlignmentQuality quality;
             ImageAligner aligner;
+            AlignmentOptions alignmentOptions;
+            alignmentOptions.imageWidth = image.width;
+            alignmentOptions.imageHeight = image.height;
+            alignmentOptions.evaluationReferenceStars =
+                &reference.evaluationStars;
+            alignmentOptions.evaluationSourceStars = &evaluationStars;
             timer.restart();
-            const bool aligned = aligner.align(reference.stars, stars, transform, &quality);
+            const bool aligned = aligner.align(
+                reference.stars, stars, transform, &quality, alignmentOptions);
             result["alignmentMs"] = static_cast<double>(timer.elapsed());
             result["alignment"] = aligned ? "passed" : "failed";
             result["alignmentMatchedStars"] = quality.matchedStars;
             result["alignmentRmsError"] = quality.rmsError;
+            result["alignmentQuality"] = qualityJson(quality);
             if (aligned) {
                 ++summary.alignmentPassed;
                 result["transform"] = transformJson(transform);
@@ -403,7 +488,7 @@ int main(int argc, char* argv[]) {
     }
 
     QJsonObject report;
-    report["schemaVersion"] = 1;
+    report["schemaVersion"] = 2;
     report["toolVersion"] = QCoreApplication::applicationVersion();
     report["generatedAt"] = QDateTime::currentDateTimeUtc().toString(Qt::ISODate);
     report["sampleRoot"] = sampleRoot;

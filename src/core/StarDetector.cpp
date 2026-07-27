@@ -371,10 +371,14 @@ bool StarDetector::detect(const std::vector<uint16_t>& image, int width, int hei
             }
         }
 
-        // 按亮度排序并截断
-        std::sort(stars.begin(), stars.end(), [](const StarPoint& a, const StarPoint& b) {
-            return a.flux > b.flux;
-        });
+        // Spatially balanced candidates are already ordered by grid rounds.
+        // Re-sorting them globally by flux would undo that coverage guarantee.
+        if (!options.spatiallyBalanced) {
+            std::sort(stars.begin(), stars.end(),
+                      [](const StarPoint& a, const StarPoint& b) {
+                return a.flux > b.flux;
+            });
+        }
         if (stars.size() > options.maxStars) {
             stars.resize(options.maxStars);
         }

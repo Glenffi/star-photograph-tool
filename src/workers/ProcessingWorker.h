@@ -41,6 +41,11 @@ public:
     int stackedFrameCount() const { return m_frameCount; }
     QString errorString() const { return m_errorString; }
     QString outputFile() const { return m_outputFile; }
+    int affineFrameCount() const { return m_affineFrameCount; }
+    int homographyFrameCount() const { return m_homographyFrameCount; }
+    double averageAlignmentRms() const;
+    double worstAlignmentP95() const { return m_worstAlignmentP95; }
+    double minimumAlignmentGridCoverage() const { return m_minimumGridCoverage; }
     bool wasCancelled() const { return m_wasCancelled; }
 
     void requestCancel();
@@ -64,6 +69,11 @@ private:
     int m_frameCount = 0;
     QString m_errorString;
     QString m_outputFile;
+    int m_affineFrameCount = 0;
+    int m_homographyFrameCount = 0;
+    double m_alignmentRmsSum = 0.0;
+    double m_worstAlignmentP95 = 0.0;
+    double m_minimumGridCoverage = 0.0;
     std::atomic<bool> m_cancelRequested{false};
     bool m_wasCancelled = false;
 };
