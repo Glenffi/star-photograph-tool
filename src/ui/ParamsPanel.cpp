@@ -335,15 +335,15 @@ void ParamsPanel::setupUI() {
     auto* strengthLabel = new QLabel(QString::fromUtf8("强度:"), m_starReduceGroup);
     strengthLabel->setStyleSheet("font-size: 12px; color: #C9D1D9; background-color: transparent;");
     strengthLabel->setToolTip(QString::fromUtf8(
-        "缩星强度：40 温和，60 明显，80 强烈\n"
+        "缩星强度：40 温和，70 强烈，90 接近清星\n"
         "请在 100% 预览下判断，过高会损失星点细节"));
     strengthRow->addWidget(strengthLabel);
     m_starReduceSlider = createSlider(0, 100, 70);
     m_starReduceSlider->setEnabled(false);
     m_starReduceSlider->setFixedWidth(120);
     m_starReduceSlider->setToolTip(QString::fromUtf8(
-        "基于局部背景保护和星点轮廓收缩处理\n"
-        "推荐从 60 开始调整"));
+        "亮星收紧轮廓，小星重建为局部天空颜色\n"
+        "推荐从 70 开始调整"));
     connect(m_starReduceSlider, &QSlider::valueChanged, this, &ParamsPanel::onSliderValueChanged);
     connect(m_starReduceSlider, &QSlider::sliderReleased, this, &ParamsPanel::onSliderReleased);
     strengthRow->addWidget(m_starReduceSlider);

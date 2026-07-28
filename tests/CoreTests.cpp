@@ -17,6 +17,7 @@
 #include <tiffio.h>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <iostream>
@@ -640,15 +641,22 @@ void testStarDetectionAndReduction() {
 
     std::vector<uint16_t> rgb(luminance.size() * 3);
     for (size_t i = 0; i < luminance.size(); ++i) {
-        rgb[i * 3] = luminance[i];
+        rgb[i * 3] = static_cast<uint16_t>(
+            std::max(0, static_cast<int>(luminance[i]) - 200));
         rgb[i * 3 + 1] = luminance[i];
-        rgb[i * 3 + 2] = luminance[i];
+        rgb[i * 3 + 2] = static_cast<uint16_t>(
+            std::min(65535, static_cast<int>(luminance[i]) + 400));
     }
     const uint16_t peakBefore = rgb[(16 * width + 18) * 3];
     const size_t faintCenterIndex =
         static_cast<size_t>(62 * width + 86) * 3;
     const uint16_t faintPeakBefore = rgb[faintCenterIndex];
     const uint16_t backgroundBefore = rgb[(65 * width + 5) * 3];
+    const std::array<uint16_t, 3> coloredBackground = {
+        backgroundBefore,
+        rgb[(65 * width + 5) * 3 + 1],
+        rgb[(65 * width + 5) * 3 + 2]
+    };
     const size_t brightPixelsBefore = static_cast<size_t>(std::count_if(
         luminance.begin(), luminance.end(),
         [](uint16_t value) { return value > 5000; }));
@@ -663,6 +671,11 @@ void testStarDetectionAndReduction() {
               backgroundBefore +
                   (faintPeakBefore - backgroundBefore) / 4,
           "Strong reduction should fade faint compact stars into the background");
+    for (int channel = 0; channel < 3; ++channel) {
+        check(std::abs(static_cast<int>(rgb[faintCenterIndex + channel]) -
+                       coloredBackground[channel]) < 300,
+              "Removed stars should inherit the local RGB background color");
+    }
     check(rgb[(16 * width + 18) * 3] > backgroundBefore + 1000,
           "Strong reduction should retain a visible core for prominent stars");
     const size_t brightPixelsAfter = static_cast<size_t>(std::count_if(

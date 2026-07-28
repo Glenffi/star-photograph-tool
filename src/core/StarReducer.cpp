@@ -3,6 +3,7 @@
 #include "StarDetector.h"
 
 #include <algorithm>
+#include <array>
 #include <climits>
 #include <cmath>
 
@@ -39,9 +40,40 @@ double sampleBilinear(const std::vector<uint16_t>& image,
     return top * (1.0 - fy) + bottom * fy;
 }
 
-uint16_t localBackground(const std::vector<uint16_t>& luminance,
-                         int width, int height, const StarPoint& star,
-                         double innerRadius, double outerRadius) {
+double sampleRgbBilinear(const std::vector<uint16_t>& image,
+                         int width, int height, double x, double y,
+                         int channel) {
+    if (x < 0.0 || y < 0.0 ||
+        x >= static_cast<double>(width - 1) ||
+        y >= static_cast<double>(height - 1)) {
+        return 0.0;
+    }
+    const int x0 = static_cast<int>(std::floor(x));
+    const int y0 = static_cast<int>(std::floor(y));
+    const double fx = x - x0;
+    const double fy = y - y0;
+    const auto valueAt = [&](int px, int py) {
+        return static_cast<double>(
+            image[(static_cast<size_t>(py) * width + px) * 3 + channel]);
+    };
+    const double top =
+        valueAt(x0, y0) * (1.0 - fx) + valueAt(x0 + 1, y0) * fx;
+    const double bottom =
+        valueAt(x0, y0 + 1) * (1.0 - fx) +
+        valueAt(x0 + 1, y0 + 1) * fx;
+    return top * (1.0 - fy) + bottom * fy;
+}
+
+struct BackgroundColor {
+    uint16_t luminance = 0;
+    std::array<uint16_t, 3> rgb = {};
+};
+
+BackgroundColor localBackground(const std::vector<uint16_t>& luminance,
+                                const std::vector<uint16_t>& rgb,
+                                int width, int height,
+                                const StarPoint& star,
+                                double innerRadius, double outerRadius) {
     const int radius = static_cast<int>(std::ceil(outerRadius));
     const int centerX = static_cast<int>(std::lround(star.x));
     const int centerY = static_cast<int>(std::lround(star.y));
@@ -51,8 +83,11 @@ uint16_t localBackground(const std::vector<uint16_t>& luminance,
     const int y1 = std::min(height - 1, centerY + radius);
     const double innerSquared = innerRadius * innerRadius;
     const double outerSquared = outerRadius * outerRadius;
-    std::vector<uint16_t> samples;
-    samples.reserve(static_cast<size_t>(radius * radius * 3));
+    std::vector<uint16_t> luminanceSamples;
+    std::array<std::vector<uint16_t>, 3> channelSamples;
+    const size_t capacity = static_cast<size_t>(radius * radius * 3);
+    luminanceSamples.reserve(capacity);
+    for (auto& samples : channelSamples) samples.reserve(capacity);
 
     for (int y = y0; y <= y1; ++y) {
         for (int x = x0; x <= x1; ++x) {
@@ -61,12 +96,21 @@ uint16_t localBackground(const std::vector<uint16_t>& luminance,
             const double distanceSquared = dx * dx + dy * dy;
             if (distanceSquared >= innerSquared &&
                 distanceSquared <= outerSquared) {
-                samples.push_back(
-                    luminance[static_cast<size_t>(y) * width + x]);
+                const size_t pixel = static_cast<size_t>(y) * width + x;
+                luminanceSamples.push_back(luminance[pixel]);
+                for (int channel = 0; channel < 3; ++channel) {
+                    channelSamples[channel].push_back(
+                        rgb[pixel * 3 + channel]);
+                }
             }
         }
     }
-    return median(samples);
+    BackgroundColor background;
+    background.luminance = median(luminanceSamples);
+    for (int channel = 0; channel < 3; ++channel) {
+        background.rgb[channel] = median(channelSamples[channel]);
+    }
+    return background;
 }
 
 double smoothMask(double distance, double radius) {
@@ -110,9 +154,9 @@ bool StarReducer::reduce(std::vector<uint16_t>& image, int width, int height,
     StarDetector detector;
     std::vector<StarPoint> stars;
     DetectionOptions options;
-    options.maxCandidates = 12000;
-    options.maxStars = 12000;
-    options.thresholdSigma = 4.0;
+    options.maxCandidates = 100000;
+    options.maxStars = 100000;
+    options.thresholdSigma = 1.5;
     if (!detector.detect(
             originalLuminance, width, height, stars, options)) {
         return true;
@@ -122,9 +166,15 @@ bool StarReducer::reduce(std::vector<uint16_t>& image, int width, int height,
     std::vector<StarPoint> filteredStars;
     filteredStars.reserve(stars.size());
     double fwhmSum = 0.0;
-    for (const StarPoint& star : stars) {
+    for (size_t starIndex = 0; starIndex < stars.size(); ++starIndex) {
+        const StarPoint& star = stars[starIndex];
+        const bool prominent =
+            starIndex < std::min<size_t>(2000, stars.size() / 20);
+        const bool compact =
+            star.fwhm <= 7.5 && star.ellipticity <= 0.68;
         if (star.fwhm < 0.7 || star.fwhm > 20.0 ||
-            star.ellipticity > 0.7 || star.flux < 100.0) {
+            star.ellipticity > 0.7 || star.flux < 100.0 ||
+            (!compact && !prominent)) {
             continue;
         }
         filteredStars.push_back(star);
@@ -151,6 +201,7 @@ bool StarReducer::reduce(std::vector<uint16_t>& image, int width, int height,
     // Every proposal is derived from the immutable source. Overlapping masks
     // keep the strongest reduction, so processing order cannot create rings.
     std::vector<uint16_t> outputLuminance = originalLuminance;
+    std::vector<uint16_t> outputRgb = image;
     for (size_t starIndex = 0;
          starIndex < filteredStars.size(); ++starIndex) {
         const StarPoint& star = filteredStars[starIndex];
@@ -162,7 +213,20 @@ bool StarReducer::reduce(std::vector<uint16_t>& image, int width, int height,
         // transition avoids a visible threshold between retained and removed
         // stars. Compactness helps suppress genuinely tiny stars without
         // erasing an unusually bright compact star outright.
-        const double faintness = smoothstep01((rank - 0.15) / 0.70);
+        const double aggressiveFade = smoothstep01(
+            (normalizedStrength - 0.45) / 0.45);
+        const double minimumRankSpan = std::min(
+            1.0, 3.0 / static_cast<double>(filteredStars.size()));
+        const double preserveFraction = std::max(
+            minimumRankSpan,
+            0.45 * (1.0 - aggressiveFade) +
+                0.01 * aggressiveFade);
+        const double transitionWidth = std::max(
+            minimumRankSpan,
+            0.40 * (1.0 - aggressiveFade) +
+                0.02 * aggressiveFade);
+        const double faintness = smoothstep01(
+            (rank - preserveFraction) / transitionWidth);
         const double compactness =
             1.0 - smoothstep01((star.fwhm - 1.5) / 4.0);
         const double smallStarScore = std::max(
@@ -175,13 +239,14 @@ bool StarReducer::reduce(std::vector<uint16_t>& image, int width, int height,
             ++stats->stronglySuppressedStars;
         }
 
-        const double maskRadius = std::clamp(star.fwhm * 2.5, 3.0, 24.0);
+        const double maskRadius = std::clamp(star.fwhm * 1.6, 2.5, 12.0);
         const double backgroundInner =
-            std::clamp(star.fwhm * 1.6, 1.5, maskRadius * 0.8);
-        const uint16_t background = localBackground(
-            originalLuminance, width, height, star,
+            std::clamp(star.fwhm * 1.2, 1.5, maskRadius * 0.8);
+        const BackgroundColor background = localBackground(
+            originalLuminance, image, width, height, star,
             backgroundInner, maskRadius);
-        const double noiseFloor = std::max(2.0, background * 0.002);
+        const double noiseFloor =
+            std::max(2.0, background.luminance * 0.002);
         const int radius = static_cast<int>(std::ceil(maskRadius));
         const int centerX = static_cast<int>(std::lround(star.x));
         const int centerY = static_cast<int>(std::lround(star.y));
@@ -201,7 +266,7 @@ bool StarReducer::reduce(std::vector<uint16_t>& image, int width, int height,
                 const double original = originalLuminance[index];
                 // Never alter dark dust or texture at/below the local annulus
                 // background. This is the black-hole guard.
-                if (original <= background + noiseFloor) continue;
+                if (original <= background.luminance + noiseFloor) continue;
 
                 const double sourceX = star.x + dx / radiusScale;
                 const double sourceY = star.y + dy / radiusScale;
@@ -209,19 +274,38 @@ bool StarReducer::reduce(std::vector<uint16_t>& image, int width, int height,
                     sampleBilinear(originalLuminance, width, height,
                                    sourceX, sourceY);
                 const double starSignal =
-                    std::max(0.0, sampled - background);
+                    std::max(0.0, sampled - background.luminance);
                 const double contracted =
-                    background + starSignal * amplitudeScale;
+                    background.luminance + starSignal * amplitudeScale;
                 const double maskWeight =
                     smoothMask(distance, maskRadius);
                 const double proposal = std::min(
                     original,
                     original * (1.0 - maskWeight) +
                         contracted * maskWeight);
-                outputLuminance[index] = std::min(
-                    outputLuminance[index],
+                const uint16_t proposedLuminance =
                     static_cast<uint16_t>(std::lround(
-                        std::clamp(proposal, 0.0, 65535.0))));
+                        std::clamp(proposal, 0.0, 65535.0)));
+                if (proposedLuminance >= outputLuminance[index]) continue;
+
+                outputLuminance[index] = proposedLuminance;
+                for (int channel = 0; channel < 3; ++channel) {
+                    const double sampledChannel = sampleRgbBilinear(
+                        image, width, height, sourceX, sourceY, channel);
+                    const double channelSignal = std::max(
+                        0.0, sampledChannel - background.rgb[channel]);
+                    const double contractedChannel =
+                        background.rgb[channel] +
+                        channelSignal * amplitudeScale;
+                    const double originalChannel =
+                        image[index * 3 + channel];
+                    const double proposedChannel =
+                        originalChannel * (1.0 - maskWeight) +
+                        contractedChannel * maskWeight;
+                    outputRgb[index * 3 + channel] =
+                        static_cast<uint16_t>(std::lround(std::clamp(
+                            proposedChannel, 0.0, 65535.0)));
+                }
             }
         }
     }
@@ -234,33 +318,6 @@ bool StarReducer::reduce(std::vector<uint16_t>& image, int width, int height,
         }
     }
 
-    std::vector<uint16_t> outputRgb;
-    rebuildRgb(image, originalLuminance, outputLuminance,
-               width, height, outputRgb);
     image = std::move(outputRgb);
     return true;
-}
-
-void StarReducer::rebuildRgb(const std::vector<uint16_t>& rgb,
-                             const std::vector<uint16_t>& originalL,
-                             const std::vector<uint16_t>& outputL,
-                             int width, int height,
-                             std::vector<uint16_t>& outRgb) {
-    const int pixelCount = width * height;
-    outRgb.resize(static_cast<size_t>(pixelCount) * 3);
-
-    constexpr float minimumRatio = 0.1f;
-    constexpr float epsilon = 1.0f;
-    for (int pixel = 0; pixel < pixelCount; ++pixel) {
-        const float original = static_cast<float>(originalL[pixel]);
-        const float output = static_cast<float>(outputL[pixel]);
-        const float ratio = std::clamp(
-            output / std::max(original, epsilon), minimumRatio, 1.0f);
-
-        for (int channel = 0; channel < 3; ++channel) {
-            const float value = rgb[pixel * 3 + channel] * ratio;
-            outRgb[pixel * 3 + channel] = static_cast<uint16_t>(
-                std::clamp(static_cast<int>(value + 0.5f), 0, 65535));
-        }
-    }
 }
