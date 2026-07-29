@@ -25,6 +25,8 @@ public:
     double kappaValue() const;
     bool dewarpEnabled() const;
     int dewarpStrength() const;
+    bool noiseReductionEnabled() const;
+    int noiseReductionStrength() const;
     bool stretchEnabled() const;
     bool starReduceEnabled() const;
     int starReduceStrength() const;
@@ -87,6 +89,8 @@ private:
     QGroupBox* m_optimizeGroup = nullptr;
     QCheckBox* m_dewarpCheck = nullptr;
     QSlider* m_dewarpSlider = nullptr;
+    QCheckBox* m_noiseReductionCheck = nullptr;
+    QSlider* m_noiseReductionSlider = nullptr;
     QCheckBox* m_stretchCheck = nullptr;
 
     // 缩星组

@@ -2,6 +2,8 @@
 #include "core/ImageBufferUtils.h"
 #include "core/ImageExporter.h"
 #include "core/AutoOptimizeEngine.h"
+#include "core/NoiseReductionEngine.h"
+#include "core/PresetManager.h"
 #include "core/RawImageLoader.h"
 #include "core/ProcessingMemoryEstimator.h"
 #include "core/PreviewToneMapper.h"
@@ -12,6 +14,7 @@
 #include <QByteArray>
 #include <QColorSpace>
 #include <QCoreApplication>
+#include <QFile>
 #include <QTemporaryDir>
 
 #include <tiffio.h>
@@ -404,6 +407,16 @@ void testMemoryEstimator() {
     check(ProcessingMemoryEstimator::estimatePeakBytes(
               6000, 4000, dehazeOptions) > baseEstimate,
           "Dehaze should increase the estimated peak for full-resolution float planes");
+    ProcessingMemoryEstimator::EstimateOptions denoiseOptions = baseOptions;
+    denoiseOptions.noiseReduction = true;
+    check(ProcessingMemoryEstimator::estimatePeakBytes(
+              6000, 4000, denoiseOptions) >= baseEstimate,
+          "Denoise should never reduce the estimated pipeline peak");
+    ProcessingMemoryEstimator::EstimateOptions starOptions = baseOptions;
+    starOptions.starReduction = true;
+    check(ProcessingMemoryEstimator::estimatePeakBytes(
+              6000, 4000, starOptions) >= frameBytes * 8,
+          "Starless separation should reserve signed layer working buffers");
     ProcessingMemoryEstimator::EstimateOptions largerChunkOptions = baseOptions;
     largerChunkOptions.frameCount = 200;
     largerChunkOptions.chunkRows = 128;
@@ -647,6 +660,7 @@ void testStarDetectionAndReduction() {
         rgb[i * 3 + 2] = static_cast<uint16_t>(
             std::min(65535, static_cast<int>(luminance[i]) + 400));
     }
+    const std::vector<uint16_t> rgbInput = rgb;
     const uint16_t peakBefore = rgb[(16 * width + 18) * 3];
     const size_t faintCenterIndex =
         static_cast<size_t>(62 * width + 86) * 3;
@@ -670,14 +684,42 @@ void testStarDetectionAndReduction() {
     check(rgb[faintCenterIndex] <
               backgroundBefore +
                   (faintPeakBefore - backgroundBefore) / 4,
-          "Strong reduction should fade faint compact stars into the background");
+          "Strong reduction should fade faint compact stars into the background "
+          "(before=" + std::to_string(faintPeakBefore) +
+          ", after=" + std::to_string(rgb[faintCenterIndex]) +
+          ", background=" + std::to_string(backgroundBefore) + ")");
     for (int channel = 0; channel < 3; ++channel) {
         check(std::abs(static_cast<int>(rgb[faintCenterIndex + channel]) -
                        coloredBackground[channel]) < 300,
-              "Removed stars should inherit the local RGB background color");
+              "Removed stars should inherit the local RGB background color "
+              "(channel=" + std::to_string(channel) +
+              ", output=" +
+              std::to_string(rgb[faintCenterIndex + channel]) +
+              ", background=" +
+              std::to_string(coloredBackground[channel]) + ")");
     }
     check(rgb[(16 * width + 18) * 3] > backgroundBefore + 1000,
           "Strong reduction should retain a visible core for prominent stars");
+    const auto redAt = [&](int x, int y) {
+        return rgb[(static_cast<size_t>(y) * width + x) * 3];
+    };
+    check(redAt(18, 16) >= redAt(19, 16) &&
+              redAt(19, 16) >= redAt(20, 16) &&
+              redAt(20, 16) >= redAt(21, 16),
+          "Reduced bright stars should keep a monotonic radial profile without rings");
+    check(std::abs(static_cast<int>(redAt(20, 16)) -
+                   static_cast<int>(redAt(18, 18))) < 500,
+          "Round Minimum should keep axial and diagonal star radii comparable");
+    const size_t brightCenter = static_cast<size_t>(16 * width + 18) * 3;
+    const int redExcess =
+        static_cast<int>(rgb[brightCenter]) - coloredBackground[0];
+    const int greenExcess =
+        static_cast<int>(rgb[brightCenter + 1]) - coloredBackground[1];
+    const int blueExcess =
+        static_cast<int>(rgb[brightCenter + 2]) - coloredBackground[2];
+    check(std::max({redExcess, greenExcess, blueExcess}) -
+              std::min({redExcess, greenExcess, blueExcess}) < 300,
+          "Signed star-layer recomposition should not create colored star cores");
     const size_t brightPixelsAfter = static_cast<size_t>(std::count_if(
         rgb.begin(), rgb.end(),
         [](uint16_t value) { return value > 5000; })) / 3;
@@ -688,7 +730,13 @@ void testStarDetectionAndReduction() {
               reductionStats.stronglySuppressedStars > 0 &&
               reductionStats.affectedPixels > 0 &&
               reductionStats.radiusScale < 1.0,
-          "Star reduction should report useful processing diagnostics");
+          "Star reduction should report useful processing diagnostics "
+          "(detected=" + std::to_string(reductionStats.detectedStars) +
+          ", processed=" + std::to_string(reductionStats.processedStars) +
+          ", suppressed=" +
+          std::to_string(reductionStats.stronglySuppressedStars) +
+          ", affected=" + std::to_string(reductionStats.affectedPixels) +
+          ", scale=" + std::to_string(reductionStats.radiusScale) + ")");
     check(std::all_of(rgb.begin(), rgb.end(),
                       [backgroundBefore](uint16_t value) {
                           return value >= backgroundBefore;
@@ -696,6 +744,189 @@ void testStarDetectionAndReduction() {
           "Local-background reduction should not create black holes");
     check(!StarReducer::reduce(rgb, width + 1, height, 50),
           "Star reduction should reject mismatched dimensions");
+
+    std::vector<uint16_t> reduced40 = rgbInput;
+    std::vector<uint16_t> reduced70 = rgbInput;
+    std::vector<uint16_t> zeroStrength = rgbInput;
+    check(StarReducer::reduce(reduced40, width, height, 40) &&
+              StarReducer::reduce(reduced70, width, height, 70),
+          "Intermediate star-reduction strengths should process successfully");
+    check(reduced40[faintCenterIndex] >= reduced70[faintCenterIndex] &&
+              reduced70[faintCenterIndex] >= rgb[faintCenterIndex],
+          "Increasing star-reduction strength should monotonically suppress faint stars");
+    check(StarReducer::reduce(zeroStrength, width, height, 0) &&
+              zeroStrength == rgbInput,
+          "Zero star-reduction strength should be an exact no-op");
+
+    std::vector<uint16_t> overlapLuminance(width * height, 1200);
+    addGaussianStar(overlapLuminance, width, height,
+                    46.0, 36.0, 1.8, 30000.0);
+    addGaussianStar(overlapLuminance, width, height,
+                    50.0, 36.0, 1.6, 24000.0);
+    std::vector<uint16_t> overlapRgb(overlapLuminance.size() * 3);
+    for (size_t pixel = 0; pixel < overlapLuminance.size(); ++pixel) {
+        overlapRgb[pixel * 3] = overlapLuminance[pixel];
+        overlapRgb[pixel * 3 + 1] = overlapLuminance[pixel];
+        overlapRgb[pixel * 3 + 2] = overlapLuminance[pixel];
+    }
+    std::vector<uint16_t> repeated = overlapRgb;
+    check(StarReducer::reduce(overlapRgb, width, height, 80) &&
+              StarReducer::reduce(repeated, width, height, 80),
+          "Overlapping-star reduction should complete");
+    check(overlapRgb == repeated,
+          "Overlapping-star reduction should be deterministic");
+    check(std::all_of(overlapRgb.begin(), overlapRgb.end(),
+                      [](uint16_t value) { return value >= 1200; }),
+          "Overlapping star masks should not create dark holes");
+}
+
+void testNoiseReduction() {
+    constexpr int width = 96;
+    constexpr int height = 64;
+    constexpr int splitX = width / 2;
+    std::vector<uint16_t> noisy(static_cast<size_t>(width) * height * 3);
+    std::mt19937 random(12345);
+    std::normal_distribution<double> luminanceNoise(0.0, 650.0);
+    std::normal_distribution<double> colorNoise(0.0, 900.0);
+
+    for (int y = 0; y < height; ++y) {
+        for (int x = 0; x < width; ++x) {
+            const int base = x < splitX ? 9000 : 29000;
+            const double common = luminanceNoise(random);
+            const size_t pixel = static_cast<size_t>(y) * width + x;
+            noisy[pixel * 3] = static_cast<uint16_t>(std::clamp(
+                base + common + colorNoise(random), 0.0, 65535.0));
+            noisy[pixel * 3 + 1] = static_cast<uint16_t>(std::clamp(
+                base + common, 0.0, 65535.0));
+            noisy[pixel * 3 + 2] = static_cast<uint16_t>(std::clamp(
+                base + common + colorNoise(random), 0.0, 65535.0));
+        }
+    }
+
+    const auto variance = [&](const std::vector<uint16_t>& image,
+                              bool chroma) {
+        std::vector<double> samples;
+        for (int y = 8; y < height - 8; ++y) {
+            for (int x = 8; x < splitX - 8; ++x) {
+                const size_t base =
+                    (static_cast<size_t>(y) * width + x) * 3;
+                samples.push_back(chroma
+                    ? static_cast<double>(image[base]) - image[base + 1]
+                    : (image[base] * 0.2126 +
+                       image[base + 1] * 0.7152 +
+                       image[base + 2] * 0.0722));
+            }
+        }
+        double mean = 0.0;
+        for (double sample : samples) mean += sample;
+        mean /= samples.size();
+        double squared = 0.0;
+        for (double sample : samples) {
+            const double delta = sample - mean;
+            squared += delta * delta;
+        }
+        return squared / samples.size();
+    };
+    const auto regionLuminance = [&](const std::vector<uint16_t>& image,
+                                     int x0, int x1) {
+        double sum = 0.0;
+        size_t count = 0;
+        for (int y = 8; y < height - 8; ++y) {
+            for (int x = x0; x < x1; ++x) {
+                const size_t base =
+                    (static_cast<size_t>(y) * width + x) * 3;
+                sum += image[base] * 0.2126 +
+                    image[base + 1] * 0.7152 +
+                    image[base + 2] * 0.0722;
+                ++count;
+            }
+        }
+        return sum / count;
+    };
+
+    std::vector<uint16_t> denoised;
+    check(NoiseReductionEngine::denoiseRgb(
+              noisy, width, height, 55, denoised),
+          "Multiscale RGB denoise should accept a valid image");
+    check(variance(denoised, false) < variance(noisy, false) * 0.65,
+          "Denoise should substantially reduce flat-field luminance variance");
+    check(variance(denoised, true) < variance(noisy, true) * 0.45,
+          "Denoise should suppress chroma speckle more strongly than luminance");
+
+    const double inputContrast =
+        regionLuminance(noisy, splitX + 8, width - 8) -
+        regionLuminance(noisy, 8, splitX - 8);
+    const double outputContrast =
+        regionLuminance(denoised, splitX + 8, width - 8) -
+        regionLuminance(denoised, 8, splitX - 8);
+    check(outputContrast > inputContrast * 0.98,
+          "Denoise should preserve broad edge contrast");
+    check(std::abs(regionLuminance(denoised, 8, splitX - 8) -
+                   regionLuminance(noisy, 8, splitX - 8)) < 20.0,
+          "Denoise should preserve the mean level of a flat field");
+
+    std::vector<uint16_t> hydrogenAlpha(
+        static_cast<size_t>(width) * height * 3);
+    std::mt19937 haRandom(67890);
+    std::normal_distribution<double> haNoise(0.0, 300.0);
+    const double centerX = width / 2.0;
+    const double centerY = height / 2.0;
+    for (int y = 0; y < height; ++y) {
+        for (int x = 0; x < width; ++x) {
+            const double dx = x - centerX;
+            const double dy = y - centerY;
+            const double redNebula =
+                3500.0 * std::exp(-(dx * dx + dy * dy) / (2.0 * 7.0 * 7.0));
+            const size_t pixel = static_cast<size_t>(y) * width + x;
+            hydrogenAlpha[pixel * 3] = static_cast<uint16_t>(std::clamp(
+                7000.0 + redNebula + haNoise(haRandom), 0.0, 65535.0));
+            hydrogenAlpha[pixel * 3 + 1] = static_cast<uint16_t>(std::clamp(
+                6500.0 + haNoise(haRandom), 0.0, 65535.0));
+            hydrogenAlpha[pixel * 3 + 2] = static_cast<uint16_t>(std::clamp(
+                6200.0 + haNoise(haRandom), 0.0, 65535.0));
+        }
+    }
+    const auto redNebulaContrast = [&](const std::vector<uint16_t>& image) {
+        double core = 0.0;
+        double background = 0.0;
+        size_t coreCount = 0;
+        size_t backgroundCount = 0;
+        for (int y = 0; y < height; ++y) {
+            for (int x = 0; x < width; ++x) {
+                const double distance =
+                    std::hypot(x - centerX, y - centerY);
+                const size_t base =
+                    (static_cast<size_t>(y) * width + x) * 3;
+                const double redExcess =
+                    static_cast<double>(image[base]) - image[base + 1];
+                if (distance <= 4.0) {
+                    core += redExcess;
+                    ++coreCount;
+                } else if (distance >= 18.0 && distance <= 24.0) {
+                    background += redExcess;
+                    ++backgroundCount;
+                }
+            }
+        }
+        return core / coreCount - background / backgroundCount;
+    };
+    std::vector<uint16_t> denoisedHa;
+    check(NoiseReductionEngine::denoiseRgb(
+              hydrogenAlpha, width, height, 55, denoisedHa),
+          "Denoise should process a red nebular structure");
+    check(redNebulaContrast(denoisedHa) >=
+              redNebulaContrast(hydrogenAlpha) * 0.85,
+          "Denoise should preserve BCF-modified-camera H-alpha color contrast");
+
+    std::vector<uint16_t> noOp;
+    check(NoiseReductionEngine::denoiseRgb(
+              noisy, width, height, 0, noOp) && noOp == noisy,
+          "Zero denoise strength should be an exact no-op");
+    std::vector<uint16_t> untouched = {1, 2, 3};
+    check(!NoiseReductionEngine::denoiseRgb(
+              noisy, width + 1, height, 50, untouched) &&
+              untouched == std::vector<uint16_t>({1, 2, 3}),
+          "Denoise should reject mismatched dimensions without changing output");
 }
 
 void testTiffIccProfile() {
@@ -731,6 +962,50 @@ void testTiffIccProfile() {
     TIFFClose(tiff);
 }
 
+void testPresetDenoisePersistence() {
+    const QList<Preset> builtins = PresetManager::builtinPresets();
+    check(builtins.size() == 2 &&
+              builtins[0].noiseReductionEnabled &&
+              builtins[0].noiseReductionStrength == 30 &&
+              builtins[1].noiseReductionEnabled &&
+              builtins[1].noiseReductionStrength == 35,
+          "Built-in presets should expose conservative denoise defaults");
+
+    QTemporaryDir directory;
+    check(directory.isValid(),
+          "Temporary preset directory should be available");
+    if (!directory.isValid()) return;
+    Preset original;
+    original.name = "Denoise round trip";
+    original.noiseReductionEnabled = true;
+    original.noiseReductionStrength = 42;
+    const QString path = directory.filePath("preset.json");
+    PresetManager::savePreset(original, path);
+    const Preset loaded = PresetManager::loadPreset(path);
+    check(loaded.name == original.name &&
+              loaded.noiseReductionEnabled &&
+              loaded.noiseReductionStrength == 42,
+          "JSON presets should persist denoise settings");
+
+    const QString legacyPath = directory.filePath("legacy.json");
+    QFile legacyFile(legacyPath);
+    check(legacyFile.open(QIODevice::WriteOnly) &&
+              legacyFile.write("{\"name\":\"Legacy\"}") > 0,
+          "Legacy preset fixture should be writable");
+    legacyFile.close();
+    const Preset legacy = PresetManager::loadPreset(legacyPath);
+    check(!legacy.noiseReductionEnabled &&
+              legacy.noiseReductionStrength == 30 &&
+              legacy.kappaValue == 2.5,
+          "Legacy presets without denoise fields should use defaults");
+
+    const Preset missing =
+        PresetManager::loadPreset(directory.filePath("missing.json"));
+    check(!missing.noiseReductionEnabled &&
+              missing.noiseReductionStrength == 30,
+          "Missing preset files should return initialized defaults");
+}
+
 void testRawApiValidation() {
     RawImageLoader loader;
     RawImageLoader::Metadata metadata;
@@ -756,7 +1031,9 @@ int main(int argc, char* argv[]) {
     testTransformDirection();
     testAlignmentEstimation();
     testStarDetectionAndReduction();
+    testNoiseReduction();
     testTiffIccProfile();
+    testPresetDenoisePersistence();
     testRawApiValidation();
 
     if (failures == 0) {

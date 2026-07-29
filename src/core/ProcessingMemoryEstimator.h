@@ -14,6 +14,7 @@ public:
         int frameCount = 0;
         int chunkRows = 32;
         bool skyGroundSeparation = false;
+        bool noiseReduction = false;
         bool dehaze = false;
         bool stretch = false;
         bool starReduction = false;

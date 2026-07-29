@@ -274,6 +274,26 @@ void ParamsPanel::setupUI() {
     auto* optimizeLayout = new QVBoxLayout(m_optimizeGroup);
     optimizeLayout->setSpacing(8);
 
+    auto* noiseReductionRow = new QHBoxLayout();
+    m_noiseReductionCheck = new QCheckBox(QString::fromUtf8("多尺度降噪"), m_optimizeGroup);
+    m_noiseReductionCheck->setToolTip(QString::fromUtf8(
+        "在线性堆栈结果上抑制亮度和色彩噪声\n"
+        "建议在去雾和曲线拉伸之前使用"));
+    m_noiseReductionCheck->setStyleSheet(
+        "QCheckBox { font-size: 12px; color: #C9D1D9; background-color: transparent; }"
+        "QCheckBox::indicator { width: 14px; height: 14px; }"
+    );
+    connect(m_noiseReductionCheck, &QCheckBox::toggled, this, &ParamsPanel::onCheckChanged);
+    noiseReductionRow->addWidget(m_noiseReductionCheck);
+    m_noiseReductionSlider = createSlider(0, 70, 30);
+    m_noiseReductionSlider->setEnabled(false);
+    m_noiseReductionSlider->setFixedWidth(100);
+    m_noiseReductionSlider->setToolTip(QString::fromUtf8("降噪强度：0 为保留全部细节，70 为最强"));
+    connect(m_noiseReductionSlider, &QSlider::valueChanged, this, &ParamsPanel::onSliderValueChanged);
+    connect(m_noiseReductionSlider, &QSlider::sliderReleased, this, &ParamsPanel::onSliderReleased);
+    noiseReductionRow->addWidget(m_noiseReductionSlider);
+    optimizeLayout->addLayout(noiseReductionRow);
+
     auto* dewarpRow = new QHBoxLayout();
     m_dewarpCheck = new QCheckBox(QString::fromUtf8("去雾"), m_optimizeGroup);
     m_dewarpCheck->setEnabled(true);
@@ -318,14 +338,16 @@ void ParamsPanel::setupUI() {
     starTitle->setStyleSheet("font-size: 12px; font-weight: bold; color: #E6EDF3; background-color: transparent;");
     starLayout->addWidget(starTitle);
 
-    auto* starDesc = new QLabel(QString::fromUtf8("缩小星点尺寸，突出星云细节"), m_starReduceGroup);
+    auto* starDesc = new QLabel(QString::fromUtf8("分离星层并缩小星点，突出银河细节"), m_starReduceGroup);
     starDesc->setStyleSheet("font-size: 10px; color: #8B949E; background-color: transparent; padding-bottom: 4px;");
     starLayout->addWidget(starDesc);
 
     auto* starRow = new QHBoxLayout();
     m_starReduceCheck = new QCheckBox(QString::fromUtf8("启用缩星"), m_starReduceGroup);
     m_starReduceCheck->setEnabled(true);
-    m_starReduceCheck->setToolTip(QString::fromUtf8("自动检测星点并缩小尺寸\n关闭时直接输出原始星点"));
+    m_starReduceCheck->setToolTip(QString::fromUtf8(
+        "自动建立无星层，仅对星层应用圆形 Minimum\n"
+        "关闭时保留原始星点"));
     m_starReduceCheck->setStyleSheet(m_dewarpCheck->styleSheet());
     connect(m_starReduceCheck, &QCheckBox::toggled, this, &ParamsPanel::onCheckChanged);
     starRow->addWidget(m_starReduceCheck);
@@ -342,8 +364,8 @@ void ParamsPanel::setupUI() {
     m_starReduceSlider->setEnabled(false);
     m_starReduceSlider->setFixedWidth(120);
     m_starReduceSlider->setToolTip(QString::fromUtf8(
-        "亮星收紧轮廓，小星重建为局部天空颜色\n"
-        "推荐从 70 开始调整"));
+        "40 温和收紧；70 强烈缩星；90 会清除多数暗弱小星\n"
+        "推荐在 100% 预览下调整"));
     connect(m_starReduceSlider, &QSlider::valueChanged, this, &ParamsPanel::onSliderValueChanged);
     connect(m_starReduceSlider, &QSlider::sliderReleased, this, &ParamsPanel::onSliderReleased);
     strengthRow->addWidget(m_starReduceSlider);
@@ -474,6 +496,9 @@ void ParamsPanel::setupUI() {
     // 连接复选框和滑块的启用/禁用关系
     connect(m_dewarpCheck, &QCheckBox::toggled, this, [this](bool checked) {
         m_dewarpSlider->setEnabled(checked);
+    });
+    connect(m_noiseReductionCheck, &QCheckBox::toggled, this, [this](bool checked) {
+        m_noiseReductionSlider->setEnabled(checked);
     });
     connect(m_starReduceCheck, &QCheckBox::toggled, this, [this](bool checked) {
         m_starReduceSlider->setEnabled(checked);
@@ -618,6 +643,8 @@ void ParamsPanel::onRestoreDefaults() {
     }
     m_dewarpCheck->setChecked(false);
     m_dewarpSlider->setValue(30);
+    m_noiseReductionCheck->setChecked(false);
+    m_noiseReductionSlider->setValue(30);
     m_stretchCheck->setChecked(false);
     m_starReduceCheck->setChecked(false);
     m_starReduceSlider->setValue(70);
@@ -651,6 +678,8 @@ void ParamsPanel::onSavePreset() {
     settings.setValue("kappaValue", m_kappaSlider->value());
     settings.setValue("dewarpEnabled", m_dewarpCheck->isChecked());
     settings.setValue("dewarpStrength", m_dewarpSlider->value());
+    settings.setValue("noiseReductionEnabled", m_noiseReductionCheck->isChecked());
+    settings.setValue("noiseReductionStrength", m_noiseReductionSlider->value());
     settings.setValue("stretchEnabled", m_stretchCheck->isChecked());
     settings.setValue("starReduceEnabled", m_starReduceCheck->isChecked());
     settings.setValue("starReduceStrength", m_starReduceSlider->value());
@@ -694,6 +723,8 @@ void ParamsPanel::saveCurrentSettings() {
     settings.setValue("kappaValue", m_kappaSlider->value());
     settings.setValue("dewarpEnabled", m_dewarpCheck->isChecked());
     settings.setValue("dewarpStrength", m_dewarpSlider->value());
+    settings.setValue("noiseReductionEnabled", m_noiseReductionCheck->isChecked());
+    settings.setValue("noiseReductionStrength", m_noiseReductionSlider->value());
     settings.setValue("stretchEnabled", m_stretchCheck->isChecked());
     settings.setValue("starReduceEnabled", m_starReduceCheck->isChecked());
     settings.setValue("starReduceStrength", m_starReduceSlider->value());
@@ -732,6 +763,8 @@ void ParamsPanel::loadPreset() {
     int kappa = settings.value("kappaValue", 25).toInt();
     bool dewarp = settings.value("dewarpEnabled", false).toBool();
     int dewarpStrength = settings.value("dewarpStrength", 30).toInt();
+    bool noiseReduction = settings.value("noiseReductionEnabled", false).toBool();
+    int noiseReductionStrength = settings.value("noiseReductionStrength", 30).toInt();
     bool stretch = settings.value("stretchEnabled", false).toBool();
     bool starReduce = settings.value("starReduceEnabled", false).toBool();
     int starReduceStrength = settings.value("starReduceStrength", 70).toInt();
@@ -751,14 +784,16 @@ void ParamsPanel::loadPreset() {
     QSignalBlocker blocker3(m_kappaSlider);
     QSignalBlocker blocker4(m_dewarpCheck);
     QSignalBlocker blocker5(m_dewarpSlider);
-    QSignalBlocker blocker6(m_stretchCheck);
-    QSignalBlocker blocker7(m_starReduceCheck);
-    QSignalBlocker blocker8(m_starReduceSlider);
-    QSignalBlocker blocker9(m_outputFormat);
-    QSignalBlocker blocker11(m_presetCombo);
-    QSignalBlocker blocker12(m_skyGroundCheck);
-    QSignalBlocker blocker13(m_skyGroundMode);
-    QSignalBlocker blocker14(m_featherSlider);
+    QSignalBlocker blocker6(m_noiseReductionCheck);
+    QSignalBlocker blocker7(m_noiseReductionSlider);
+    QSignalBlocker blocker8(m_stretchCheck);
+    QSignalBlocker blocker9(m_starReduceCheck);
+    QSignalBlocker blocker10(m_starReduceSlider);
+    QSignalBlocker blocker11(m_outputFormat);
+    QSignalBlocker blocker12(m_presetCombo);
+    QSignalBlocker blocker13(m_skyGroundCheck);
+    QSignalBlocker blocker14(m_skyGroundMode);
+    QSignalBlocker blocker15(m_featherSlider);
 
     m_alignMethod->setCurrentIndex(alignIndex);
     m_stackAlgorithm->setCurrentIndex(stackIndex);
@@ -767,6 +802,9 @@ void ParamsPanel::loadPreset() {
     m_dewarpCheck->setChecked(dewarp);
     m_dewarpSlider->setValue(dewarpStrength);
     m_dewarpSlider->setEnabled(dewarp);
+    m_noiseReductionCheck->setChecked(noiseReduction);
+    m_noiseReductionSlider->setValue(noiseReductionStrength);
+    m_noiseReductionSlider->setEnabled(noiseReduction);
     m_stretchCheck->setChecked(stretch);
     m_starReduceCheck->setChecked(starReduce);
     m_starReduceSlider->setValue(starReduceStrength);
@@ -815,6 +853,8 @@ void ParamsPanel::onPresetChanged(int index) {
             preset.kappaValue = settings.value("kappaValue", 25).toInt() / 10.0;
             preset.dewarpEnabled = settings.value("dewarpEnabled", false).toBool();
             preset.dewarpStrength = settings.value("dewarpStrength", 30).toInt();
+            preset.noiseReductionEnabled = settings.value("noiseReductionEnabled", false).toBool();
+            preset.noiseReductionStrength = settings.value("noiseReductionStrength", 30).toInt();
             preset.stretchEnabled = settings.value("stretchEnabled", false).toBool();
             preset.starReduceEnabled = settings.value("starReduceEnabled", false).toBool();
             preset.starReduceStrength = settings.value("starReduceStrength", 70).toInt();
@@ -853,10 +893,12 @@ void ParamsPanel::applyPreset(const Preset& preset) {
     QSignalBlocker blocker3(m_kappaSlider);
     QSignalBlocker blocker4(m_dewarpCheck);
     QSignalBlocker blocker5(m_dewarpSlider);
-    QSignalBlocker blocker6(m_stretchCheck);
-    QSignalBlocker blocker7(m_starReduceCheck);
-    QSignalBlocker blocker8(m_starReduceSlider);
-    QSignalBlocker blocker9(m_outputFormat);
+    QSignalBlocker blocker6(m_noiseReductionCheck);
+    QSignalBlocker blocker7(m_noiseReductionSlider);
+    QSignalBlocker blocker8(m_stretchCheck);
+    QSignalBlocker blocker9(m_starReduceCheck);
+    QSignalBlocker blocker10(m_starReduceSlider);
+    QSignalBlocker blocker11(m_outputFormat);
 
     // Align method
     if (preset.alignMethod == "star") m_alignMethod->setCurrentIndex(0);
@@ -878,6 +920,11 @@ void ParamsPanel::applyPreset(const Preset& preset) {
     m_dewarpCheck->setChecked(preset.dewarpEnabled);
     m_dewarpSlider->setValue(preset.dewarpStrength);
     m_dewarpSlider->setEnabled(preset.dewarpEnabled);
+
+    // Denoise is applied to the linear stacked image before dehaze/stretch.
+    m_noiseReductionCheck->setChecked(preset.noiseReductionEnabled);
+    m_noiseReductionSlider->setValue(preset.noiseReductionStrength);
+    m_noiseReductionSlider->setEnabled(preset.noiseReductionEnabled);
 
     // Stretch
     m_stretchCheck->setChecked(preset.stretchEnabled);
@@ -931,6 +978,14 @@ bool ParamsPanel::dewarpEnabled() const {
 
 int ParamsPanel::dewarpStrength() const {
     return m_dewarpSlider ? m_dewarpSlider->value() : 0;
+}
+
+bool ParamsPanel::noiseReductionEnabled() const {
+    return m_noiseReductionCheck ? m_noiseReductionCheck->isChecked() : false;
+}
+
+int ParamsPanel::noiseReductionStrength() const {
+    return m_noiseReductionSlider ? m_noiseReductionSlider->value() : 30;
 }
 
 bool ParamsPanel::stretchEnabled() const {

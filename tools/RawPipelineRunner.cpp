@@ -68,6 +68,10 @@ int main(int argc, char* argv[]) {
         "memory-budget-mib",
         "Override the automatic memory budget in MiB; 0 keeps automatic mode.",
         "mib", "0");
+    const QCommandLineOption denoiseOption(
+        "denoise-strength",
+        "Enable linear RGB multiscale denoise at strength 1-70; 0 disables it.",
+        "value", "0");
     const QCommandLineOption dehazeOption(
         "dehaze-strength",
         "Enable RGB-linked dehaze at strength 1-100; 0 disables it.",
@@ -81,7 +85,8 @@ int main(int argc, char* argv[]) {
         "value", "0");
     parser.addOptions({inputOption, outputOption, limitOption, referenceOption,
                        methodOption, kappaOption, memoryBudgetOption,
-                       dehazeOption, stretchOption, starReduceOption});
+                       denoiseOption, dehazeOption, stretchOption,
+                       starReduceOption});
     parser.process(application);
 
     const QString input = QDir(parser.value(inputOption)).absolutePath();
@@ -106,6 +111,9 @@ int main(int argc, char* argv[]) {
     bool memoryBudgetOk = false;
     const qulonglong memoryBudgetMiB =
         parser.value(memoryBudgetOption).toULongLong(&memoryBudgetOk);
+    bool denoiseOk = false;
+    const int denoiseStrength =
+        parser.value(denoiseOption).toInt(&denoiseOk);
     bool dehazeOk = false;
     const int dehazeStrength = parser.value(dehazeOption).toInt(&dehazeOk);
     bool starReduceOk = false;
@@ -115,6 +123,7 @@ int main(int argc, char* argv[]) {
     const QString method = parser.value(methodOption).toLower();
     if (!limitOk || limit < 0 || !referenceOk || referenceIndex < -1 ||
         !kappaOk || kappa <= 0.0 || !memoryBudgetOk ||
+        !denoiseOk || denoiseStrength < 0 || denoiseStrength > 70 ||
         !dehazeOk || dehazeStrength < 0 || dehazeStrength > 100 ||
         !starReduceOk || starReduceStrength < 0 ||
         starReduceStrength > 100 ||
@@ -122,7 +131,8 @@ int main(int argc, char* argv[]) {
             std::numeric_limits<uint64_t>::max() / (1024ULL * 1024ULL) ||
         !validMethod(method)) {
         std::cerr << "Invalid --limit, --reference-index, --method, --kappa, "
-                     "--memory-budget-mib, --dehaze-strength, or "
+                     "--memory-budget-mib, --denoise-strength, "
+                     "--dehaze-strength, or "
                      "--star-reduce-strength.\n";
         return 2;
     }
@@ -149,6 +159,7 @@ int main(int argc, char* argv[]) {
     }
     ProcessingMemoryEstimator::EstimateOptions estimateOptions;
     estimateOptions.frameCount = files.size();
+    estimateOptions.noiseReduction = denoiseStrength > 0;
     estimateOptions.dehaze = dehazeStrength > 0;
     estimateOptions.stretch = stretchEnabled;
     estimateOptions.starReduction = starReduceStrength > 0;
@@ -164,6 +175,8 @@ int main(int argc, char* argv[]) {
     params.outputFormat = "tiff16";
     params.outputPath = output;
     params.memoryBudgetBytes = requestedMemoryBudgetBytes;
+    params.noiseReductionEnabled = denoiseStrength > 0;
+    params.noiseReductionStrength = denoiseStrength;
     params.dewarpEnabled = dehazeStrength > 0;
     params.dewarpStrength = dehazeStrength;
     params.stretchEnabled = stretchEnabled;
@@ -203,7 +216,7 @@ int main(int argc, char* argv[]) {
     worker.wait();
 
     QJsonObject report;
-    report["schemaVersion"] = 2;
+    report["schemaVersion"] = 3;
     report["toolVersion"] = QCoreApplication::applicationVersion();
     report["generatedAt"] = QDateTime::currentDateTimeUtc().toString(Qt::ISODate);
     report["input"] = input;
@@ -212,6 +225,7 @@ int main(int argc, char* argv[]) {
     report["referenceFile"] = QFileInfo(files[referenceIndex]).fileName();
     report["method"] = method;
     report["kappa"] = kappa;
+    report["denoiseStrength"] = denoiseStrength;
     report["dehazeStrength"] = dehazeStrength;
     report["stretchEnabled"] = stretchEnabled;
     report["starReduceStrength"] = starReduceStrength;

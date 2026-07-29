@@ -6,6 +6,7 @@
 #include <array>
 #include <climits>
 #include <cmath>
+#include <limits>
 
 namespace {
 
@@ -20,51 +21,25 @@ uint16_t median(std::vector<uint16_t>& values) {
         (static_cast<uint32_t>(lower) + values[middle]) / 2);
 }
 
-double sampleBilinear(const std::vector<uint16_t>& image,
-                      int width, int height, double x, double y) {
-    if (x < 0.0 || y < 0.0 ||
-        x >= static_cast<double>(width - 1) ||
-        y >= static_cast<double>(height - 1)) {
-        return 0.0;
-    }
-    const int x0 = static_cast<int>(std::floor(x));
-    const int y0 = static_cast<int>(std::floor(y));
-    const double fx = x - x0;
-    const double fy = y - y0;
-    const double top =
-        image[static_cast<size_t>(y0) * width + x0] * (1.0 - fx) +
-        image[static_cast<size_t>(y0) * width + x0 + 1] * fx;
-    const double bottom =
-        image[static_cast<size_t>(y0 + 1) * width + x0] * (1.0 - fx) +
-        image[static_cast<size_t>(y0 + 1) * width + x0 + 1] * fx;
-    return top * (1.0 - fy) + bottom * fy;
+uint16_t rgbLuminance(const uint16_t* rgb) {
+    return static_cast<uint16_t>(
+        (static_cast<uint32_t>(rgb[0]) * 13933 +
+         static_cast<uint32_t>(rgb[1]) * 46871 +
+         static_cast<uint32_t>(rgb[2]) * 4732) /
+        65536);
 }
 
-double sampleRgbBilinear(const std::vector<uint16_t>& image,
-                         int width, int height, double x, double y,
-                         int channel) {
-    if (x < 0.0 || y < 0.0 ||
-        x >= static_cast<double>(width - 1) ||
-        y >= static_cast<double>(height - 1)) {
-        return 0.0;
-    }
-    const int x0 = static_cast<int>(std::floor(x));
-    const int y0 = static_cast<int>(std::floor(y));
-    const double fx = x - x0;
-    const double fy = y - y0;
-    const auto valueAt = [&](int px, int py) {
-        return static_cast<double>(
-            image[(static_cast<size_t>(py) * width + px) * 3 + channel]);
-    };
-    const double top =
-        valueAt(x0, y0) * (1.0 - fx) + valueAt(x0 + 1, y0) * fx;
-    const double bottom =
-        valueAt(x0, y0 + 1) * (1.0 - fx) +
-        valueAt(x0 + 1, y0 + 1) * fx;
-    return top * (1.0 - fy) + bottom * fy;
+uint16_t positiveLayerLuminance(const int32_t* rgb) {
+    const int64_t weighted =
+        static_cast<int64_t>(rgb[0]) * 13933 +
+        static_cast<int64_t>(rgb[1]) * 46871 +
+        static_cast<int64_t>(rgb[2]) * 4732;
+    return static_cast<uint16_t>(std::clamp<int64_t>(
+        weighted / 65536, 0, 65535));
 }
 
 struct BackgroundColor {
+    bool valid = false;
     uint16_t luminance = 0;
     std::array<uint16_t, 3> rgb = {};
 };
@@ -94,18 +69,22 @@ BackgroundColor localBackground(const std::vector<uint16_t>& luminance,
             const double dx = x - star.x;
             const double dy = y - star.y;
             const double distanceSquared = dx * dx + dy * dy;
-            if (distanceSquared >= innerSquared &&
-                distanceSquared <= outerSquared) {
-                const size_t pixel = static_cast<size_t>(y) * width + x;
-                luminanceSamples.push_back(luminance[pixel]);
-                for (int channel = 0; channel < 3; ++channel) {
-                    channelSamples[channel].push_back(
-                        rgb[pixel * 3 + channel]);
-                }
+            if (distanceSquared < innerSquared ||
+                distanceSquared > outerSquared) {
+                continue;
+            }
+            const size_t pixel = static_cast<size_t>(y) * width + x;
+            luminanceSamples.push_back(luminance[pixel]);
+            for (int channel = 0; channel < 3; ++channel) {
+                channelSamples[channel].push_back(
+                    rgb[pixel * 3 + channel]);
             }
         }
     }
+
     BackgroundColor background;
+    if (luminanceSamples.size() < 8) return background;
+    background.valid = true;
     background.luminance = median(luminanceSamples);
     for (int channel = 0; channel < 3; ++channel) {
         background.rgb[channel] = median(channelSamples[channel]);
@@ -113,17 +92,65 @@ BackgroundColor localBackground(const std::vector<uint16_t>& luminance,
     return background;
 }
 
-double smoothMask(double distance, double radius) {
+double featheredFootprint(double distance, double radius) {
     if (distance >= radius) return 0.0;
-    const double normalized = distance / radius;
-    const double smoothstep =
-        normalized * normalized * (3.0 - 2.0 * normalized);
-    return 1.0 - smoothstep;
+    const double feather = std::min(1.25, radius * 0.45);
+    const double innerRadius = std::max(0.0, radius - feather);
+    if (distance <= innerRadius) return 1.0;
+    const double t = std::clamp(
+        (radius - distance) / std::max(0.01, feather), 0.0, 1.0);
+    return t * t * (3.0 - 2.0 * t);
 }
 
 double smoothstep01(double value) {
     const double clamped = std::clamp(value, 0.0, 1.0);
     return clamped * clamped * (3.0 - 2.0 * clamped);
+}
+
+void erodeRound(const std::vector<int32_t>& layer,
+                const std::vector<uint16_t>& luminance,
+                int width, int height, int radius,
+                std::vector<int32_t>& eroded) {
+    eroded.resize(layer.size());
+    const int radiusSquared = radius * radius;
+    for (int y = 0; y < height; ++y) {
+        for (int x = 0; x < width; ++x) {
+            const size_t pixel = static_cast<size_t>(y) * width + x;
+            size_t darkestPixel = pixel;
+            uint16_t darkest = luminance[pixel];
+            for (int dy = -radius; dy <= radius; ++dy) {
+                for (int dx = -radius; dx <= radius; ++dx) {
+                    if (dx * dx + dy * dy > radiusSquared) continue;
+                    const int sampleX = x + dx;
+                    const int sampleY = y + dy;
+                    if (sampleX < 0 || sampleX >= width ||
+                        sampleY < 0 || sampleY >= height) {
+                        continue;
+                    }
+                    const size_t sample =
+                        static_cast<size_t>(sampleY) * width + sampleX;
+                    if (luminance[sample] < darkest) {
+                        darkest = luminance[sample];
+                        darkestPixel = sample;
+                    }
+                }
+            }
+            for (int channel = 0; channel < 3; ++channel) {
+                eroded[pixel * 3 + channel] =
+                    layer[darkestPixel * 3 + channel];
+            }
+        }
+    }
+}
+
+int32_t blendLayerSample(int32_t first, int32_t second, double amount) {
+    return static_cast<int32_t>(std::lround(
+        first * (1.0 - amount) + second * amount));
+}
+
+uint16_t blendImageSample(uint16_t first, uint16_t second, double amount) {
+    return static_cast<uint16_t>(std::lround(
+        first * (1.0 - amount) + second * amount));
 }
 
 } // namespace
@@ -136,19 +163,17 @@ bool StarReducer::reduce(std::vector<uint16_t>& image, int width, int height,
         return false;
     }
 
-    const int pixelCount = width * height;
-    const size_t expectedSize = static_cast<size_t>(pixelCount) * 3;
-    if (image.size() != expectedSize || strength < 0) return false;
+    const size_t pixelCount = static_cast<size_t>(width) * height;
+    if (pixelCount > std::numeric_limits<size_t>::max() / 3 ||
+        image.size() != pixelCount * 3 || strength < 0) {
+        return false;
+    }
     if (strength == 0) return true;
     strength = std::min(strength, 100);
 
     std::vector<uint16_t> originalLuminance(pixelCount);
-    for (int pixel = 0; pixel < pixelCount; ++pixel) {
-        const uint32_t red = image[pixel * 3];
-        const uint32_t green = image[pixel * 3 + 1];
-        const uint32_t blue = image[pixel * 3 + 2];
-        originalLuminance[pixel] = static_cast<uint16_t>(
-            (red * 299 + green * 587 + blue * 114) / 1000);
+    for (size_t pixel = 0; pixel < pixelCount; ++pixel) {
+        originalLuminance[pixel] = rgbLuminance(&image[pixel * 3]);
     }
 
     StarDetector detector;
@@ -187,67 +212,25 @@ bool StarReducer::reduce(std::vector<uint16_t>& image, int width, int height,
     }
     if (filteredStars.empty()) return true;
 
-    const double normalizedStrength = strength / 100.0;
-    // Radius contraction alone does not remove tiny stars because their center
-    // remains a bright sample. Reduce the common bright-star amplitude and add
-    // a rank-aware fade for the numerous faint stars. This mirrors the normal
-    // photographic goal: retain prominent stars while simplifying dense fields.
-    const double radiusScale = 1.0 - normalizedStrength * 0.75;
-    const double brightStarAmplitude = 1.0 - normalizedStrength * 0.55;
-    const double fadeProgress = std::clamp(
-        (normalizedStrength - 0.20) / 0.65, 0.0, 1.0);
-    if (stats) stats->radiusScale = radiusScale;
-
-    // Every proposal is derived from the immutable source. Overlapping masks
-    // keep the strongest reduction, so processing order cannot create rings.
-    std::vector<uint16_t> outputLuminance = originalLuminance;
-    std::vector<uint16_t> outputRgb = image;
-    for (size_t starIndex = 0;
-         starIndex < filteredStars.size(); ++starIndex) {
-        const StarPoint& star = filteredStars[starIndex];
-        const double rank = filteredStars.size() <= 1
-            ? 0.0
-            : static_cast<double>(starIndex) /
-                static_cast<double>(filteredStars.size() - 1);
-        // The detector returns stars in descending flux order. The smooth
-        // transition avoids a visible threshold between retained and removed
-        // stars. Compactness helps suppress genuinely tiny stars without
-        // erasing an unusually bright compact star outright.
-        const double aggressiveFade = smoothstep01(
-            (normalizedStrength - 0.45) / 0.45);
-        const double minimumRankSpan = std::min(
-            1.0, 3.0 / static_cast<double>(filteredStars.size()));
-        const double preserveFraction = std::max(
-            minimumRankSpan,
-            0.45 * (1.0 - aggressiveFade) +
-                0.01 * aggressiveFade);
-        const double transitionWidth = std::max(
-            minimumRankSpan,
-            0.40 * (1.0 - aggressiveFade) +
-                0.02 * aggressiveFade);
-        const double faintness = smoothstep01(
-            (rank - preserveFraction) / transitionWidth);
-        const double compactness =
-            1.0 - smoothstep01((star.fwhm - 1.5) / 4.0);
-        const double smallStarScore = std::max(
-            faintness, compactness * (0.25 + 0.75 * faintness));
-        const double survival = std::clamp(
-            1.0 - fadeProgress * 1.35 * smallStarScore, 0.0, 1.0);
-        const double amplitudeScale =
-            brightStarAmplitude * survival;
-        if (stats && survival <= 0.15) {
-            ++stats->stronglySuppressedStars;
-        }
-
-        const double maskRadius = std::clamp(star.fwhm * 1.6, 2.5, 12.0);
-        const double backgroundInner =
-            std::clamp(star.fwhm * 1.2, 1.5, maskRadius * 0.8);
+    // Build an explicit starless layer from immutable input. The center of each
+    // footprint is fully replaced with its local annulus median; only the outer
+    // ~1 px is feathered. For overlaps, keep the darkest valid proposal.
+    std::vector<uint16_t> starless = image;
+    std::vector<uint16_t> starlessLuminance = originalLuminance;
+    for (const StarPoint& star : filteredStars) {
+        const double footprintRadius =
+            std::clamp(star.fwhm * 1.5, 2.0, 12.0);
+        const double annulusInner = footprintRadius + 1.0;
+        const double annulusOuter =
+            annulusInner + std::max(2.0, star.fwhm * 0.75);
         const BackgroundColor background = localBackground(
             originalLuminance, image, width, height, star,
-            backgroundInner, maskRadius);
+            annulusInner, annulusOuter);
+        if (!background.valid) continue;
+
         const double noiseFloor =
-            std::max(2.0, background.luminance * 0.002);
-        const int radius = static_cast<int>(std::ceil(maskRadius));
+            std::max(8.0, background.luminance * 0.002);
+        const int radius = static_cast<int>(std::ceil(footprintRadius));
         const int centerX = static_cast<int>(std::lround(star.x));
         const int centerY = static_cast<int>(std::lround(star.y));
         const int x0 = std::max(0, centerX - radius);
@@ -257,67 +240,147 @@ bool StarReducer::reduce(std::vector<uint16_t>& image, int width, int height,
 
         for (int y = y0; y <= y1; ++y) {
             for (int x = x0; x <= x1; ++x) {
-                const double dx = x - star.x;
-                const double dy = y - star.y;
-                const double distance = std::hypot(dx, dy);
-                if (distance >= maskRadius) continue;
+                const double distance = std::hypot(x - star.x, y - star.y);
+                const double weight =
+                    featheredFootprint(distance, footprintRadius);
+                if (weight <= 0.0) continue;
+                const size_t pixel = static_cast<size_t>(y) * width + x;
+                if (originalLuminance[pixel] <=
+                    background.luminance + noiseFloor) {
+                    continue;
+                }
 
-                const size_t index = static_cast<size_t>(y) * width + x;
-                const double original = originalLuminance[index];
-                // Never alter dark dust or texture at/below the local annulus
-                // background. This is the black-hole guard.
-                if (original <= background.luminance + noiseFloor) continue;
-
-                const double sourceX = star.x + dx / radiusScale;
-                const double sourceY = star.y + dy / radiusScale;
-                const double sampled =
-                    sampleBilinear(originalLuminance, width, height,
-                                   sourceX, sourceY);
-                const double starSignal =
-                    std::max(0.0, sampled - background.luminance);
-                const double contracted =
-                    background.luminance + starSignal * amplitudeScale;
-                const double maskWeight =
-                    smoothMask(distance, maskRadius);
-                const double proposal = std::min(
-                    original,
-                    original * (1.0 - maskWeight) +
-                        contracted * maskWeight);
-                const uint16_t proposedLuminance =
-                    static_cast<uint16_t>(std::lround(
-                        std::clamp(proposal, 0.0, 65535.0)));
-                if (proposedLuminance >= outputLuminance[index]) continue;
-
-                outputLuminance[index] = proposedLuminance;
+                std::array<uint16_t, 3> proposal = {};
                 for (int channel = 0; channel < 3; ++channel) {
-                    const double sampledChannel = sampleRgbBilinear(
-                        image, width, height, sourceX, sourceY, channel);
-                    const double channelSignal = std::max(
-                        0.0, sampledChannel - background.rgb[channel]);
-                    const double contractedChannel =
-                        background.rgb[channel] +
-                        channelSignal * amplitudeScale;
-                    const double originalChannel =
-                        image[index * 3 + channel];
-                    const double proposedChannel =
-                        originalChannel * (1.0 - maskWeight) +
-                        contractedChannel * maskWeight;
-                    outputRgb[index * 3 + channel] =
-                        static_cast<uint16_t>(std::lround(std::clamp(
-                            proposedChannel, 0.0, 65535.0)));
+                    proposal[channel] = blendImageSample(
+                        image[pixel * 3 + channel],
+                        background.rgb[channel], weight);
+                }
+                const uint16_t proposalLuminance =
+                    rgbLuminance(proposal.data());
+                if (proposalLuminance >= starlessLuminance[pixel]) continue;
+                starlessLuminance[pixel] = proposalLuminance;
+                for (int channel = 0; channel < 3; ++channel) {
+                    starless[pixel * 3 + channel] = proposal[channel];
                 }
             }
         }
     }
 
+    // Keep the layer signed. A local RGB background can be brighter than the
+    // source in one channel even when its luminance is lower. Preserving that
+    // negative component makes starless + stars an exact color reconstruction
+    // before the Minimum operation.
+    std::vector<int32_t> starLayer(image.size());
+    std::vector<uint16_t> starLayerLuminance(pixelCount);
+    for (size_t pixel = 0; pixel < pixelCount; ++pixel) {
+        for (int channel = 0; channel < 3; ++channel) {
+            starLayer[pixel * 3 + channel] =
+                static_cast<int32_t>(image[pixel * 3 + channel]) -
+                static_cast<int32_t>(starless[pixel * 3 + channel]);
+        }
+        starLayerLuminance[pixel] =
+            positiveLayerLuminance(&starLayer[pixel * 3]);
+    }
+
+    std::vector<int32_t> erodedRadiusOne;
+    erodeRound(starLayer, starLayerLuminance,
+               width, height, 1, erodedRadiusOne);
+
+    const double normalizedStrength = strength / 100.0;
+    // Values around 0.3-1.2 px cover normal photographic reduction. The upper
+    // end extends to 2 px so the existing 70-100 "strong/near-clear" range can
+    // remove undersampled stars instead of merely lowering their peaks.
+    const double effectiveRadius = normalizedStrength * 2.0;
+    const bool useSecondRadius = effectiveRadius > 1.0;
+    const double interpolation = useSecondRadius
+        ? effectiveRadius - 1.0 : effectiveRadius;
+
+    std::vector<uint16_t> starPeaks;
+    starPeaks.reserve(filteredStars.size());
+    for (const StarPoint& star : filteredStars) {
+        const int x = std::clamp(
+            static_cast<int>(std::lround(star.x)), 0, width - 1);
+        const int y = std::clamp(
+            static_cast<int>(std::lround(star.y)), 0, height - 1);
+        starPeaks.push_back(
+            starLayerLuminance[static_cast<size_t>(y) * width + x]);
+    }
+    std::vector<uint16_t> orderedStarPeaks = starPeaks;
+    const double typicalStarPeak = median(orderedStarPeaks);
+    const double clearProgress =
+        smoothstep01((normalizedStrength - 0.55) / 0.45);
+    const double residualFloor =
+        typicalStarPeak * 0.75 * clearProgress;
+
+    if (useSecondRadius) {
+        for (size_t pixel = 0; pixel < pixelCount; ++pixel) {
+            starLayerLuminance[pixel] =
+                positiveLayerLuminance(&erodedRadiusOne[pixel * 3]);
+        }
+        // Reuse the original layer buffer for radius 2. Applying the radius-1
+        // disk twice produces the same round diamond footprint at this scale.
+        erodeRound(erodedRadiusOne, starLayerLuminance,
+                   width, height, 1, starLayer);
+    }
+
+    for (size_t pixel = 0; pixel < pixelCount; ++pixel) {
+        std::array<int32_t, 3> blended = {};
+        for (int channel = 0; channel < 3; ++channel) {
+            const size_t index = pixel * 3 + channel;
+            if (useSecondRadius) {
+                blended[channel] = blendLayerSample(
+                    erodedRadiusOne[index], starLayer[index], interpolation);
+            } else {
+                blended[channel] = blendLayerSample(
+                    starLayer[index], erodedRadiusOne[index], interpolation);
+            }
+        }
+        const uint16_t blendedLuminance =
+            positiveLayerLuminance(blended.data());
+        const double retainedFraction = blendedLuminance <= residualFloor
+            ? 0.0
+            : (blendedLuminance - residualFloor) / blendedLuminance;
+        for (int channel = 0; channel < 3; ++channel) {
+            starLayer[pixel * 3 + channel] =
+                static_cast<int32_t>(std::lround(
+                    blended[channel] * retainedFraction));
+        }
+    }
+
+    for (size_t index = 0; index < image.size(); ++index) {
+        const int64_t recombined =
+            static_cast<int64_t>(starless[index]) + starLayer[index];
+        image[index] = static_cast<uint16_t>(
+            std::clamp<int64_t>(recombined, 0, 65535));
+    }
+
     if (stats) {
-        for (size_t pixel = 0; pixel < outputLuminance.size(); ++pixel) {
-            if (outputLuminance[pixel] < originalLuminance[pixel]) {
+        stats->radiusScale = std::max(
+            0.0, 1.0 - effectiveRadius /
+                std::max(1.0, stats->averageInputFwhm));
+        for (size_t pixel = 0; pixel < pixelCount; ++pixel) {
+            if (rgbLuminance(&image[pixel * 3]) <
+                originalLuminance[pixel]) {
                 ++stats->affectedPixels;
+            }
+        }
+        for (size_t starIndex = 0;
+             starIndex < filteredStars.size(); ++starIndex) {
+            const StarPoint& star = filteredStars[starIndex];
+            const int x = std::clamp(
+                static_cast<int>(std::lround(star.x)), 0, width - 1);
+            const int y = std::clamp(
+                static_cast<int>(std::lround(star.y)), 0, height - 1);
+            const size_t pixel = static_cast<size_t>(y) * width + x;
+            const uint16_t processedPeak =
+                positiveLayerLuminance(&starLayer[pixel * 3]);
+            if (starPeaks[starIndex] > 0 &&
+                processedPeak <= starPeaks[starIndex] * 0.15) {
+                ++stats->stronglySuppressedStars;
             }
         }
     }
 
-    image = std::move(outputRgb);
     return true;
 }

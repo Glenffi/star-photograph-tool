@@ -18,8 +18,9 @@ struct StarReductionStats {
 /**
  * @brief 缩星处理器
  *
- * 基于低阈值星点检测、局部 RGB 背景估计和 PSF 径向收缩的方案。
- * 亮星收紧轮廓，暗弱小星随强度提高逐渐融入周围天空颜色。
+ * 先用局部 RGB 背景建立无星层，再从原图分离出有符号星层。圆形
+ * Minimum（形态学腐蚀）只作用于星层，随后与无星层重新合成。
+ * 这让小于腐蚀核的暗弱星点真正消失，同时保护银河和地景纹理。
  */
 class StarReducer {
 public:
@@ -29,7 +30,8 @@ public:
      * @param image     输入/输出 16-bit RGB 图像数据（interleaved R,G,B）
      * @param width     图像宽度
      * @param height    图像高度
-     * @param strength  缩星强度 0-100（40 温和，70 强烈，90 接近清星）
+     * @param strength  缩星强度 0-100，对应约 0-2 px 圆形腐蚀半径；
+     *                  70 以上会逐步清除腐蚀后残留的弱小星点
      * @return true 处理成功；false 参数校验失败或内部错误
      */
     static bool reduce(std::vector<uint16_t>& image, int width, int height,

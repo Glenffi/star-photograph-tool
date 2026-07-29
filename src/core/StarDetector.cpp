@@ -286,7 +286,11 @@ bool StarDetector::detect(const std::vector<uint16_t>& image, int width, int hei
         for (auto& cell : grid) {
             if (!cell.empty()) {
                 std::sort(cell.begin(), cell.end(), [](const Candidate& a, const Candidate& b) {
-                    return a.response > b.response;
+                    if (a.response != b.response) {
+                        return a.response > b.response;
+                    }
+                    if (a.y != b.y) return a.y < b.y;
+                    return a.x < b.x;
                 });
                 // 每格最多取 10 个，避免单格垄断
                 size_t perCell = std::min<size_t>(cell.size(), 10);
@@ -351,7 +355,11 @@ bool StarDetector::detect(const std::vector<uint16_t>& image, int width, int hei
         // 不按空间均衡：直接按响应排序后截断
         std::sort(candidates.begin(), candidates.end(),
                   [](const Candidate& a, const Candidate& b) {
-            return a.response > b.response;
+            if (a.response != b.response) {
+                return a.response > b.response;
+            }
+            if (a.y != b.y) return a.y < b.y;
+            return a.x < b.x;
         });
         size_t fitCount = std::min(candidates.size(), options.maxCandidates);
         selectedCandidates.reserve(fitCount);
@@ -376,7 +384,9 @@ bool StarDetector::detect(const std::vector<uint16_t>& image, int width, int hei
         if (!options.spatiallyBalanced) {
             std::sort(stars.begin(), stars.end(),
                       [](const StarPoint& a, const StarPoint& b) {
-                return a.flux > b.flux;
+                if (a.flux != b.flux) return a.flux > b.flux;
+                if (a.y != b.y) return a.y < b.y;
+                return a.x < b.x;
             });
         }
         if (stars.size() > options.maxStars) {

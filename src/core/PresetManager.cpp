@@ -17,6 +17,8 @@ QList<Preset> PresetManager::builtinPresets() {
     // explicit correction instead of applying it to every nightscape.
     milkyWay.dewarpEnabled = false;
     milkyWay.dewarpStrength = 25;
+    milkyWay.noiseReductionEnabled = true;
+    milkyWay.noiseReductionStrength = 30;
     milkyWay.stretchEnabled = true;
     milkyWay.starReduceEnabled = false;
     milkyWay.starReduceStrength = 70;
@@ -31,6 +33,8 @@ QList<Preset> PresetManager::builtinPresets() {
     deepSky.kappaValue = 2.5;
     deepSky.dewarpEnabled = false;
     deepSky.dewarpStrength = 20;
+    deepSky.noiseReductionEnabled = true;
+    deepSky.noiseReductionStrength = 35;
     deepSky.stretchEnabled = true;
     deepSky.starReduceEnabled = false;
     deepSky.starReduceStrength = 70;
@@ -48,6 +52,8 @@ void PresetManager::savePreset(const Preset& preset, const QString& path) {
     obj["kappaValue"] = preset.kappaValue;
     obj["dewarpEnabled"] = preset.dewarpEnabled;
     obj["dewarpStrength"] = preset.dewarpStrength;
+    obj["noiseReductionEnabled"] = preset.noiseReductionEnabled;
+    obj["noiseReductionStrength"] = preset.noiseReductionStrength;
     obj["stretchEnabled"] = preset.stretchEnabled;
     obj["starReduceEnabled"] = preset.starReduceEnabled;
     obj["starReduceStrength"] = preset.starReduceStrength;
@@ -76,6 +82,8 @@ Preset PresetManager::loadPreset(const QString& path) {
     preset.kappaValue = obj["kappaValue"].toDouble(2.5);
     preset.dewarpEnabled = obj["dewarpEnabled"].toBool(false);
     preset.dewarpStrength = obj["dewarpStrength"].toInt(30);
+    preset.noiseReductionEnabled = obj["noiseReductionEnabled"].toBool(false);
+    preset.noiseReductionStrength = obj["noiseReductionStrength"].toInt(30);
     preset.stretchEnabled = obj["stretchEnabled"].toBool(false);
     preset.starReduceEnabled = obj["starReduceEnabled"].toBool(false);
     preset.starReduceStrength = obj["starReduceStrength"].toInt(70);

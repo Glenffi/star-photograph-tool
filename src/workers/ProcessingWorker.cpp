@@ -4,6 +4,7 @@
 #include "core/ImageAligner.h"
 #include "core/ImageBufferUtils.h"
 #include "core/ImageExporter.h"
+#include "core/NoiseReductionEngine.h"
 #include "core/ProcessingMemoryEstimator.h"
 #include "core/RawImageLoader.h"
 #include "core/StackingEngine.h"
@@ -346,6 +347,7 @@ void ProcessingWorker::run() {
     ProcessingMemoryEstimator::EstimateOptions estimateOptions;
     estimateOptions.frameCount = m_files.size();
     estimateOptions.skyGroundSeparation = m_params.skyGroundSepEnabled;
+    estimateOptions.noiseReduction = m_params.noiseReductionEnabled;
     estimateOptions.dehaze = m_params.dewarpEnabled;
     estimateOptions.stretch = m_params.stretchEnabled;
     estimateOptions.starReduction = m_params.starReduceEnabled;
@@ -359,7 +361,7 @@ void ProcessingWorker::run() {
     if (estimatedBytes == 0 || estimatedBytes > budgetBytes) {
         m_errorString = QString("预计需要约 %1 内存，当前安全预算为 %2"
                                 "（系统当前可用约 %3）。"
-                                "请减少帧数或关闭天地分离。")
+                                "请减少帧数，或关闭天地分离、去雾、降噪、缩星等高内存功能。")
                             .arg(formatMemoryBytes(estimatedBytes))
                             .arg(formatMemoryBytes(budgetBytes))
                             .arg(formatMemoryBytes(memoryInfo.availableBytes));
@@ -639,6 +641,20 @@ void ProcessingWorker::run() {
         m_height = height;
     }
 
+    if (m_params.noiseReductionEnabled &&
+        m_params.noiseReductionStrength > 0) {
+        emit stageMessage("多尺度降噪...");
+        std::vector<uint16_t> denoised;
+        if (!NoiseReductionEngine::denoiseRgb(
+                resultRgb, width, height,
+                m_params.noiseReductionStrength, denoised)) {
+            m_errorString = "RGB 多尺度降噪失败";
+            return;
+        }
+        resultRgb = std::move(denoised);
+        emit progress(85);
+    }
+
     if (m_params.dewarpEnabled || m_params.stretchEnabled) {
         emit stageMessage("自动优化...");
         if (m_params.dewarpEnabled) {
@@ -671,7 +687,7 @@ void ProcessingWorker::run() {
             qWarning() << "缩星处理失败，继续导出未缩星结果";
         } else {
             emit stageMessage(QString(
-                "缩星完成：处理 %1 颗星，其中 %2 颗小星被显著压低")
+                "缩星完成：处理 %1 颗星，其中 %2 颗弱小星被清除或显著缩小")
                 .arg(m_starReductionStats.processedStars)
                 .arg(m_starReductionStats.stronglySuppressedStars));
         }

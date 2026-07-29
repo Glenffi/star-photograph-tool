@@ -98,9 +98,12 @@ uint64_t ProcessingMemoryEstimator::estimatePeakBytes(
     };
     // Guided-filter dehaze owns many full-resolution float planes. The
     // equivalent counts include caller RGB/channel buffers and library margin.
-    if (!includeFrameEquivalents(options.dehaze, 15ULL) ||
+    if (!includeFrameEquivalents(options.noiseReduction, 6ULL) ||
+        !includeFrameEquivalents(options.dehaze, 15ULL) ||
         !includeFrameEquivalents(options.stretch, 4ULL) ||
-        !includeFrameEquivalents(options.starReduction, 6ULL)) {
+        // Starless RGB, signed RGB star layer and its eroded working buffer
+        // coexist with the caller-owned image and luminance planes.
+        !includeFrameEquivalents(options.starReduction, 8ULL)) {
         return 0;
     }
     return std::max({alignmentPeak, stackingPeak, postProcessPeak});

@@ -18,6 +18,8 @@ public:
     struct Params {
         QString stackMethod = "average";
         double kappaValue = 2.5;
+        bool noiseReductionEnabled = false;
+        int noiseReductionStrength = 30;
         bool dewarpEnabled = false;
         int dewarpStrength = 30;
         bool stretchEnabled = false;

@@ -5,15 +5,17 @@
 
 struct Preset {
     QString name;
-    QString alignMethod;
-    QString stackMethod;
-    double kappaValue;
-    bool dewarpEnabled;
-    int dewarpStrength;
-    bool stretchEnabled;
-    bool starReduceEnabled;
-    int starReduceStrength;
-    QString outputFormat;
+    QString alignMethod = "star";
+    QString stackMethod = "average";
+    double kappaValue = 2.5;
+    bool dewarpEnabled = false;
+    int dewarpStrength = 30;
+    bool noiseReductionEnabled = false;
+    int noiseReductionStrength = 30;
+    bool stretchEnabled = false;
+    bool starReduceEnabled = false;
+    int starReduceStrength = 70;
+    QString outputFormat = "tiff16";
 };
 
 class PresetManager {

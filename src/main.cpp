@@ -557,6 +557,10 @@ private slots:
         ProcessingWorker::Params params;
         params.stackMethod = m_paramsPanel->stackMethod();
         params.kappaValue = m_paramsPanel->kappaValue();
+        params.noiseReductionEnabled =
+            m_paramsPanel->noiseReductionEnabled();
+        params.noiseReductionStrength =
+            m_paramsPanel->noiseReductionStrength();
         params.dewarpEnabled = m_paramsPanel->dewarpEnabled();
         params.dewarpStrength = m_paramsPanel->dewarpStrength();
         params.stretchEnabled = m_paramsPanel->stretchEnabled();
