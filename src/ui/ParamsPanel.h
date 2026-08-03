@@ -23,6 +23,7 @@ public:
     QString alignMethod() const;
     QString stackMethod() const;
     double kappaValue() const;
+    bool autoRejectLowQualityFrames() const;
     bool photometricNormalizationEnabled() const;
     bool dewarpEnabled() const;
     int dewarpStrength() const;
@@ -85,6 +86,7 @@ private:
     QComboBox* m_stackAlgorithm = nullptr;
     QSlider* m_kappaSlider = nullptr;
     QLabel* m_kappaLabel = nullptr;
+    QCheckBox* m_autoRejectQualityCheck = nullptr;
     QCheckBox* m_photometricCheck = nullptr;
 
     // 自动优化组

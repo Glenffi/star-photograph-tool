@@ -546,17 +546,13 @@ private slots:
         if (refFrame.isEmpty() || !files.contains(refFrame)) {
             refFrame = m_projectPanel->referenceFramePath();
         }
-        if (refFrame.isEmpty()) {
-            // Without a quality score, the middle frame minimizes the maximum
-            // temporal drift to both ends of a fixed-tripod sequence.
-            refFrame = files.at(files.size() / 2);
-            m_projectPanel->setReferenceFrame(refFrame);
-        }
 
         // 2. 构建参数
         ProcessingWorker::Params params;
         params.stackMethod = m_paramsPanel->stackMethod();
         params.kappaValue = m_paramsPanel->kappaValue();
+        params.autoRejectLowQualityFrames =
+            m_paramsPanel->autoRejectLowQualityFrames();
         params.photometricNormalizationEnabled =
             m_paramsPanel->photometricNormalizationEnabled();
         params.noiseReductionEnabled =
@@ -627,11 +623,16 @@ private slots:
                 m_previewPanel->loadRgb16BitImage(m_cachedStackedData, m_cachedWidth, m_cachedHeight);
                 m_toolbar->enableExport(true);
                 int frameCount = m_cachedFrameCount;
+                const QString referenceName = QFileInfo(
+                    worker->selectedReferenceFrame()).fileName();
+                const int rejectedCount = worker->qualityRejectedFiles().size();
                 statusBar()->showMessage(
-                    QString("处理完成 — %1×%2 已堆栈 %3 帧")
+                    QString("处理完成 — %1×%2 已堆栈 %3 帧 | 参考 %4 | 排除 %5 帧")
                         .arg(m_cachedWidth)
                         .arg(m_cachedHeight)
-                        .arg(frameCount),
+                        .arg(frameCount)
+                        .arg(referenceName)
+                        .arg(rejectedCount),
                     5000
                 );
             } else {

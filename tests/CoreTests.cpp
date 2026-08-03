@@ -2,6 +2,7 @@
 #include "core/ImageBufferUtils.h"
 #include "core/ImageExporter.h"
 #include "core/AutoOptimizeEngine.h"
+#include "core/FrameQualityEvaluator.h"
 #include "core/NoiseReductionEngine.h"
 #include "core/PhotometricNormalizer.h"
 #include "core/PresetManager.h"
@@ -1015,6 +1016,73 @@ void testPhotometricNormalization() {
           "Photometric normalization should reject mismatched dimensions safely");
 }
 
+std::vector<uint16_t> qualityTestFrame(int width, int height,
+                                       double starSigma, int starStride,
+                                       unsigned seed) {
+    std::mt19937 generator(seed);
+    std::normal_distribution<double> noise(0.0, 45.0);
+    std::vector<uint16_t> image(static_cast<size_t>(width) * height);
+    for (int y = 0; y < height; ++y) {
+        for (int x = 0; x < width; ++x) {
+            const size_t index = static_cast<size_t>(y) * width + x;
+            // A strong smooth gradient represents horizon glow. Quality
+            // detection must remove it locally before estimating stars.
+            image[index] = static_cast<uint16_t>(std::clamp(
+                std::lround(2600.0 + x * 70.0 + y * 50.0 +
+                            noise(generator)),
+                0L, 65535L));
+        }
+    }
+    for (int y = 18; y < height - 18; y += starStride) {
+        for (int x = 18; x < width - 18; x += starStride) {
+            addGaussianStar(image, width, height,
+                            x + (y % 7) * 0.08,
+                            y + (x % 5) * 0.07,
+                            starSigma, 18000.0);
+        }
+    }
+    return image;
+}
+
+void testFrameQualitySelection() {
+    constexpr int width = 256;
+    constexpr int height = 160;
+    const std::vector<std::vector<uint16_t>> frames = {
+        qualityTestFrame(width, height, 1.35, 25, 1),
+        qualityTestFrame(width, height, 1.10, 25, 2),
+        qualityTestFrame(width, height, 1.40, 25, 3),
+        qualityTestFrame(width, height, 5.50, 60, 4),
+        qualityTestFrame(width, height, 1.30, 25, 5)
+    };
+    std::vector<FrameQualityMetrics> metrics(frames.size());
+    for (size_t index = 0; index < frames.size(); ++index) {
+        check(FrameQualityEvaluator::evaluate(
+                  frames[index], width, height, metrics[index]),
+              "Frame quality evaluator should accept a synthetic star field");
+    }
+    check(metrics[1].medianFwhm < metrics[3].medianFwhm,
+          "Frame quality metrics should distinguish sharp and defocused stars");
+    check(metrics[1].usableStars > metrics[3].usableStars,
+          "Frame quality metrics should detect star loss in a poor frame");
+
+    FrameQualitySelection selection;
+    check(FrameQualityEvaluator::selectSequence(
+              metrics, 2, true, selection),
+          "Frame quality selector should rank a valid sequence");
+    check(selection.referenceIndex == 1,
+          "Frame quality selector should prefer the sharpest well-populated frame");
+    check(selection.rejected.size() == frames.size() && selection.rejected[3],
+          "Frame quality selector should reject a severe defocus outlier");
+    check(std::count(selection.rejected.begin(), selection.rejected.end(), false) >= 2,
+          "Frame quality rejection should always retain a stackable sequence");
+
+    FrameQualityMetrics invalid;
+    check(!FrameQualityEvaluator::evaluate(
+              std::vector<uint16_t>({1, 2, 3}), width, height, invalid) &&
+              !invalid.valid,
+          "Frame quality evaluator should reject mismatched dimensions");
+}
+
 void testTiffIccProfile() {
     QTemporaryDir directory;
     check(directory.isValid(), "Temporary export directory should be available");
@@ -1063,6 +1131,7 @@ void testPresetDenoisePersistence() {
     if (!directory.isValid()) return;
     Preset original;
     original.name = "Denoise round trip";
+    original.autoRejectLowQualityFrames = false;
     original.photometricNormalizationEnabled = false;
     original.noiseReductionEnabled = true;
     original.noiseReductionStrength = 42;
@@ -1070,6 +1139,7 @@ void testPresetDenoisePersistence() {
     PresetManager::savePreset(original, path);
     const Preset loaded = PresetManager::loadPreset(path);
     check(loaded.name == original.name &&
+              !loaded.autoRejectLowQualityFrames &&
               !loaded.photometricNormalizationEnabled &&
               loaded.noiseReductionEnabled &&
               loaded.noiseReductionStrength == 42,
@@ -1082,7 +1152,8 @@ void testPresetDenoisePersistence() {
           "Legacy preset fixture should be writable");
     legacyFile.close();
     const Preset legacy = PresetManager::loadPreset(legacyPath);
-    check(legacy.photometricNormalizationEnabled &&
+    check(legacy.autoRejectLowQualityFrames &&
+              legacy.photometricNormalizationEnabled &&
               !legacy.noiseReductionEnabled &&
               legacy.noiseReductionStrength == 30 &&
               legacy.kappaValue == 2.5,
@@ -1122,6 +1193,7 @@ int main(int argc, char* argv[]) {
     testStarDetectionAndReduction();
     testNoiseReduction();
     testPhotometricNormalization();
+    testFrameQualitySelection();
     testTiffIccProfile();
     testPresetDenoisePersistence();
     testRawApiValidation();

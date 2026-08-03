@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/FrameQualityEvaluator.h"
 #include "core/SkyGroundMask.h"
 #include "core/StarReducer.h"
 
@@ -18,6 +19,7 @@ public:
     struct Params {
         QString stackMethod = "average";
         double kappaValue = 2.5;
+        bool autoRejectLowQualityFrames = true;
         bool photometricNormalizationEnabled = true;
         bool noiseReductionEnabled = false;
         int noiseReductionStrength = 30;
@@ -45,6 +47,12 @@ public:
     int cropOffsetX() const { return m_cropOffsetX; }
     int cropOffsetY() const { return m_cropOffsetY; }
     int stackedFrameCount() const { return m_frameCount; }
+    int selectedReferenceIndex() const { return m_selectedReferenceIndex; }
+    QString selectedReferenceFrame() const { return m_selectedReferenceFrame; }
+    const std::vector<FrameQualityMetrics>& frameQualityMetrics() const {
+        return m_frameQualityMetrics;
+    }
+    QStringList qualityRejectedFiles() const { return m_qualityRejectedFiles; }
     QString errorString() const { return m_errorString; }
     QString outputFile() const { return m_outputFile; }
     int affineFrameCount() const { return m_affineFrameCount; }
@@ -95,6 +103,10 @@ private:
     int m_cropOffsetX = 0;
     int m_cropOffsetY = 0;
     int m_frameCount = 0;
+    int m_selectedReferenceIndex = -1;
+    QString m_selectedReferenceFrame;
+    std::vector<FrameQualityMetrics> m_frameQualityMetrics;
+    QStringList m_qualityRejectedFiles;
     QString m_errorString;
     QString m_outputFile;
     int m_affineFrameCount = 0;

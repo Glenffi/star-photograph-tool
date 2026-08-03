@@ -176,6 +176,18 @@ void ParamsPanel::setupUI() {
     kappaRow->addWidget(m_kappaLabel);
     stackLayout->addLayout(kappaRow);
 
+    m_autoRejectQualityCheck = new QCheckBox(
+        QString::fromUtf8("自动排除严重差帧"), m_stackGroup);
+    m_autoRejectQualityCheck->setChecked(true);
+    m_autoRejectQualityCheck->setToolTip(QString::fromUtf8(
+        "通过轻量预览识别明显失焦、拖星或云层遮挡的离群帧；正常差异不会自动删除"));
+    m_autoRejectQualityCheck->setStyleSheet(
+        "QCheckBox { font-size: 12px; color: #C9D1D9; background-color: transparent; }"
+        "QCheckBox::indicator { width: 14px; height: 14px; }");
+    connect(m_autoRejectQualityCheck, &QCheckBox::toggled,
+            this, &ParamsPanel::onCheckChanged);
+    stackLayout->addWidget(m_autoRejectQualityCheck);
+
     m_photometricCheck = new QCheckBox(
         QString::fromUtf8("帧间光度匹配"), m_stackGroup);
     m_photometricCheck->setChecked(true);
@@ -661,6 +673,7 @@ void ParamsPanel::onRestoreDefaults() {
     m_starReduceCheck->setChecked(false);
     m_starReduceSlider->setValue(70);
     m_outputFormat->setCurrentIndex(0);
+    m_autoRejectQualityCheck->setChecked(true);
     m_photometricCheck->setChecked(true);
     // 重置天地分离
     m_skyGroundCheck->setChecked(false);
@@ -689,6 +702,8 @@ void ParamsPanel::onSavePreset() {
     settings.setValue("alignMethod", m_alignMethod->currentIndex());
     settings.setValue("stackMethod", m_stackAlgorithm->currentIndex());
     settings.setValue("kappaValue", m_kappaSlider->value());
+    settings.setValue("autoRejectLowQualityFrames",
+                      m_autoRejectQualityCheck->isChecked());
     settings.setValue("photometricNormalizationEnabled",
                       m_photometricCheck->isChecked());
     settings.setValue("dewarpEnabled", m_dewarpCheck->isChecked());
@@ -736,6 +751,8 @@ void ParamsPanel::saveCurrentSettings() {
     settings.setValue("alignMethod", m_alignMethod->currentIndex());
     settings.setValue("stackMethod", m_stackAlgorithm->currentIndex());
     settings.setValue("kappaValue", m_kappaSlider->value());
+    settings.setValue("autoRejectLowQualityFrames",
+                      m_autoRejectQualityCheck->isChecked());
     settings.setValue("photometricNormalizationEnabled",
                       m_photometricCheck->isChecked());
     settings.setValue("dewarpEnabled", m_dewarpCheck->isChecked());
@@ -778,6 +795,8 @@ void ParamsPanel::loadPreset() {
     int alignIndex = settings.value("alignMethod", 0).toInt();
     int stackIndex = settings.value("stackMethod", 0).toInt();
     int kappa = settings.value("kappaValue", 25).toInt();
+    bool autoRejectQuality =
+        settings.value("autoRejectLowQualityFrames", true).toBool();
     bool photometricNormalization =
         settings.value("photometricNormalizationEnabled", true).toBool();
     bool dewarp = settings.value("dewarpEnabled", false).toBool();
@@ -814,11 +833,13 @@ void ParamsPanel::loadPreset() {
     QSignalBlocker blocker14(m_skyGroundMode);
     QSignalBlocker blocker15(m_featherSlider);
     QSignalBlocker blocker16(m_photometricCheck);
+    QSignalBlocker blocker17(m_autoRejectQualityCheck);
 
     m_alignMethod->setCurrentIndex(alignIndex);
     m_stackAlgorithm->setCurrentIndex(stackIndex);
     m_kappaSlider->setValue(kappa);
     m_kappaLabel->setText(QString::number(kappa / 10.0, 'f', 1));
+    m_autoRejectQualityCheck->setChecked(autoRejectQuality);
     m_photometricCheck->setChecked(photometricNormalization);
     m_dewarpCheck->setChecked(dewarp);
     m_dewarpSlider->setValue(dewarpStrength);
@@ -872,6 +893,8 @@ void ParamsPanel::onPresetChanged(int index) {
                                  settings.value("stackMethod", 0).toInt() == 1 ? "average" :
                                  settings.value("stackMethod", 0).toInt() == 2 ? "kappa-sigma" : "winsorized";
             preset.kappaValue = settings.value("kappaValue", 25).toInt() / 10.0;
+            preset.autoRejectLowQualityFrames =
+                settings.value("autoRejectLowQualityFrames", true).toBool();
             preset.photometricNormalizationEnabled =
                 settings.value("photometricNormalizationEnabled", true).toBool();
             preset.dewarpEnabled = settings.value("dewarpEnabled", false).toBool();
@@ -923,6 +946,7 @@ void ParamsPanel::applyPreset(const Preset& preset) {
     QSignalBlocker blocker10(m_starReduceSlider);
     QSignalBlocker blocker11(m_outputFormat);
     QSignalBlocker blocker12(m_photometricCheck);
+    QSignalBlocker blocker13(m_autoRejectQualityCheck);
 
     // Align method
     if (preset.alignMethod == "star") m_alignMethod->setCurrentIndex(0);
@@ -939,6 +963,8 @@ void ParamsPanel::applyPreset(const Preset& preset) {
     int kappaInt = static_cast<int>(preset.kappaValue * 10 + 0.5);
     m_kappaSlider->setValue(kappaInt);
     m_kappaLabel->setText(QString::number(preset.kappaValue, 'f', 1));
+    m_autoRejectQualityCheck->setChecked(
+        preset.autoRejectLowQualityFrames);
     m_photometricCheck->setChecked(
         preset.photometricNormalizationEnabled);
 
@@ -996,6 +1022,11 @@ QString ParamsPanel::stackMethod() const {
 double ParamsPanel::kappaValue() const {
     if (!m_kappaSlider) return 2.5;
     return m_kappaSlider->value() / 10.0;
+}
+
+bool ParamsPanel::autoRejectLowQualityFrames() const {
+    return m_autoRejectQualityCheck
+        ? m_autoRejectQualityCheck->isChecked() : true;
 }
 
 bool ParamsPanel::photometricNormalizationEnabled() const {

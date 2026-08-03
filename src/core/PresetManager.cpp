@@ -50,6 +50,7 @@ void PresetManager::savePreset(const Preset& preset, const QString& path) {
     obj["alignMethod"] = preset.alignMethod;
     obj["stackMethod"] = preset.stackMethod;
     obj["kappaValue"] = preset.kappaValue;
+    obj["autoRejectLowQualityFrames"] = preset.autoRejectLowQualityFrames;
     obj["photometricNormalizationEnabled"] =
         preset.photometricNormalizationEnabled;
     obj["dewarpEnabled"] = preset.dewarpEnabled;
@@ -82,6 +83,8 @@ Preset PresetManager::loadPreset(const QString& path) {
     preset.alignMethod = obj["alignMethod"].toString("star");
     preset.stackMethod = obj["stackMethod"].toString("average");
     preset.kappaValue = obj["kappaValue"].toDouble(2.5);
+    preset.autoRejectLowQualityFrames =
+        obj["autoRejectLowQualityFrames"].toBool(true);
     preset.photometricNormalizationEnabled =
         obj["photometricNormalizationEnabled"].toBool(true);
     preset.dewarpEnabled = obj["dewarpEnabled"].toBool(false);

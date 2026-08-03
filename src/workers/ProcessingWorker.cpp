@@ -1,6 +1,7 @@
 #include "ProcessingWorker.h"
 
 #include "core/AutoOptimizeEngine.h"
+#include "core/FrameQualityEvaluator.h"
 #include "core/ImageAligner.h"
 #include "core/ImageBufferUtils.h"
 #include "core/ImageExporter.h"
@@ -18,6 +19,7 @@
 #include <QElapsedTimer>
 #include <QFile>
 #include <QFileInfo>
+#include <QImage>
 #include <QStorageInfo>
 #include <QTemporaryDir>
 
@@ -52,6 +54,58 @@ double medianValue(std::vector<double> values) {
     const double lower =
         *std::max_element(values.begin(), values.begin() + middle);
     return (lower + values[middle]) * 0.5;
+}
+
+bool previewToLuminance(const RawImageLoader::PreviewData& preview,
+                        std::vector<uint16_t>& luminance,
+                        int& width, int& height) {
+    QImage image;
+    if (preview.encoding == RawImageLoader::PreviewData::Encoding::Jpeg) {
+        if (preview.bytes.size() >
+            static_cast<size_t>(std::numeric_limits<int>::max())) {
+            return false;
+        }
+        image = QImage::fromData(
+            preview.bytes.data(), static_cast<int>(preview.bytes.size()), "JPEG");
+    } else {
+        if (preview.width <= 0 || preview.height <= 0 ||
+            preview.width > std::numeric_limits<int>::max() / 3 ||
+            static_cast<size_t>(preview.width) >
+                std::numeric_limits<size_t>::max() /
+                    static_cast<size_t>(preview.height) / 3) {
+            return false;
+        }
+        const size_t expected =
+            static_cast<size_t>(preview.width) * preview.height * 3;
+        if (preview.bytes.size() != expected) return false;
+        image = QImage(preview.bytes.data(), preview.width, preview.height,
+                       preview.width * 3, QImage::Format_RGB888).copy();
+    }
+    if (image.isNull()) return false;
+    image = image.convertToFormat(QImage::Format_RGB888);
+    constexpr int kQualityLongSide = 1200;
+    if (std::max(image.width(), image.height()) > kQualityLongSide) {
+        image = image.scaled(kQualityLongSide, kQualityLongSide,
+                             Qt::KeepAspectRatio,
+                             Qt::SmoothTransformation);
+    }
+    width = image.width();
+    height = image.height();
+    if (width <= 0 || height <= 0) return false;
+
+    luminance.resize(static_cast<size_t>(width) * height);
+    for (int y = 0; y < height; ++y) {
+        const uchar* row = image.constScanLine(y);
+        for (int x = 0; x < width; ++x) {
+            const uint32_t weighted =
+                static_cast<uint32_t>(row[x * 3]) * 13933 +
+                static_cast<uint32_t>(row[x * 3 + 1]) * 46871 +
+                static_cast<uint32_t>(row[x * 3 + 2]) * 4732;
+            const uint16_t value8 = static_cast<uint16_t>(weighted / 65536);
+            luminance[static_cast<size_t>(y) * width + x] = value8 * 257;
+        }
+    }
+    return true;
 }
 
 bool cropRgb(const std::vector<uint16_t>& source,
@@ -320,6 +374,10 @@ void ProcessingWorker::run() {
     m_cropOffsetX = 0;
     m_cropOffsetY = 0;
     m_frameCount = 0;
+    m_selectedReferenceIndex = -1;
+    m_selectedReferenceFrame.clear();
+    m_frameQualityMetrics.clear();
+    m_qualityRejectedFiles.clear();
     m_wasCancelled = false;
     m_outputFile.clear();
     m_affineFrameCount = 0;
@@ -348,7 +406,7 @@ void ProcessingWorker::run() {
     RawImageLoader loader;
     std::vector<RawImageLoader::Metadata> metadata;
     metadata.reserve(static_cast<size_t>(m_files.size()));
-    size_t referenceIndex = 0;
+    size_t explicitReferenceIndex = std::numeric_limits<size_t>::max();
     for (int i = 0; i < m_files.size(); ++i) {
         if (stopIfCancelled()) return;
         RawImageLoader::Metadata item;
@@ -357,8 +415,62 @@ void ProcessingWorker::run() {
                                 .arg(QFileInfo(m_files[i]).fileName());
             return;
         }
-        if (m_files[i] == m_referenceFrame) referenceIndex = static_cast<size_t>(i);
+        if (!m_referenceFrame.isEmpty() && m_files[i] == m_referenceFrame) {
+            explicitReferenceIndex = static_cast<size_t>(i);
+        }
         metadata.push_back(std::move(item));
+    }
+
+    const bool automaticReference =
+        explicitReferenceIndex == std::numeric_limits<size_t>::max();
+    size_t referenceIndex = automaticReference
+        ? static_cast<size_t>(m_files.size() / 2)
+        : explicitReferenceIndex;
+    std::vector<bool> qualityRejected(static_cast<size_t>(m_files.size()), false);
+    if (automaticReference || m_params.autoRejectLowQualityFrames) {
+        emit stageMessage("快速评估帧质量...");
+        m_frameQualityMetrics.resize(static_cast<size_t>(m_files.size()));
+        for (int i = 0; i < m_files.size(); ++i) {
+            if (stopIfCancelled()) return;
+            RawImageLoader::PreviewData preview;
+            std::vector<uint16_t> previewLuminance;
+            int previewWidth = 0;
+            int previewHeight = 0;
+            if (loader.loadPreview(m_files[i].toStdString(), 1600, preview) &&
+                previewToLuminance(preview, previewLuminance,
+                                   previewWidth, previewHeight)) {
+                FrameQualityEvaluator::evaluate(
+                    previewLuminance, previewWidth, previewHeight,
+                    m_frameQualityMetrics[static_cast<size_t>(i)]);
+            }
+            emit progress(static_cast<int>((i + 1) * 10.0 / m_files.size()));
+        }
+
+        FrameQualitySelection qualitySelection;
+        if (FrameQualityEvaluator::selectSequence(
+                m_frameQualityMetrics,
+                static_cast<size_t>(m_files.size() / 2),
+                m_params.autoRejectLowQualityFrames,
+                qualitySelection)) {
+            if (automaticReference) {
+                referenceIndex = qualitySelection.referenceIndex;
+            }
+            qualityRejected = std::move(qualitySelection.rejected);
+        }
+    }
+    // A manual reference is an explicit user decision and always remains in
+    // the sequence even if its preview metrics look unusual.
+    qualityRejected[referenceIndex] = false;
+    for (int i = 0; i < m_files.size(); ++i) {
+        if (qualityRejected[static_cast<size_t>(i)]) {
+            m_qualityRejectedFiles.push_back(m_files[i]);
+        }
+    }
+    m_selectedReferenceIndex = static_cast<int>(referenceIndex);
+    m_selectedReferenceFrame = m_files[m_selectedReferenceIndex];
+    if (automaticReference) {
+        emit stageMessage(QString("自动参考帧：%1")
+                              .arg(QFileInfo(m_selectedReferenceFrame).fileName()));
     }
 
     const int metadataWidth = metadata[referenceIndex].width;
@@ -372,7 +484,9 @@ void ProcessingWorker::run() {
     }
 
     ProcessingMemoryEstimator::EstimateOptions estimateOptions;
-    estimateOptions.frameCount = m_files.size();
+    const int activeInputFrameCount =
+        m_files.size() - m_qualityRejectedFiles.size();
+    estimateOptions.frameCount = activeInputFrameCount;
     estimateOptions.skyGroundSeparation = m_params.skyGroundSepEnabled;
     estimateOptions.noiseReduction = m_params.noiseReductionEnabled;
     estimateOptions.dehaze = m_params.dewarpEnabled;
@@ -395,7 +509,8 @@ void ProcessingWorker::run() {
         return;
     }
     const uint64_t scratchBytes = ProcessingMemoryEstimator::estimateScratchDiskBytes(
-        metadataWidth, metadataHeight, m_files.size(), m_params.skyGroundSepEnabled);
+        metadataWidth, metadataHeight, activeInputFrameCount,
+        m_params.skyGroundSepEnabled);
     const QStorageInfo temporaryStorage(QDir::tempPath());
     const qint64 availableScratchBytes = temporaryStorage.bytesAvailable();
     // Keep 10% headroom for filesystem metadata and the final exported image.
@@ -526,6 +641,7 @@ void ProcessingWorker::run() {
         static_cast<size_t>(m_files.size() - 1));
     for (int i = 0; i < m_files.size(); ++i) {
         if (stopIfCancelled()) return;
+        if (qualityRejected[static_cast<size_t>(i)]) continue;
         if (static_cast<size_t>(i) == referenceIndex) continue;
 
         RawImageLoader::ImageData sourceImage;

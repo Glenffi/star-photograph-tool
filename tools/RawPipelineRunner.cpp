@@ -11,6 +11,7 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QJsonDocument>
+#include <QJsonArray>
 #include <QJsonObject>
 #include <QSet>
 
@@ -58,7 +59,7 @@ int main(int argc, char* argv[]) {
     const QCommandLineOption limitOption("limit",
         "Use at most this many sorted RAW files.", "count", "0");
     const QCommandLineOption referenceOption("reference-index",
-        "Zero-based reference index; defaults to the middle selected frame.", "index", "-1");
+        "Zero-based reference index; -1 selects the best frame automatically.", "index", "-1");
     const QCommandLineOption methodOption("method",
         "Stack method: average, median, kappa-sigma, or winsorized.",
         "name", "kappa-sigma");
@@ -71,6 +72,9 @@ int main(int argc, char* argv[]) {
     const QCommandLineOption noPhotometricNormalizationOption(
         "no-photometric-normalization",
         "Disable frame-to-reference exposure and background color matching.");
+    const QCommandLineOption noQualityRejectionOption(
+        "no-quality-rejection",
+        "Keep severe quality outliers; automatic reference selection still runs.");
     const QCommandLineOption denoiseOption(
         "denoise-strength",
         "Enable linear RGB multiscale denoise at strength 1-70; 0 disables it.",
@@ -89,6 +93,7 @@ int main(int argc, char* argv[]) {
     parser.addOptions({inputOption, outputOption, limitOption, referenceOption,
                        methodOption, kappaOption, memoryBudgetOption,
                        noPhotometricNormalizationOption,
+                       noQualityRejectionOption,
                        denoiseOption, dehazeOption, stretchOption,
                        starReduceOption});
     parser.process(application);
@@ -149,7 +154,6 @@ int main(int argc, char* argv[]) {
         std::cerr << "At least two RAW files are required.\n";
         return 2;
     }
-    if (referenceIndex < 0) referenceIndex = files.size() / 2;
     if (referenceIndex >= files.size()) {
         std::cerr << "--reference-index is outside the selected sequence.\n";
         return 2;
@@ -179,6 +183,8 @@ int main(int argc, char* argv[]) {
     params.outputFormat = "tiff16";
     params.outputPath = output;
     params.memoryBudgetBytes = requestedMemoryBudgetBytes;
+    params.autoRejectLowQualityFrames =
+        !parser.isSet(noQualityRejectionOption);
     params.photometricNormalizationEnabled =
         !parser.isSet(noPhotometricNormalizationOption);
     params.noiseReductionEnabled = denoiseStrength > 0;
@@ -189,7 +195,9 @@ int main(int argc, char* argv[]) {
     params.starReduceEnabled = starReduceStrength > 0;
     params.starReduceStrength = starReduceStrength;
 
-    ProcessingWorker worker(files, files[referenceIndex], params);
+    const QString requestedReference = referenceIndex >= 0
+        ? files[referenceIndex] : QString();
+    ProcessingWorker worker(files, requestedReference, params);
     QObject::connect(&worker, &ProcessingWorker::stageMessage, &application,
                      [](const QString& message) {
                          std::cout << "[stage] " << message.toStdString() << std::endl;
@@ -210,7 +218,10 @@ int main(int argc, char* argv[]) {
         ProcessingMemoryEstimator::calculateEffectiveBudgetBytes(
             memoryInfo.safeBudgetBytes, requestedMemoryBudgetBytes);
     std::cout << "Frames: " << files.size()
-              << ", reference: " << QFileInfo(files[referenceIndex]).fileName().toStdString()
+              << ", reference: "
+              << (referenceIndex >= 0
+                      ? QFileInfo(files[referenceIndex]).fileName().toStdString()
+                      : std::string("automatic"))
               << ", method: " << method.toStdString()
               << ", estimated peak: " << estimatedBytes / kGiB << " GiB"
               << ", available memory: " << memoryInfo.availableBytes / kGiB << " GiB"
@@ -222,13 +233,47 @@ int main(int argc, char* argv[]) {
     worker.wait();
 
     QJsonObject report;
-    report["schemaVersion"] = 4;
+    report["schemaVersion"] = 5;
     report["toolVersion"] = QCoreApplication::applicationVersion();
     report["generatedAt"] = QDateTime::currentDateTimeUtc().toString(Qt::ISODate);
     report["input"] = input;
     report["selectedFrames"] = files.size();
-    report["referenceIndex"] = referenceIndex;
-    report["referenceFile"] = QFileInfo(files[referenceIndex]).fileName();
+    report["requestedReferenceIndex"] = referenceIndex;
+    report["referenceIndex"] = worker.selectedReferenceIndex();
+    report["referenceFile"] =
+        QFileInfo(worker.selectedReferenceFrame()).fileName();
+    report["autoQualityRejectionEnabled"] =
+        params.autoRejectLowQualityFrames;
+    const QStringList rejectedFiles = worker.qualityRejectedFiles();
+    report["qualityRejectedFrames"] = rejectedFiles.size();
+    const QSet<QString> rejectedSet(rejectedFiles.begin(), rejectedFiles.end());
+    QJsonArray qualityFrames;
+    const std::vector<FrameQualityMetrics>& qualityMetrics =
+        worker.frameQualityMetrics();
+    for (int index = 0; index < files.size(); ++index) {
+        QJsonObject quality;
+        quality["index"] = index;
+        quality["file"] = QFileInfo(files[index]).fileName();
+        quality["rejected"] = rejectedSet.contains(files[index]);
+        if (static_cast<size_t>(index) < qualityMetrics.size()) {
+            const FrameQualityMetrics& metrics =
+                qualityMetrics[static_cast<size_t>(index)];
+            quality["valid"] = metrics.valid;
+            quality["detectedStars"] = metrics.detectedStars;
+            quality["usableStars"] = metrics.usableStars;
+            quality["medianFwhm"] = metrics.medianFwhm;
+            quality["medianEllipticity"] = metrics.medianEllipticity;
+            quality["medianFlux"] = metrics.medianFlux;
+            quality["backgroundMedian"] = metrics.backgroundMedian;
+            quality["backgroundNoise"] = metrics.backgroundNoise;
+            quality["clippedFraction"] = metrics.clippedFraction;
+            quality["score"] = metrics.score;
+        } else {
+            quality["valid"] = false;
+        }
+        qualityFrames.append(quality);
+    }
+    report["frameQuality"] = qualityFrames;
     report["method"] = method;
     report["kappa"] = kappa;
     report["photometricNormalizationEnabled"] =
