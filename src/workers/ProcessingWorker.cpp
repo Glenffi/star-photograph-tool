@@ -29,6 +29,7 @@
 #include <cstring>
 #include <functional>
 #include <limits>
+#include <numeric>
 #include <utility>
 
 #ifdef Q_OS_MACOS
@@ -36,6 +37,29 @@
 #endif
 
 namespace {
+
+bool loadMaskPreview(const QString& path, QImage& image) {
+    RawImageLoader loader;
+    RawImageLoader::PreviewData preview;
+    constexpr int kMaskPreviewLongSide = 2400;
+    if (!loader.loadPreview(path.toStdString(), kMaskPreviewLongSide, preview)) {
+        return false;
+    }
+    if (preview.encoding == RawImageLoader::PreviewData::Encoding::Jpeg) {
+        image = QImage::fromData(preview.bytes.data(),
+                                 static_cast<int>(preview.bytes.size()), "JPEG");
+    } else if (preview.width > 0 && preview.height > 0) {
+        const QImage borrowed(preview.bytes.data(), preview.width, preview.height,
+                              preview.width * 3, QImage::Format_RGB888);
+        image = borrowed.copy();
+    }
+    if (image.isNull()) return false;
+    if (std::max(image.width(), image.height()) > kMaskPreviewLongSide) {
+        image = image.scaled(kMaskPreviewLongSide, kMaskPreviewLongSide,
+                             Qt::KeepAspectRatio, Qt::SmoothTransformation);
+    }
+    return !image.isNull();
+}
 
 QString formatMemoryBytes(uint64_t bytes) {
     constexpr double kMiB = 1024.0 * 1024.0;
@@ -784,15 +808,41 @@ void ProcessingWorker::run() {
     std::vector<uint8_t> mask;
     if (m_params.skyGroundSepEnabled) {
         emit stageMessage("生成天地蒙版...");
-        const bool maskReady = m_params.skyGroundMode == SkyGroundMask::AutoDetect
-            ? SkyGroundMask::autoDetect(referenceLuminance, width, height, mask,
-                                        m_params.featherRadius)
-            : SkyGroundMask::loadUserMask(m_params.userMaskPath.toStdString(),
-                                          width, height, mask, m_params.featherRadius);
+        bool maskReady = false;
+        if (m_params.skyGroundMode == SkyGroundMask::AutoDetect) {
+            QImage preview;
+            if (loadMaskPreview(m_selectedReferenceFrame, preview)) {
+                maskReady = SkyGroundMask::autoDetectPreview(
+                    preview, width, height, mask, m_params.featherRadius);
+            }
+            if (maskReady) {
+                m_skyGroundMaskSource = "embedded-preview";
+            } else {
+                maskReady = SkyGroundMask::autoDetect(
+                    referenceLuminance, width, height, mask,
+                    m_params.featherRadius);
+                if (maskReady) m_skyGroundMaskSource = "linear-fallback";
+            }
+        } else {
+            maskReady = SkyGroundMask::loadUserMask(
+                m_params.userMaskPath.toStdString(), width, height, mask,
+                m_params.featherRadius);
+            if (maskReady) m_skyGroundMaskSource = "user-mask";
+        }
         if (!maskReady) {
             m_errorString = m_params.skyGroundMode == SkyGroundMask::AutoDetect
                 ? "天地蒙版自动检测失败" : "无法加载用户蒙版";
             return;
+        }
+        const double maskSum = std::accumulate(mask.begin(), mask.end(), 0.0);
+        m_skyGroundSkyFraction = maskSum / (255.0 * mask.size());
+        if (!m_params.skyGroundMaskOutputPath.isEmpty()) {
+            const QImage borrowedMask(mask.data(), width, height, width,
+                                      QImage::Format_Grayscale8);
+            if (!borrowedMask.copy().save(m_params.skyGroundMaskOutputPath)) {
+                m_errorString = "无法保存天地蒙版诊断图";
+                return;
+            }
         }
         emit stageMessage("天地分离堆栈...");
     }

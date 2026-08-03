@@ -34,6 +34,9 @@ public:
         SkyGroundMask::Mode skyGroundMode = SkyGroundMask::AutoDetect;
         QString userMaskPath;
         int featherRadius = 20;
+        // Optional diagnostic artifact. The GUI leaves this empty; the sample
+        // runner uses it to preserve the exact mask consumed by stacking.
+        QString skyGroundMaskOutputPath;
         uint64_t memoryBudgetBytes = 0; // 0 selects the platform recommendation.
     };
 
@@ -81,6 +84,8 @@ public:
     const StarReductionStats& starReductionStats() const {
         return m_starReductionStats;
     }
+    double skyGroundSkyFraction() const { return m_skyGroundSkyFraction; }
+    QString skyGroundMaskSource() const { return m_skyGroundMaskSource; }
 
     void requestCancel();
 
@@ -126,4 +131,6 @@ private:
     std::atomic<bool> m_cancelRequested{false};
     bool m_wasCancelled = false;
     StarReductionStats m_starReductionStats;
+    double m_skyGroundSkyFraction = 0.0;
+    QString m_skyGroundMaskSource;
 };

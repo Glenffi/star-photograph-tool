@@ -9,14 +9,17 @@
 #include "core/RawImageLoader.h"
 #include "core/ProcessingMemoryEstimator.h"
 #include "core/PreviewToneMapper.h"
+#include "core/SkyGroundMask.h"
 #include "core/StackingEngine.h"
 #include "core/StarDetector.h"
 #include "core/StarReducer.h"
 
 #include <QByteArray>
+#include <QColor>
 #include <QColorSpace>
 #include <QCoreApplication>
 #include <QFile>
+#include <QImage>
 #include <QTemporaryDir>
 
 #include <tiffio.h>
@@ -1178,6 +1181,98 @@ void testRawApiValidation() {
           "Preview API should reject a non-positive requested size before I/O");
 }
 
+void testSkyGroundHorizonDetection() {
+    const auto runSyntheticScene = [](int width, int height, double baseRatio,
+                                      const std::string& label) {
+        std::vector<uint16_t> image(static_cast<size_t>(width) * height);
+        std::vector<int> expected(width);
+        for (int x = 0; x < width; ++x) {
+            const double phase = x * 2.0 * 3.14159265358979323846 / width;
+            const int ridge = static_cast<int>(std::round(
+                height * baseRatio + height * 0.045 * std::sin(phase) +
+                height * 0.025 * std::sin(phase * 3.0)));
+            expected[x] = ridge;
+            for (int y = 0; y < height; ++y) {
+                const size_t index = static_cast<size_t>(y) * width + x;
+                if (y < ridge) {
+                    image[index] = static_cast<uint16_t>(
+                        17000 + y * 7 + ((x * 13 + y * 3) % 31));
+                } else {
+                    image[index] = static_cast<uint16_t>(
+                        5500 + ((x * 97 + y * 53) % 3500));
+                }
+            }
+        }
+        for (int x = 12; x < width; x += 37) {
+            const int y = 10 + (x * 17) % std::max(12, height / 3);
+            if (y < expected[x]) {
+                image[static_cast<size_t>(y) * width + x] = 52000;
+            }
+        }
+
+        std::vector<uint8_t> mask;
+        check(SkyGroundMask::autoDetect(image, width, height, mask, 0),
+              label + " horizon should be detected");
+        if (mask.size() != image.size()) {
+            check(false, label + " mask should preserve image dimensions");
+            return;
+        }
+
+        double absoluteError = 0.0;
+        for (int x = 0; x < width; ++x) {
+            int boundary = 0;
+            while (boundary < height &&
+                   mask[static_cast<size_t>(boundary) * width + x] >= 128) {
+                ++boundary;
+            }
+            absoluteError += std::abs(boundary - expected[x]);
+        }
+        const double meanAbsoluteError = absoluteError / width;
+        check(meanAbsoluteError <= std::max(3.0, height * 0.025),
+              label + " detected horizon should follow the synthetic ridge");
+    };
+
+    runSyntheticScene(320, 200, 0.64, "Landscape");
+    runSyntheticScene(180, 320, 0.68, "Portrait");
+
+    const int width = 160;
+    const int height = 120;
+    const std::vector<uint16_t> flat(static_cast<size_t>(width) * height, 12000);
+    std::vector<uint8_t> mask;
+    check(!SkyGroundMask::autoDetect(flat, width, height, mask, 0),
+          "A flat frame without a credible horizon should be rejected");
+
+    QImage preview(160, 100, QImage::Format_RGB888);
+    for (int y = 0; y < preview.height(); ++y) {
+        uchar* row = preview.scanLine(y);
+        for (int x = 0; x < preview.width(); ++x) {
+            const uchar value = y < 64 ? 125 :
+                static_cast<uchar>(25 + (x * 7 + y * 3) % 25);
+            row[x * 3] = value;
+            row[x * 3 + 1] = value;
+            row[x * 3 + 2] = value;
+        }
+    }
+    check(SkyGroundMask::autoDetectPreview(preview, 320, 200, mask, 8) &&
+              mask.size() == 320U * 200U,
+          "Preview horizon detection should scale its mask to processing dimensions");
+    check(!SkyGroundMask::autoDetectPreview(preview, 200, 200, mask, 0),
+          "Preview detection should reject a mismatched target aspect ratio");
+
+    QTemporaryDir directory;
+    check(directory.isValid(), "Temporary mask directory should be available");
+    if (directory.isValid()) {
+        QImage alphaMask(2, 1, QImage::Format_RGBA8888);
+        alphaMask.setPixelColor(0, 0, QColor(255, 255, 255, 0));
+        alphaMask.setPixelColor(1, 0, QColor(255, 255, 255, 255));
+        const QString path = directory.filePath("alpha-mask.png");
+        check(alphaMask.save(path), "Alpha mask fixture should be writable");
+        check(SkyGroundMask::loadUserMask(path.toStdString(), 2, 1, mask, 0) &&
+                  mask == std::vector<uint8_t>({0, 255}),
+              "Transparent user-mask pixels should mean ground, not sky");
+    }
+}
+
 } // namespace
 
 int main(int argc, char* argv[]) {
@@ -1197,6 +1292,7 @@ int main(int argc, char* argv[]) {
     testTiffIccProfile();
     testPresetDenoisePersistence();
     testRawApiValidation();
+    testSkyGroundHorizonDetection();
 
     if (failures == 0) {
         std::cout << "All core tests passed.\n";

@@ -75,6 +75,17 @@ int main(int argc, char* argv[]) {
     const QCommandLineOption noQualityRejectionOption(
         "no-quality-rejection",
         "Keep severe quality outliers; automatic reference selection still runs.");
+    const QCommandLineOption skyGroundOption(
+        "sky-ground",
+        "Enable automatic sky/ground separation for fixed-tripod sequences.");
+    const QCommandLineOption skyGroundMaskOption(
+        "sky-ground-mask",
+        "Use this user mask instead of automatic sky/ground detection.",
+        "path");
+    const QCommandLineOption skyGroundFeatherOption(
+        "sky-ground-feather",
+        "Sky/ground mask feather radius in pixels (0-50).",
+        "pixels", "20");
     const QCommandLineOption denoiseOption(
         "denoise-strength",
         "Enable linear RGB multiscale denoise at strength 1-70; 0 disables it.",
@@ -94,6 +105,8 @@ int main(int argc, char* argv[]) {
                        methodOption, kappaOption, memoryBudgetOption,
                        noPhotometricNormalizationOption,
                        noQualityRejectionOption,
+                       skyGroundOption, skyGroundMaskOption,
+                       skyGroundFeatherOption,
                        denoiseOption, dehazeOption, stretchOption,
                        starReduceOption});
     parser.process(application);
@@ -129,6 +142,12 @@ int main(int argc, char* argv[]) {
     const int starReduceStrength =
         parser.value(starReduceOption).toInt(&starReduceOk);
     const bool stretchEnabled = parser.isSet(stretchOption);
+    bool skyGroundFeatherOk = false;
+    const int skyGroundFeather =
+        parser.value(skyGroundFeatherOption).toInt(&skyGroundFeatherOk);
+    const QString skyGroundMask = parser.value(skyGroundMaskOption);
+    const bool skyGroundEnabled =
+        parser.isSet(skyGroundOption) || !skyGroundMask.isEmpty();
     const QString method = parser.value(methodOption).toLower();
     if (!limitOk || limit < 0 || !referenceOk || referenceIndex < -1 ||
         !kappaOk || kappa <= 0.0 || !memoryBudgetOk ||
@@ -136,13 +155,16 @@ int main(int argc, char* argv[]) {
         !dehazeOk || dehazeStrength < 0 || dehazeStrength > 100 ||
         !starReduceOk || starReduceStrength < 0 ||
         starReduceStrength > 100 ||
+        !skyGroundFeatherOk || skyGroundFeather < 0 ||
+        skyGroundFeather > 50 ||
+        (!skyGroundMask.isEmpty() && !QFileInfo::exists(skyGroundMask)) ||
         memoryBudgetMiB >
             std::numeric_limits<uint64_t>::max() / (1024ULL * 1024ULL) ||
         !validMethod(method)) {
         std::cerr << "Invalid --limit, --reference-index, --method, --kappa, "
                      "--memory-budget-mib, --denoise-strength, "
                      "--dehaze-strength, or "
-                     "--star-reduce-strength.\n";
+                     "--star-reduce-strength/sky-ground options.\n";
         return 2;
     }
     const uint64_t requestedMemoryBudgetBytes =
@@ -167,6 +189,7 @@ int main(int argc, char* argv[]) {
     }
     ProcessingMemoryEstimator::EstimateOptions estimateOptions;
     estimateOptions.frameCount = files.size();
+    estimateOptions.skyGroundSeparation = skyGroundEnabled;
     estimateOptions.noiseReduction = denoiseStrength > 0;
     estimateOptions.dehaze = dehazeStrength > 0;
     estimateOptions.stretch = stretchEnabled;
@@ -175,7 +198,7 @@ int main(int argc, char* argv[]) {
         ProcessingMemoryEstimator::estimatePeakBytes(
             metadata.width, metadata.height, estimateOptions);
     const uint64_t scratchBytes = ProcessingMemoryEstimator::estimateScratchDiskBytes(
-        metadata.width, metadata.height, files.size(), false);
+        metadata.width, metadata.height, files.size(), skyGroundEnabled);
 
     ProcessingWorker::Params params;
     params.stackMethod = method;
@@ -183,6 +206,14 @@ int main(int argc, char* argv[]) {
     params.outputFormat = "tiff16";
     params.outputPath = output;
     params.memoryBudgetBytes = requestedMemoryBudgetBytes;
+    params.skyGroundSepEnabled = skyGroundEnabled;
+    params.skyGroundMode = skyGroundMask.isEmpty()
+        ? SkyGroundMask::AutoDetect : SkyGroundMask::UserMask;
+    params.userMaskPath = skyGroundMask;
+    params.featherRadius = skyGroundFeather;
+    const QString generatedSkyGroundMask = skyGroundEnabled
+        ? QDir(output).filePath("sky-ground-mask.png") : QString();
+    params.skyGroundMaskOutputPath = generatedSkyGroundMask;
     params.autoRejectLowQualityFrames =
         !parser.isSet(noQualityRejectionOption);
     params.photometricNormalizationEnabled =
@@ -233,7 +264,7 @@ int main(int argc, char* argv[]) {
     worker.wait();
 
     QJsonObject report;
-    report["schemaVersion"] = 5;
+    report["schemaVersion"] = 6;
     report["toolVersion"] = QCoreApplication::applicationVersion();
     report["generatedAt"] = QDateTime::currentDateTimeUtc().toString(Qt::ISODate);
     report["input"] = input;
@@ -244,6 +275,15 @@ int main(int argc, char* argv[]) {
         QFileInfo(worker.selectedReferenceFrame()).fileName();
     report["autoQualityRejectionEnabled"] =
         params.autoRejectLowQualityFrames;
+    report["skyGroundSeparationEnabled"] = skyGroundEnabled;
+    report["skyGroundMode"] = skyGroundEnabled
+        ? (skyGroundMask.isEmpty() ? "automatic" : "user-mask")
+        : "disabled";
+    report["skyGroundMask"] = skyGroundMask;
+    report["skyGroundMaskOutput"] = generatedSkyGroundMask;
+    report["skyGroundFeatherRadius"] = skyGroundFeather;
+    report["skyGroundSkyFraction"] = worker.skyGroundSkyFraction();
+    report["skyGroundMaskSource"] = worker.skyGroundMaskSource();
     const QStringList rejectedFiles = worker.qualityRejectedFiles();
     report["qualityRejectedFrames"] = rejectedFiles.size();
     const QSet<QString> rejectedSet(rejectedFiles.begin(), rejectedFiles.end());

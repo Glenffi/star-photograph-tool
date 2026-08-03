@@ -2,7 +2,7 @@
 #include <QImage>
 #include <algorithm>
 #include <cmath>
-#include <numeric>
+#include <limits>
 
 // ---------------------------------------------------------------------------
 // 图像缩放（双线性插值）
@@ -133,303 +133,176 @@ static void gaussianBlurMask(const std::vector<uint8_t>& src, int w, int h,
     }
 }
 
-// ---------------------------------------------------------------------------
-// 1. Sobel 梯度强度
-// ---------------------------------------------------------------------------
-void SkyGroundMask::computeGradient(const std::vector<uint16_t>& image, int w, int h,
-                                      std::vector<float>& gradient)
+static float percentile(std::vector<float> values, float fraction)
 {
-    gradient.resize(w * h, 0.0f);
-
-    for (int y = 1; y < h - 1; ++y) {
-        for (int x = 1; x < w - 1; ++x) {
-            int idx = y * w + x;
-
-            float gx = -1.0f * image[(y - 1) * w + (x - 1)]
-                       + 1.0f * image[(y - 1) * w + (x + 1)]
-                       - 2.0f * image[y * w + (x - 1)]
-                       + 2.0f * image[y * w + (x + 1)]
-                       - 1.0f * image[(y + 1) * w + (x - 1)]
-                       + 1.0f * image[(y + 1) * w + (x + 1)];
-
-            float gy = -1.0f * image[(y - 1) * w + (x - 1)]
-                       - 2.0f * image[(y - 1) * w + x]
-                       - 1.0f * image[(y - 1) * w + (x + 1)]
-                       + 1.0f * image[(y + 1) * w + (x - 1)]
-                       + 2.0f * image[(y + 1) * w + x]
-                       + 1.0f * image[(y + 1) * w + (x + 1)];
-
-            gradient[idx] = std::sqrt(gx * gx + gy * gy) / 8.0f;
-        }
-    }
+    if (values.empty()) return 0.0f;
+    const size_t index = std::min(
+        values.size() - 1,
+        static_cast<size_t>(std::round(fraction * (values.size() - 1))));
+    std::nth_element(values.begin(), values.begin() + index, values.end());
+    return values[index];
 }
 
-// ---------------------------------------------------------------------------
-// 2. 局部亮度方差（50×50 窗口）— 使用积分图加速
-// ---------------------------------------------------------------------------
-void SkyGroundMask::computeVariance(const std::vector<uint16_t>& image, int w, int h,
-                                    std::vector<float>& variance)
+static void gaussianBlurLuminance(const std::vector<uint16_t>& src, int w, int h,
+                                  std::vector<float>& dst, float sigma)
 {
-    variance.resize(w * h, 0.0f);
-    const int win = 50;
-    const int half = win / 2;
+    int radius = std::max(1, static_cast<int>(std::ceil(sigma * 3.0f)));
+    const int kernelSize = radius * 2 + 1;
+    std::vector<float> kernel(kernelSize);
+    float sum = 0.0f;
+    for (int i = -radius; i <= radius; ++i) {
+        const float value = std::exp(-(i * i) / (2.0f * sigma * sigma));
+        kernel[i + radius] = value;
+        sum += value;
+    }
+    for (float& value : kernel) value /= sum;
 
-    // Build integral images: sum and sum of squares
-    std::vector<double> integral(w * h);
-    std::vector<double> integralSq(w * h);
+    std::vector<float> temp(static_cast<size_t>(w) * h);
+    dst.resize(static_cast<size_t>(w) * h);
     for (int y = 0; y < h; ++y) {
         for (int x = 0; x < w; ++x) {
-            double v = static_cast<double>(image[y * w + x]);
-            double vSq = v * v;
-            double sum = v;
-            double sumSq = vSq;
-            if (x > 0) { sum += integral[y * w + (x - 1)]; sumSq += integralSq[y * w + (x - 1)]; }
-            if (y > 0) { sum += integral[(y - 1) * w + x]; sumSq += integralSq[(y - 1) * w + x]; }
-            if (x > 0 && y > 0) { sum -= integral[(y - 1) * w + (x - 1)]; sumSq -= integralSq[(y - 1) * w + (x - 1)]; }
-            integral[y * w + x] = sum;
-            integralSq[y * w + x] = sumSq;
+            float value = 0.0f;
+            for (int k = -radius; k <= radius; ++k) {
+                const int px = std::clamp(x + k, 0, w - 1);
+                value += src[static_cast<size_t>(y) * w + px] * kernel[k + radius];
+            }
+            temp[static_cast<size_t>(y) * w + x] = value;
         }
     }
-
-    // Query window sums using integral image
     for (int y = 0; y < h; ++y) {
         for (int x = 0; x < w; ++x) {
-            int y0 = std::max(0, y - half);
-            int y1 = std::min(h - 1, y + half);
-            int x0 = std::max(0, x - half);
-            int x1 = std::min(w - 1, x + half);
-
-            double sum = integral[y1 * w + x1];
-            double sumSq = integralSq[y1 * w + x1];
-            if (x0 > 0) { sum -= integral[y1 * w + (x0 - 1)]; sumSq -= integralSq[y1 * w + (x0 - 1)]; }
-            if (y0 > 0) { sum -= integral[(y0 - 1) * w + x1]; sumSq -= integralSq[(y0 - 1) * w + x1]; }
-            if (x0 > 0 && y0 > 0) { sum += integral[(y0 - 1) * w + (x0 - 1)]; sumSq += integralSq[(y0 - 1) * w + (x0 - 1)]; }
-
-            int count = (y1 - y0 + 1) * (x1 - x0 + 1);
-            if (count > 1) {
-                double mean = sum / count;
-                double meanSq = sumSq / count;
-                variance[y * w + x] = static_cast<float>(meanSq - mean * mean);
+            float value = 0.0f;
+            for (int k = -radius; k <= radius; ++k) {
+                const int py = std::clamp(y + k, 0, h - 1);
+                value += temp[static_cast<size_t>(py) * w + x] * kernel[k + radius];
             }
+            dst[static_cast<size_t>(y) * w + x] = value;
         }
     }
 }
 
-// ---------------------------------------------------------------------------
-// 3. 星点密度（轻量局部极大值扫描，统计 50×50 块）
-// ---------------------------------------------------------------------------
-void SkyGroundMask::computeStarDensity(const std::vector<uint16_t>& image, int w, int h,
-                                       std::vector<float>& density)
+static bool findHorizon(const std::vector<uint16_t>& image, int w, int h,
+                        std::vector<int>& horizon)
 {
-    density.resize(w * h, 0.0f);
+    if (w < 32 || h < 32) return false;
 
-    // 1. 轻量高斯模糊（sigma=1.5，与 StarDetector 一致）
-    std::vector<float> blurred;
-    {
-        int kernelSize = static_cast<int>(std::ceil(1.5f * 6.0f));
-        if (kernelSize % 2 == 0) kernelSize++;
-        int half = kernelSize / 2;
-        std::vector<float> kernel(kernelSize);
-        float sum = 0.0f;
-        for (int i = 0; i < kernelSize; ++i) {
-            float x = static_cast<float>(i - half);
-            kernel[i] = std::exp(-(x * x) / (2.0f * 1.5f * 1.5f));
-            sum += kernel[i];
-        }
-        for (float& k : kernel) k /= sum;
+    std::vector<float> smooth;
+    const float sigma = std::max(1.0f, 2.5f * std::max(w, h) / 640.0f);
+    gaussianBlurLuminance(image, w, h, smooth, sigma);
 
-        std::vector<float> temp(w * h);
-        blurred.resize(w * h);
+    const int span = std::max(2, h / 140);
+    const int band = std::max(6, h / 36);
+    const int firstY = std::max(band + span,
+                                static_cast<int>(std::round(h * 0.25)));
+    const int lastY = std::min(h - band - span - 1,
+                              static_cast<int>(std::round(h * 0.92)));
+    if (firstY >= lastY) return false;
 
-        // 行方向
-        for (int y = 0; y < h; ++y) {
-            for (int x = 0; x < w; ++x) {
-                float acc = 0.0f;
-                for (int k = 0; k < kernelSize; ++k) {
-                    int px = x + k - half;
-                    px = std::clamp(px, 0, w - 1);
-                    acc += static_cast<float>(image[y * w + px]) * kernel[k];
-                }
-                temp[y * w + x] = acc;
-            }
-        }
-        // 列方向
-        for (int y = 0; y < h; ++y) {
-            for (int x = 0; x < w; ++x) {
-                float acc = 0.0f;
-                for (int k = 0; k < kernelSize; ++k) {
-                    int py = y + k - half;
-                    py = std::clamp(py, 0, h - 1);
-                    acc += temp[py * w + x] * kernel[k];
-                }
-                blurred[y * w + x] = acc;
-            }
-        }
-    }
-
-    // 2. 估计背景中值和噪声（采样）
-    float bgNoise = 0.5f;
-    float backgroundMedian = 0.0f;
-    {
-        size_t sampleCount = std::min<size_t>(blurred.size(), 65536);
-        size_t step = blurred.size() / sampleCount;
-        if (step == 0) step = 1;
-        std::vector<float> samples;
-        samples.reserve(sampleCount);
-        for (size_t i = 0; i < blurred.size(); i += step) {
-            samples.push_back(blurred[i]);
-        }
-        size_t n = samples.size();
-        if (n > 0) {
-            std::nth_element(samples.begin(), samples.begin() + n / 2, samples.end());
-            backgroundMedian = samples[n / 2];
-            std::vector<float> absDev;
-            absDev.reserve(n);
-            for (float v : samples) {
-                absDev.push_back(std::abs(v - backgroundMedian));
-            }
-            std::nth_element(absDev.begin(), absDev.begin() + n / 2, absDev.end());
-            bgNoise = absDev[n / 2] * 1.4826f;
-        }
-    }
-    if (bgNoise < 0.5f) bgNoise = 0.5f;
-    float threshold = backgroundMedian + 5.0f * bgNoise;
-
-    // 3. 局部最大值扫描 + 块直方图统计
-    const int blockSize = 50;
-    int blockW = (w + blockSize - 1) / blockSize;
-    int blockH = (h + blockSize - 1) / blockSize;
-    std::vector<int> blockCount(blockW * blockH, 0);
-
-    for (int y = 1; y < h - 1; ++y) {
-        for (int x = 1; x < w - 1; ++x) {
-            float val = blurred[y * w + x];
-            if (val < threshold) continue;
-
-            bool isLocalMax = true;
-            for (int dy = -1; dy <= 1 && isLocalMax; ++dy) {
-                for (int dx = -1; dx <= 1; ++dx) {
-                    if (dx == 0 && dy == 0) continue;
-                    if (blurred[(y + dy) * w + (x + dx)] >= val) {
-                        isLocalMax = false;
-                        break;
-                    }
-                }
-            }
-
-            if (isLocalMax) {
-                int bx = x / blockSize;
-                int by = y / blockSize;
-                bx = std::clamp(bx, 0, blockW - 1);
-                by = std::clamp(by, 0, blockH - 1);
-                blockCount[by * blockW + bx]++;
-            }
-        }
-    }
-
-    // 4. 块归一化
-    int maxCount = 0;
-    for (int c : blockCount) {
-        if (c > maxCount) maxCount = c;
-    }
-    if (maxCount == 0) maxCount = 1;
-
+    // Column integrals make the above/below band contrast inexpensive. Point
+    // stars survive as isolated edges, while a true horizon stays coherent
+    // across many neighboring columns.
+    std::vector<double> columnIntegral(static_cast<size_t>(h + 1) * w, 0.0);
     for (int y = 0; y < h; ++y) {
         for (int x = 0; x < w; ++x) {
-            int bx = std::min(x / blockSize, blockW - 1);
-            int by = std::min(y / blockSize, blockH - 1);
-            density[y * w + x] = static_cast<float>(blockCount[by * blockW + bx]) / maxCount;
+            columnIntegral[static_cast<size_t>(y + 1) * w + x] =
+                columnIntegral[static_cast<size_t>(y) * w + x] +
+                smooth[static_cast<size_t>(y) * w + x];
         }
     }
-}
 
-// ---------------------------------------------------------------------------
-// 4. Otsu 自动阈值
-// ---------------------------------------------------------------------------
-uint8_t SkyGroundMask::otsuThreshold(const std::vector<float>& scores)
-{
-    std::vector<int> hist(256, 0);
-    for (float s : scores) {
-        int idx = std::clamp(static_cast<int>(s * 255.0f + 0.5f), 0, 255);
-        hist[idx]++;
-    }
-
-    int total = static_cast<int>(scores.size());
-    double sum = 0.0;
-    for (int i = 0; i < 256; ++i) sum += i * hist[i];
-
-    double sumB = 0.0;
-    int wB = 0;
-    double maxVar = 0.0;
-    int threshold = 0;
-
-    for (int t = 0; t < 256; ++t) {
-        wB += hist[t];
-        if (wB == 0) continue;
-        int wF = total - wB;
-        if (wF == 0) break;
-        sumB += t * hist[t];
-        double mB = sumB / wB;
-        double mF = (sum - sumB) / wF;
-        double var = wB * wF * (mB - mF) * (mB - mF);
-        if (var > maxVar) {
-            maxVar = var;
-            threshold = t;
-        }
-    }
-    return static_cast<uint8_t>(threshold);
-}
-
-// ---------------------------------------------------------------------------
-// 5. 形态学闭运算（3×3 结构元素）
-// ---------------------------------------------------------------------------
-static void dilate3x3(const std::vector<uint8_t>& src, int w, int h,
-                        std::vector<uint8_t>& dst)
-{
-    dst.resize(w * h);
-    for (int y = 0; y < h; ++y) {
+    std::vector<float> evidence(static_cast<size_t>(h) * w, 0.0f);
+    std::vector<float> candidateEvidence;
+    candidateEvidence.reserve(static_cast<size_t>(lastY - firstY + 1) * w);
+    for (int y = firstY; y <= lastY; ++y) {
         for (int x = 0; x < w; ++x) {
-            uint8_t maxVal = 0;
-            for (int dy = -1; dy <= 1; ++dy) {
-                for (int dx = -1; dx <= 1; ++dx) {
-                    int py = y + dy, px = x + dx;
-                    if (py >= 0 && py < h && px >= 0 && px < w) {
-                        maxVal = std::max(maxVal, src[py * w + px]);
-                    }
+            const float verticalEdge = std::abs(
+                smooth[static_cast<size_t>(y + span) * w + x] -
+                smooth[static_cast<size_t>(y - span) * w + x]);
+            const double above =
+                (columnIntegral[static_cast<size_t>(y) * w + x] -
+                 columnIntegral[static_cast<size_t>(y - band) * w + x]) / band;
+            const double below =
+                (columnIntegral[static_cast<size_t>(y + band) * w + x] -
+                 columnIntegral[static_cast<size_t>(y) * w + x]) / band;
+            const float value = 0.7f * verticalEdge +
+                                0.3f * static_cast<float>(std::abs(below - above));
+            evidence[static_cast<size_t>(y) * w + x] = value;
+            candidateEvidence.push_back(value);
+        }
+    }
+
+    std::vector<float> luminanceSamples(smooth.begin(), smooth.end());
+    const float luminanceP95 = percentile(luminanceSamples, 0.95f);
+    const float luminanceP05 = percentile(luminanceSamples, 0.05f);
+    const float luminanceRange = luminanceP95 - luminanceP05;
+    const float evidenceScale = percentile(candidateEvidence, 0.95f);
+    if (luminanceRange < 32.0f ||
+        evidenceScale < std::max(8.0f, luminanceRange * 0.005f)) {
+        return false;
+    }
+
+    const int candidateRows = lastY - firstY + 1;
+    std::vector<float> previous(candidateRows);
+    std::vector<float> current(candidateRows);
+    std::vector<uint16_t> parent(static_cast<size_t>(candidateRows) * w);
+    for (int row = 0; row < candidateRows; ++row) {
+        const int y = firstY + row;
+        const float normalized = std::min(
+            3.0f, evidence[static_cast<size_t>(y) * w] / evidenceScale);
+        previous[row] = -normalized +
+            0.15f * std::abs(y - h * 0.65f) / h;
+    }
+
+    const int maxStep = std::clamp(static_cast<int>(std::round(w / 213.0)), 2, 4);
+    for (int x = 1; x < w; ++x) {
+        for (int row = 0; row < candidateRows; ++row) {
+            float bestCost = std::numeric_limits<float>::max();
+            int bestParent = row;
+            const int parentStart = std::max(0, row - maxStep);
+            const int parentEnd = std::min(candidateRows - 1, row + maxStep);
+            for (int candidate = parentStart; candidate <= parentEnd; ++candidate) {
+                const float delta = static_cast<float>(std::abs(candidate - row));
+                const float cost = previous[candidate] +
+                                   0.04f * delta + 0.012f * delta * delta;
+                if (cost < bestCost) {
+                    bestCost = cost;
+                    bestParent = candidate;
                 }
             }
-            dst[y * w + x] = maxVal;
+            const int y = firstY + row;
+            const float normalized = std::min(
+                3.0f, evidence[static_cast<size_t>(y) * w + x] / evidenceScale);
+            current[row] = bestCost - normalized;
+            parent[static_cast<size_t>(x) * candidateRows + row] =
+                static_cast<uint16_t>(bestParent);
         }
+        previous.swap(current);
     }
-}
 
-static void erode3x3(const std::vector<uint8_t>& src, int w, int h,
-                     std::vector<uint8_t>& dst)
-{
-    dst.resize(w * h);
-    for (int y = 0; y < h; ++y) {
-        for (int x = 0; x < w; ++x) {
-            uint8_t minVal = 255;
-            for (int dy = -1; dy <= 1; ++dy) {
-                for (int dx = -1; dx <= 1; ++dx) {
-                    int py = y + dy, px = x + dx;
-                    if (py >= 0 && py < h && px >= 0 && px < w) {
-                        minVal = std::min(minVal, src[py * w + px]);
-                    } else {
-                        minVal = 0; // 边界外视为 0
-                    }
-                }
-            }
-            dst[y * w + x] = minVal;
+    int row = static_cast<int>(std::min_element(previous.begin(), previous.end()) -
+                               previous.begin());
+    horizon.assign(w, firstY + row);
+    for (int x = w - 1; x > 0; --x) {
+        row = parent[static_cast<size_t>(x) * candidateRows + row];
+        horizon[x - 1] = firstY + row;
+    }
+
+    const int medianRadius = std::max(2, w / 100);
+    std::vector<int> smoothedHorizon(w);
+    std::vector<int> window;
+    window.reserve(medianRadius * 2 + 1);
+    for (int x = 0; x < w; ++x) {
+        window.clear();
+        for (int sampleX = std::max(0, x - medianRadius);
+             sampleX <= std::min(w - 1, x + medianRadius); ++sampleX) {
+            window.push_back(horizon[sampleX]);
         }
+        const size_t middle = window.size() / 2;
+        std::nth_element(window.begin(), window.begin() + middle, window.end());
+        smoothedHorizon[x] = window[middle];
     }
-}
-
-void SkyGroundMask::morphologicalClose(std::vector<uint8_t>& mask, int w, int h)
-{
-    std::vector<uint8_t> temp;
-    dilate3x3(mask, w, h, temp);
-    erode3x3(temp, w, h, mask);
+    horizon = std::move(smoothedHorizon);
+    return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -452,65 +325,83 @@ bool SkyGroundMask::autoDetect(const std::vector<uint16_t>& image, int width, in
 {
     if (image.empty() || width <= 0 || height <= 0)
         return false;
-    if (static_cast<int>(image.size()) != width * height)
+    if (static_cast<size_t>(width) >
+            std::numeric_limits<size_t>::max() / static_cast<size_t>(height) ||
+        image.size() != static_cast<size_t>(width) * height)
         return false;
 
-    // 1. 缩放至 1/4
-    int smallW = width / 4;
-    int smallH = height / 4;
-    if (smallW < 1) smallW = 1;
-    if (smallH < 1) smallH = 1;
+    constexpr int kAnalysisLongSide = 640;
+    const double analysisScale = std::min(
+        1.0, static_cast<double>(kAnalysisLongSide) / std::max(width, height));
+    const int smallW = std::max(1, static_cast<int>(std::round(width * analysisScale)));
+    const int smallH = std::max(1, static_cast<int>(std::round(height * analysisScale)));
 
     std::vector<uint16_t> smallImage;
     resizeImage(image, width, height, smallImage, smallW, smallH);
 
-    // 2. 计算特征
-    std::vector<float> gradient, variance, density;
-    computeGradient(smallImage, smallW, smallH, gradient);
-    computeVariance(smallImage, smallW, smallH, variance);
-    computeStarDensity(smallImage, smallW, smallH, density);
-
-    // 3. 归一化并综合打分
-    float maxGrad = 0.0f, maxVar = 0.0f;
-    for (float g : gradient) if (g > maxGrad) maxGrad = g;
-    for (float v : variance) if (v > maxVar) maxVar = v;
-    if (maxGrad < 1e-6f) maxGrad = 1.0f;
-    if (maxVar < 1e-6f) maxVar = 1.0f;
-
-    std::vector<float> scores(smallW * smallH);
-    for (int i = 0; i < smallW * smallH; ++i) {
-        scores[i] = 0.4f * density[i]
-                  + 0.3f * (1.0f - gradient[i] / maxGrad)
-                  + 0.3f * (1.0f - variance[i] / maxVar);
+    std::vector<int> horizon;
+    if (!findHorizon(smallImage, smallW, smallH, horizon)) return false;
+    std::vector<uint8_t> smallMask(static_cast<size_t>(smallW) * smallH, 0);
+    for (int x = 0; x < smallW; ++x) {
+        for (int y = 0; y < horizon[x]; ++y) {
+            smallMask[static_cast<size_t>(y) * smallW + x] = 255;
+        }
     }
 
-    // 4. Otsu 阈值
-    uint8_t thresh = otsuThreshold(scores);
-
-    // 5. 二值化
-    std::vector<uint8_t> smallMask(smallW * smallH);
-    for (int i = 0; i < smallW * smallH; ++i) {
-        int val = static_cast<int>(scores[i] * 255.0f + 0.5f);
-        smallMask[i] = (val >= thresh) ? 255 : 0;
-    }
-
-    // 6. 形态学闭运算
-    morphologicalClose(smallMask, smallW, smallH);
-
-    // 7. 羽化（在小图上做，避免全图高斯模糊的性能开销）
+    // 羽化仍在分析尺寸完成，避免在 40MP 蒙版上做大核卷积。
     if (featherRadius > 0) {
-        int smallFeather = std::max(1, featherRadius / 4);
+        const int smallFeather = std::max(
+            1, static_cast<int>(std::round(featherRadius * analysisScale)));
         std::vector<uint8_t> blurredMask;
         gaussianBlurMask(smallMask, smallW, smallH, blurredMask, static_cast<float>(smallFeather));
         smallMask = std::move(blurredMask);
     }
-    // featherRadius == 0 表示完全不羽化，与 UI 语义一致
 
-    // 8. 缩放回原始尺寸（双线性插值）
     std::vector<uint8_t> fullMask;
     resizeMask(smallMask, smallW, smallH, fullMask, width, height);
 
     mask = std::move(fullMask);
+    return true;
+}
+
+bool SkyGroundMask::autoDetectPreview(const QImage& preview, int targetWidth,
+                                      int targetHeight, std::vector<uint8_t>& mask,
+                                      int featherRadius)
+{
+    if (preview.isNull() || targetWidth <= 0 || targetHeight <= 0) return false;
+    const double sourceAspect = static_cast<double>(preview.width()) / preview.height();
+    const double targetAspect = static_cast<double>(targetWidth) / targetHeight;
+    if (std::abs(sourceAspect - targetAspect) / targetAspect > 0.03) return false;
+
+    const QImage rgb = preview.convertToFormat(QImage::Format_RGB888);
+    const int width = rgb.width();
+    const int height = rgb.height();
+    std::vector<uint16_t> luminance(static_cast<size_t>(width) * height);
+    for (int y = 0; y < height; ++y) {
+        const uchar* row = rgb.constScanLine(y);
+        for (int x = 0; x < width; ++x) {
+            const uint32_t red = row[x * 3];
+            const uint32_t green = row[x * 3 + 1];
+            const uint32_t blue = row[x * 3 + 2];
+            luminance[static_cast<size_t>(y) * width + x] =
+                static_cast<uint16_t>(
+                    ((red * 299 + green * 587 + blue * 114) / 1000) * 257);
+        }
+    }
+
+    const double scale = static_cast<double>(std::max(width, height)) /
+                         std::max(targetWidth, targetHeight);
+    const int previewFeather = featherRadius > 0
+        ? std::max(1, static_cast<int>(std::round(featherRadius * scale))) : 0;
+    std::vector<uint8_t> previewMask;
+    if (!autoDetect(luminance, width, height, previewMask, previewFeather)) {
+        return false;
+    }
+    if (width == targetWidth && height == targetHeight) {
+        mask = std::move(previewMask);
+    } else {
+        resizeMask(previewMask, width, height, mask, targetWidth, targetHeight);
+    }
     return true;
 }
 

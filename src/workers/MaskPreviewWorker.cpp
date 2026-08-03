@@ -50,32 +50,16 @@ void MaskPreviewWorker::run() {
         image = image.scaled(kPreviewLongSide, kPreviewLongSide,
                              Qt::KeepAspectRatio, Qt::SmoothTransformation);
     }
-    image = image.convertToFormat(QImage::Format_RGB888);
-
-    // Mask preview needs spatial structure, not processing-grade AHD. Expand
-    // 8-bit luminance so SkyGroundMask retains its 16-bit input contract.
     const int previewWidth = image.width();
     const int previewHeight = image.height();
-    std::vector<uint16_t> luminance(static_cast<size_t>(previewWidth) * previewHeight);
-    for (int y = 0; y < previewHeight; ++y) {
-        const uchar* row = image.constScanLine(y);
-        for (int x = 0; x < previewWidth; ++x) {
-            const uint32_t red = row[x * 3];
-            const uint32_t green = row[x * 3 + 1];
-            const uint32_t blue = row[x * 3 + 2];
-            luminance[static_cast<size_t>(y) * previewWidth + x] =
-                static_cast<uint16_t>(((red * 299 + green * 587 + blue * 114) / 1000) * 257);
-        }
-    }
-
     if (isInterruptionRequested()) return;
     const int fullLongSide = std::max(metadata.width, metadata.height);
     const double previewScale = fullLongSide > 0
         ? static_cast<double>(std::max(previewWidth, previewHeight)) / fullLongSide
         : 1.0;
     const int previewFeather = std::max(0, qRound(m_featherRadius * previewScale));
-    if (!SkyGroundMask::autoDetect(luminance, previewWidth, previewHeight,
-                                   m_mask, previewFeather)) {
+    if (!SkyGroundMask::autoDetectPreview(image, previewWidth, previewHeight,
+                                          m_mask, previewFeather)) {
         m_error = "地景检测失败";
         return;
     }

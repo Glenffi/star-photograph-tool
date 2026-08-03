@@ -4,10 +4,12 @@
 #include <string>
 #include <vector>
 
+class QImage;
+
 /**
  * @brief 天空/地景蒙版生成器
  *
- * 支持自动检测（基于星点密度+纹理+亮度方差）和用户上传蒙版。
+ * 支持自动地平线检测和用户上传蒙版。
  * 输出 8-bit 灰度蒙版：255=天空（需要对齐），0=地景（不移动），中间值=羽化过渡。
  */
 class SkyGroundMask {
@@ -20,7 +22,9 @@ public:
     /**
      * @brief 自动检测天空/地景蒙版
      *
-     * 基于星点密度+纹理强度+亮度方差的Patch分类法。
+     * 先在低分辨率亮度图上寻找连续地平线，再将地平线上方标记
+     * 为天空。连续性约束可以避免星点、草叶和灯光等局部纹理把
+     * 蒙版切成零散区域。
      *
      * @param image   16-bit 单通道图像（Bayer CFA或灰度）
      * @param width   图像宽度
@@ -32,11 +36,22 @@ public:
                            std::vector<uint8_t>& mask, int featherRadius = 0);
 
     /**
+     * @brief 从经过相机显色的预览图检测，并缩放到处理图尺寸
+     *
+     * 线性 RAW 在地平线附近可能缺少肉眼可见的亮度反差。相机内嵌
+     * 预览已经应用白平衡和显示曲线，更适合做结构分割。若输入和目标
+     * 长宽比不一致则返回 false，调用方应回退到线性图检测。
+     */
+    static bool autoDetectPreview(const QImage& preview, int targetWidth,
+                                  int targetHeight, std::vector<uint8_t>& mask,
+                                  int featherRadius = 0);
+
+    /**
      * @brief 加载用户蒙版
      *
      * 支持格式：
      * - 白/黑 PNG/JPG：白色=天空，黑色=地景
-     * - PS alpha蒙版：透明/白色=天空，黑色=地景
+     * - PS alpha蒙版：白色=天空，黑色或完全透明=地景
      *
      * @param path  蒙版文件路径
      * @param width  目标宽度（缩放匹配）
@@ -60,22 +75,4 @@ public:
     static void feather(std::vector<uint8_t>& mask, int width, int height,
                         int featherRadius);
 
-private:
-    // 计算图像梯度强度（Sobel算子）
-    static void computeGradient(const std::vector<uint16_t>& image, int w, int h,
-                                std::vector<float>& gradient);
-
-    // 计算局部亮度方差
-    static void computeVariance(const std::vector<uint16_t>& image, int w, int h,
-                                std::vector<float>& variance);
-
-    // 星点密度检测（复用 StarDetector 的阈值逻辑）
-    static void computeStarDensity(const std::vector<uint16_t>& image, int w, int h,
-                                    std::vector<float>& density);
-
-    // Otsu 自动阈值
-    static uint8_t otsuThreshold(const std::vector<float>& scores);
-
-    // 形态学闭运算（填充小洞）
-    static void morphologicalClose(std::vector<uint8_t>& mask, int w, int h);
 };
