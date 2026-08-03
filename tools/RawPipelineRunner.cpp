@@ -68,6 +68,9 @@ int main(int argc, char* argv[]) {
         "memory-budget-mib",
         "Override the automatic memory budget in MiB; 0 keeps automatic mode.",
         "mib", "0");
+    const QCommandLineOption noPhotometricNormalizationOption(
+        "no-photometric-normalization",
+        "Disable frame-to-reference exposure and background color matching.");
     const QCommandLineOption denoiseOption(
         "denoise-strength",
         "Enable linear RGB multiscale denoise at strength 1-70; 0 disables it.",
@@ -85,6 +88,7 @@ int main(int argc, char* argv[]) {
         "value", "0");
     parser.addOptions({inputOption, outputOption, limitOption, referenceOption,
                        methodOption, kappaOption, memoryBudgetOption,
+                       noPhotometricNormalizationOption,
                        denoiseOption, dehazeOption, stretchOption,
                        starReduceOption});
     parser.process(application);
@@ -175,6 +179,8 @@ int main(int argc, char* argv[]) {
     params.outputFormat = "tiff16";
     params.outputPath = output;
     params.memoryBudgetBytes = requestedMemoryBudgetBytes;
+    params.photometricNormalizationEnabled =
+        !parser.isSet(noPhotometricNormalizationOption);
     params.noiseReductionEnabled = denoiseStrength > 0;
     params.noiseReductionStrength = denoiseStrength;
     params.dewarpEnabled = dehazeStrength > 0;
@@ -216,7 +222,7 @@ int main(int argc, char* argv[]) {
     worker.wait();
 
     QJsonObject report;
-    report["schemaVersion"] = 3;
+    report["schemaVersion"] = 4;
     report["toolVersion"] = QCoreApplication::applicationVersion();
     report["generatedAt"] = QDateTime::currentDateTimeUtc().toString(Qt::ISODate);
     report["input"] = input;
@@ -225,6 +231,21 @@ int main(int argc, char* argv[]) {
     report["referenceFile"] = QFileInfo(files[referenceIndex]).fileName();
     report["method"] = method;
     report["kappa"] = kappa;
+    report["photometricNormalizationEnabled"] =
+        params.photometricNormalizationEnabled;
+    report["photometricNormalizedFrames"] =
+        worker.photometricNormalizedFrameCount();
+    report["photometricSkippedFrames"] =
+        worker.photometricSkippedFrameCount();
+    report["photometricAverageGain"] = worker.averagePhotometricGain();
+    report["photometricMinimumGain"] = worker.minimumPhotometricGain();
+    report["photometricMaximumGain"] = worker.maximumPhotometricGain();
+    report["photometricMaximumAbsoluteOffset"] =
+        worker.maximumPhotometricOffset();
+    report["photometricOutputAnchorGain"] =
+        worker.photometricOutputAnchorGain();
+    report["photometricOutputAnchorMaximumAbsoluteOffset"] =
+        worker.photometricOutputAnchorOffset();
     report["denoiseStrength"] = denoiseStrength;
     report["dehazeStrength"] = dehazeStrength;
     report["stretchEnabled"] = stretchEnabled;

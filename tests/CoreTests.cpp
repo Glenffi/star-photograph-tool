@@ -3,6 +3,7 @@
 #include "core/ImageExporter.h"
 #include "core/AutoOptimizeEngine.h"
 #include "core/NoiseReductionEngine.h"
+#include "core/PhotometricNormalizer.h"
 #include "core/PresetManager.h"
 #include "core/RawImageLoader.h"
 #include "core/ProcessingMemoryEstimator.h"
@@ -929,6 +930,91 @@ void testNoiseReduction() {
           "Denoise should reject mismatched dimensions without changing output");
 }
 
+void testPhotometricNormalization() {
+    constexpr int width = 160;
+    constexpr int height = 96;
+    constexpr double expectedGain = 1.08;
+    constexpr std::array<double, 3> expectedOffsets = {350.0, -180.0, 90.0};
+    const size_t pixelCount = static_cast<size_t>(width) * height;
+
+    std::vector<uint16_t> reference(pixelCount * 3);
+    std::vector<uint16_t> source(pixelCount * 3);
+    for (int y = 0; y < height; ++y) {
+        for (int x = 0; x < width; ++x) {
+            const size_t base = (static_cast<size_t>(y) * width + x) * 3;
+            const double texture = 8500.0 + x * 105.0 + y * 73.0 +
+                1200.0 * std::sin(x * 0.17) * std::cos(y * 0.11);
+            for (int channel = 0; channel < 3; ++channel) {
+                const double channelValue = texture + channel * 1700.0 +
+                    420.0 * std::sin((x + channel * 7) * 0.09);
+                reference[base + channel] = static_cast<uint16_t>(
+                    std::clamp(std::lround(channelValue), 0L, 65535L));
+                source[base + channel] = static_cast<uint16_t>(std::clamp(
+                    std::lround((channelValue - expectedOffsets[channel]) /
+                                expectedGain),
+                    0L, 65535L));
+            }
+        }
+    }
+
+    // Simulate a moving bright foreground/cloud that must not drive the fit.
+    for (int y = 20; y < 58; ++y) {
+        for (int x = 25; x < 105; ++x) {
+            const size_t base = (static_cast<size_t>(y) * width + x) * 3;
+            source[base] = 53000;
+            source[base + 1] = 47000;
+            source[base + 2] = 43000;
+        }
+    }
+    source[0] = source[1] = source[2] = 0;
+
+    PhotometricReferenceProfile profile;
+    check(PhotometricNormalizer::buildReferenceProfile(
+              reference, width, height, profile, 4096),
+          "Photometric reference profile should build from valid RGB data");
+    PhotometricModel model;
+    check(PhotometricNormalizer::estimate(profile, source, model),
+          "Photometric model should tolerate a large local outlier region");
+    check(std::abs(model.gain - expectedGain) < 0.02,
+          "Photometric model should recover the exposure gain");
+    for (int channel = 0; channel < 3; ++channel) {
+        check(std::abs(model.offsets[channel] - expectedOffsets[channel]) < 90.0,
+              "Photometric model should recover per-channel offsets");
+    }
+
+    const std::vector<uint16_t> before = source;
+    check(PhotometricNormalizer::applyInPlace(source, width, height, model),
+          "Photometric model should apply to valid RGB data");
+    check(source[0] == 0 && source[1] == 0 && source[2] == 0,
+          "Photometric normalization should preserve zero-valued warp borders");
+
+    double beforeError = 0.0;
+    double afterError = 0.0;
+    size_t comparedValues = 0;
+    for (int y = 0; y < height; ++y) {
+        for (int x = 0; x < width; ++x) {
+            if (x >= 25 && x < 105 && y >= 20 && y < 58) continue;
+            const size_t base = (static_cast<size_t>(y) * width + x) * 3;
+            if (base == 0) continue;
+            for (int channel = 0; channel < 3; ++channel) {
+                beforeError += std::abs(static_cast<double>(before[base + channel]) -
+                                        reference[base + channel]);
+                afterError += std::abs(static_cast<double>(source[base + channel]) -
+                                       reference[base + channel]);
+                ++comparedValues;
+            }
+        }
+    }
+    check(comparedValues > 0 && afterError < beforeError * 0.03,
+          "Photometric normalization should substantially reduce frame mismatch");
+
+    std::vector<uint16_t> invalid = {1, 2, 3};
+    check(!PhotometricNormalizer::applyInPlace(
+              invalid, width, height, model) &&
+              invalid == std::vector<uint16_t>({1, 2, 3}),
+          "Photometric normalization should reject mismatched dimensions safely");
+}
+
 void testTiffIccProfile() {
     QTemporaryDir directory;
     check(directory.isValid(), "Temporary export directory should be available");
@@ -977,12 +1063,14 @@ void testPresetDenoisePersistence() {
     if (!directory.isValid()) return;
     Preset original;
     original.name = "Denoise round trip";
+    original.photometricNormalizationEnabled = false;
     original.noiseReductionEnabled = true;
     original.noiseReductionStrength = 42;
     const QString path = directory.filePath("preset.json");
     PresetManager::savePreset(original, path);
     const Preset loaded = PresetManager::loadPreset(path);
     check(loaded.name == original.name &&
+              !loaded.photometricNormalizationEnabled &&
               loaded.noiseReductionEnabled &&
               loaded.noiseReductionStrength == 42,
           "JSON presets should persist denoise settings");
@@ -994,10 +1082,11 @@ void testPresetDenoisePersistence() {
           "Legacy preset fixture should be writable");
     legacyFile.close();
     const Preset legacy = PresetManager::loadPreset(legacyPath);
-    check(!legacy.noiseReductionEnabled &&
+    check(legacy.photometricNormalizationEnabled &&
+              !legacy.noiseReductionEnabled &&
               legacy.noiseReductionStrength == 30 &&
               legacy.kappaValue == 2.5,
-          "Legacy presets without denoise fields should use defaults");
+          "Legacy presets without newer fields should use safe defaults");
 
     const Preset missing =
         PresetManager::loadPreset(directory.filePath("missing.json"));
@@ -1032,6 +1121,7 @@ int main(int argc, char* argv[]) {
     testAlignmentEstimation();
     testStarDetectionAndReduction();
     testNoiseReduction();
+    testPhotometricNormalization();
     testTiffIccProfile();
     testPresetDenoisePersistence();
     testRawApiValidation();

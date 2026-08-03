@@ -5,6 +5,7 @@
 #include "core/ImageBufferUtils.h"
 #include "core/ImageExporter.h"
 #include "core/NoiseReductionEngine.h"
+#include "core/PhotometricNormalizer.h"
 #include "core/ProcessingMemoryEstimator.h"
 #include "core/RawImageLoader.h"
 #include "core/StackingEngine.h"
@@ -21,6 +22,8 @@
 #include <QTemporaryDir>
 
 #include <algorithm>
+#include <array>
+#include <cmath>
 #include <cstring>
 #include <functional>
 #include <limits>
@@ -39,6 +42,16 @@ QString formatMemoryBytes(uint64_t bytes) {
         return QString("%1 MB").arg(bytes / kMiB, 0, 'f', 0);
     }
     return QString("%1 GB").arg(bytes / kGiB, 0, 'f', 1);
+}
+
+double medianValue(std::vector<double> values) {
+    if (values.empty()) return 0.0;
+    const size_t middle = values.size() / 2;
+    std::nth_element(values.begin(), values.begin() + middle, values.end());
+    if (values.size() % 2 != 0) return values[middle];
+    const double lower =
+        *std::max_element(values.begin(), values.begin() + middle);
+    return (lower + values[middle]) * 0.5;
 }
 
 bool cropRgb(const std::vector<uint16_t>& source,
@@ -283,6 +296,12 @@ double ProcessingWorker::averageAlignmentRms() const {
     return alignedSources > 0 ? m_alignmentRmsSum / alignedSources : 0.0;
 }
 
+double ProcessingWorker::averagePhotometricGain() const {
+    return m_photometricNormalizedFrameCount > 0
+        ? m_photometricGainSum / m_photometricNormalizedFrameCount
+        : 1.0;
+}
+
 void ProcessingWorker::requestCancel() {
     m_cancelRequested.store(true);
 }
@@ -309,6 +328,14 @@ void ProcessingWorker::run() {
     m_worstAlignmentP95 = 0.0;
     m_minimumGridCoverage = 0.0;
     m_stackingElapsedMs = 0;
+    m_photometricNormalizedFrameCount = 0;
+    m_photometricSkippedFrameCount = 0;
+    m_photometricGainSum = 0.0;
+    m_photometricMinGain = 1.0;
+    m_photometricMaxGain = 1.0;
+    m_photometricMaxAbsOffset = 0.0;
+    m_photometricOutputAnchorGain = 1.0;
+    m_photometricOutputAnchorMaxAbsOffset = 0.0;
     m_starReductionStats = {};
     emit progress(0);
 
@@ -435,6 +462,18 @@ void ProcessingWorker::run() {
         return;
     }
 
+    PhotometricReferenceProfile photometricReference;
+    bool photometricReferenceReady = false;
+    if (m_params.photometricNormalizationEnabled) {
+        emit stageMessage("建立帧间光度参考...");
+        photometricReferenceReady =
+            PhotometricNormalizer::buildReferenceProfile(
+                referenceImage.data, width, height, photometricReference);
+        if (!photometricReferenceReady) {
+            qWarning() << "光度参考建立失败，本次处理跳过帧间光度匹配";
+        }
+    }
+
     emit stageMessage("参考帧星点检测...");
     StarDetector detector;
     DetectionOptions evaluationDetectionOptions;
@@ -482,6 +521,9 @@ void ProcessingWorker::run() {
     ImageAligner aligner;
     std::vector<AlignmentTransform> acceptedTransforms;
     acceptedTransforms.reserve(static_cast<size_t>(m_files.size() - 1));
+    std::vector<PhotometricModel> acceptedPhotometricModels;
+    acceptedPhotometricModels.reserve(
+        static_cast<size_t>(m_files.size() - 1));
     for (int i = 0; i < m_files.size(); ++i) {
         if (stopIfCancelled()) return;
         if (static_cast<size_t>(i) == referenceIndex) continue;
@@ -543,6 +585,45 @@ void ProcessingWorker::run() {
                                        alignedFrame)) {
             qWarning() << "变换应用失败，跳过:" << m_files[i];
             continue;
+        }
+        if (photometricReferenceReady) {
+            PhotometricModel model;
+            if (PhotometricNormalizer::estimate(
+                    photometricReference, alignedFrame, model)) {
+                const bool alignedNormalized =
+                    PhotometricNormalizer::applyInPlace(
+                        alignedFrame, width, height, model);
+                const bool originalNormalized =
+                    !m_params.skyGroundSepEnabled ||
+                    PhotometricNormalizer::applyInPlace(
+                        sourceImage.data, width, height, model);
+                if (!alignedNormalized || !originalNormalized) {
+                    m_errorString = "帧间光度匹配应用失败";
+                    return;
+                }
+                ++m_photometricNormalizedFrameCount;
+                acceptedPhotometricModels.push_back(model);
+                m_photometricGainSum += model.gain;
+                if (m_photometricNormalizedFrameCount == 1) {
+                    m_photometricMinGain = model.gain;
+                    m_photometricMaxGain = model.gain;
+                } else {
+                    m_photometricMinGain =
+                        std::min(m_photometricMinGain, model.gain);
+                    m_photometricMaxGain =
+                        std::max(m_photometricMaxGain, model.gain);
+                }
+                for (double offset : model.offsets) {
+                    m_photometricMaxAbsOffset = std::max(
+                        m_photometricMaxAbsOffset, std::abs(offset));
+                }
+            } else {
+                ++m_photometricSkippedFrameCount;
+                qWarning() << "光度模型不可靠，保留原亮度:"
+                           << m_files[i];
+            }
+        } else if (m_params.photometricNormalizationEnabled) {
+            ++m_photometricSkippedFrameCount;
         }
         if (!alignedCache.append(alignedFrame) ||
             (m_params.skyGroundSepEnabled && !originalCache.append(sourceImage.data))) {
@@ -620,6 +701,38 @@ void ProcessingWorker::run() {
     m_frameCount = alignedCache.frameCount();
     emit progress(80);
     if (stopIfCancelled()) return;
+
+    if (!acceptedPhotometricModels.empty()) {
+        // All normalized frames currently share the reference frame's
+        // photometry. Re-anchor that common result to the median frame so one
+        // unusually hazy or dark reference cannot set the final brightness.
+        std::vector<double> gains = {1.0};
+        std::array<std::vector<double>, 3> offsets;
+        for (auto& channelOffsets : offsets) channelOffsets.push_back(0.0);
+        for (const PhotometricModel& model : acceptedPhotometricModels) {
+            gains.push_back(model.gain);
+            for (int channel = 0; channel < 3; ++channel) {
+                offsets[channel].push_back(model.offsets[channel]);
+            }
+        }
+        const double anchorGain = medianValue(std::move(gains));
+        PhotometricModel outputAnchor;
+        outputAnchor.gain = 1.0 / anchorGain;
+        for (int channel = 0; channel < 3; ++channel) {
+            outputAnchor.offsets[channel] =
+                -medianValue(std::move(offsets[channel])) / anchorGain;
+            m_photometricOutputAnchorMaxAbsOffset = std::max(
+                m_photometricOutputAnchorMaxAbsOffset,
+                std::abs(outputAnchor.offsets[channel]));
+        }
+        if (PhotometricNormalizer::applyInPlace(
+                resultRgb, width, height, outputAnchor)) {
+            m_photometricOutputAnchorGain = outputAnchor.gain;
+        } else {
+            m_photometricOutputAnchorMaxAbsOffset = 0.0;
+            qWarning() << "光度中位锚定不可靠，保留参考帧亮度";
+        }
+    }
 
     AlignmentBounds commonBounds;
     if (aligner.commonValidBounds(

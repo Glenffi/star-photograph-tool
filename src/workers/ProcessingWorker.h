@@ -18,6 +18,7 @@ public:
     struct Params {
         QString stackMethod = "average";
         double kappaValue = 2.5;
+        bool photometricNormalizationEnabled = true;
         bool noiseReductionEnabled = false;
         int noiseReductionStrength = 30;
         bool dewarpEnabled = false;
@@ -52,6 +53,22 @@ public:
     double worstAlignmentP95() const { return m_worstAlignmentP95; }
     double minimumAlignmentGridCoverage() const { return m_minimumGridCoverage; }
     qint64 stackingElapsedMs() const { return m_stackingElapsedMs; }
+    int photometricNormalizedFrameCount() const {
+        return m_photometricNormalizedFrameCount;
+    }
+    int photometricSkippedFrameCount() const {
+        return m_photometricSkippedFrameCount;
+    }
+    double averagePhotometricGain() const;
+    double minimumPhotometricGain() const { return m_photometricMinGain; }
+    double maximumPhotometricGain() const { return m_photometricMaxGain; }
+    double maximumPhotometricOffset() const { return m_photometricMaxAbsOffset; }
+    double photometricOutputAnchorGain() const {
+        return m_photometricOutputAnchorGain;
+    }
+    double photometricOutputAnchorOffset() const {
+        return m_photometricOutputAnchorMaxAbsOffset;
+    }
     bool wasCancelled() const { return m_wasCancelled; }
     const StarReductionStats& starReductionStats() const {
         return m_starReductionStats;
@@ -86,6 +103,14 @@ private:
     double m_worstAlignmentP95 = 0.0;
     double m_minimumGridCoverage = 0.0;
     qint64 m_stackingElapsedMs = 0;
+    int m_photometricNormalizedFrameCount = 0;
+    int m_photometricSkippedFrameCount = 0;
+    double m_photometricGainSum = 0.0;
+    double m_photometricMinGain = 1.0;
+    double m_photometricMaxGain = 1.0;
+    double m_photometricMaxAbsOffset = 0.0;
+    double m_photometricOutputAnchorGain = 1.0;
+    double m_photometricOutputAnchorMaxAbsOffset = 0.0;
     std::atomic<bool> m_cancelRequested{false};
     bool m_wasCancelled = false;
     StarReductionStats m_starReductionStats;

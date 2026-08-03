@@ -557,6 +557,8 @@ private slots:
         ProcessingWorker::Params params;
         params.stackMethod = m_paramsPanel->stackMethod();
         params.kappaValue = m_paramsPanel->kappaValue();
+        params.photometricNormalizationEnabled =
+            m_paramsPanel->photometricNormalizationEnabled();
         params.noiseReductionEnabled =
             m_paramsPanel->noiseReductionEnabled();
         params.noiseReductionStrength =

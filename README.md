@@ -9,6 +9,7 @@
 - 多张 RAW 图片叠加堆栈降噪
 - 星点检测、Affine / Homography 自动选择、全画幅 3×3 网格质量门禁
 - Average / Median / Kappa-Sigma / Winsorized 堆栈
+- 帧间光度匹配：稳健估计共享曝光增益与 RGB 背景偏移，并回到序列中位光度
 - 天空对齐、地景固定的天地分离堆栈
 - 线性 RGB 多尺度降噪，亮度与色度分离处理并保护强结构
 - 亮度引导去雾、低频背景色偏校正与 RGB 联动 Arcsinh 拉伸
@@ -61,6 +62,7 @@ StarProcessor/
 │   │   ├── StarDetector.h/cpp         # 星点检测与 2D 高斯拟合
 │   │   ├── ImageAligner.h/cpp         # 基于星点的图像对齐
 │   │   ├── StackingEngine.h/cpp       # 堆栈降噪（均值/中值/Kappa-Sigma/Winsorized）
+│   │   ├── PhotometricNormalizer.h/cpp # 帧间曝光与背景色偏匹配
 │   │   ├── NoiseReductionEngine.h/cpp # 线性 RGB 多尺度亮度/色度降噪
 │   │   ├── StarReducer.h/cpp          # Starless/Stars 分离 + 星层圆形 Minimum
 │   │   ├── ImageExporter.h/cpp        # 16-bit TIFF / PNG 8-bit 导出
@@ -139,7 +141,7 @@ cmake --build . --config Release
 .\Release\StarProcessor.exe
 ```
 
-> **注意**：当前 P2 阶段已实现核心处理链路（对齐 → 堆栈 → 线性降噪 → 自动优化 → Starless/Stars 缩星 → 导出）。
+> **注意**：当前 P2+ 已实现核心处理链路（对齐 → 帧间光度匹配 → 堆栈 → 线性降噪 → 自动优化 → Starless/Stars 缩星 → 导出）。
 
 ## 真实 RAW 样片回归
 
@@ -175,7 +177,7 @@ cmake --build . --config Release
   --denoise-strength 30 --stretch --star-reduce-strength 70
 ```
 
-工具会生成完整分辨率 TIFF 和 `pipeline-report.json`。报告分别记录全流程耗时、纯堆栈耗时、通道样本吞吐量、自动裁切偏移和画质选项。`--denoise-strength` 接受 `0–70`；`--stretch` 启用背景校正与 RGB 联动拉伸；`--dehaze-strength` 和 `--star-reduce-strength` 接受 `0–100`。处理期间，对齐帧写入系统临时目录并按 32 行分块堆栈；任务正常、失败或取消后都会自动清理。
+工具会生成完整分辨率 TIFF 和 `pipeline-report.json`。报告分别记录全流程耗时、纯堆栈耗时、通道样本吞吐量、光度模型、自动裁切偏移和画质选项。帧间光度匹配默认开启；`--no-photometric-normalization` 可关闭它用于 A/B 检查。`--denoise-strength` 接受 `0–70`；`--stretch` 启用背景校正与 RGB 联动拉伸；`--dehaze-strength` 和 `--star-reduce-strength` 接受 `0–100`。处理期间，对齐帧写入系统临时目录并按 32 行分块堆栈；任务正常、失败或取消后都会自动清理。
 
 `--memory-budget-mib` 可为测试或受控运行设置更低的内存上限。该值只能收紧平台安全预算，不能绕过实时内存门禁；传 `0` 或省略参数时使用自动预算。
 
