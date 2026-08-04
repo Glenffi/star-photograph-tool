@@ -308,12 +308,12 @@ void ParamsPanel::setupUI() {
     stackLayout->addLayout(groundMethodRow);
 
     auto* groundDetailRow = new QHBoxLayout();
-    m_groundDetailSlider = createSlider(0, 70, 35);
+    m_groundDetailSlider = createSlider(0, 70, 40);
     m_groundDetailSlider->setEnabled(false);
     m_groundDetailSlider->setFixedWidth(120);
     m_groundDetailSlider->setToolTip(QString::fromUtf8(
-        "恢复山体和建筑的局部细节；值过高会同时增强地景噪声"));
-    m_groundDetailLabel = new QLabel("35%", m_stackGroup);
+        "恢复山体和建筑的纹理与中尺度清晰度；值过高会同时增强地景噪声"));
+    m_groundDetailLabel = new QLabel("40%", m_stackGroup);
     m_groundDetailLabel->setMinimumWidth(32);
     connect(m_groundDetailSlider, &QSlider::valueChanged, this,
             [this](int value) {
@@ -727,7 +727,7 @@ void ParamsPanel::onRestoreDefaults() {
     m_skyGroundMode->setCurrentIndex(0);
     m_featherSlider->setValue(20);
     m_groundStackMethod->setCurrentIndex(0);
-    m_groundDetailSlider->setValue(35);
+    m_groundDetailSlider->setValue(40);
     m_userMaskPath.clear();
     m_maskPathLabel->clear();
     m_maskPathLabel->setVisible(false);
@@ -869,7 +869,7 @@ void ParamsPanel::loadPreset() {
     QString userMaskPath = settings.value("userMaskPath", QString()).toString();
     int featherRadius = settings.value("featherRadius", 20).toInt();
     int groundStackMethod = settings.value("groundStackMethod", 0).toInt();
-    int groundDetailStrength = settings.value("groundDetailStrength", 35).toInt();
+    int groundDetailStrength = settings.value("groundDetailStrength", 40).toInt();
 
     // 使用信号阻塞避免触发 paramsChanged
     QSignalBlocker blocker1(m_alignMethod);
@@ -979,7 +979,7 @@ void ParamsPanel::onPresetChanged(int index) {
             QString ump = settings.value("userMaskPath", QString()).toString();
             int fr = settings.value("featherRadius", 20).toInt();
             int gsm = settings.value("groundStackMethod", 0).toInt();
-            int gds = settings.value("groundDetailStrength", 35).toInt();
+            int gds = settings.value("groundDetailStrength", 40).toInt();
             QSignalBlocker sgBlocker1(m_skyGroundCheck);
             QSignalBlocker sgBlocker2(m_skyGroundMode);
             QSignalBlocker sgBlocker3(m_featherSlider);
@@ -1192,7 +1192,7 @@ QString ParamsPanel::groundStackMethod() const {
 }
 
 int ParamsPanel::groundDetailStrength() const {
-    return m_groundDetailSlider ? m_groundDetailSlider->value() : 35;
+    return m_groundDetailSlider ? m_groundDetailSlider->value() : 40;
 }
 
 void ParamsPanel::setMaskPreview(const std::vector<uint8_t>& mask, int w, int h) {

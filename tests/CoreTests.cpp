@@ -385,7 +385,7 @@ void testRgbAutoOptimize() {
           "Spatial background interpolation should remain continuous at grid edges");
 
     constexpr int detailWidth = 16;
-    constexpr int detailHeight = 10;
+    constexpr int detailHeight = 24;
     std::vector<uint16_t> detailRgb(detailWidth * detailHeight * 3);
     std::vector<uint8_t> skyMask(detailWidth * detailHeight);
     for (int y = 0; y < detailHeight; ++y) {
@@ -403,18 +403,22 @@ void testRgbAutoOptimize() {
         return image[(static_cast<size_t>(y) * detailWidth + x) * 3];
     };
     const int contrastBefore =
-        valueAt(detailRgb, 8, 7) - valueAt(detailRgb, 7, 7);
+        valueAt(detailRgb, 8, 14) - valueAt(detailRgb, 7, 14);
     check(AutoOptimizeEngine::enhanceGroundDetail(
               detailRgb, detailWidth, detailHeight, skyMask, 50),
           "Ground detail recovery should accept a matching RGB image and mask");
-    const int contrastAfter =
-        valueAt(detailRgb, 8, 7) - valueAt(detailRgb, 7, 7);
+    const int nearHorizonContrast =
+        valueAt(detailRgb, 8, 14) - valueAt(detailRgb, 7, 14);
+    const int nearForegroundContrast =
+        valueAt(detailRgb, 8, 22) - valueAt(detailRgb, 7, 22);
     check(std::equal(detailRgb.begin(),
                      detailRgb.begin() + detailWidth * (detailHeight / 2) * 3,
                      detailInput.begin()),
           "Ground detail recovery should leave the sky region bit-exact");
-    check(contrastAfter > contrastBefore,
+    check(nearHorizonContrast > contrastBefore,
           "Ground detail recovery should increase foreground edge contrast");
+    check(nearHorizonContrast > nearForegroundContrast,
+          "Medium-scale ground clarity should favor distant terrain near the horizon");
     bool detailStayedNeutral = true;
     for (size_t base = 0; base < detailRgb.size(); base += 3) {
         detailStayedNeutral = detailStayedNeutral &&

@@ -97,7 +97,7 @@ int main(int argc, char* argv[]) {
     const QCommandLineOption groundDetailOption(
         "ground-detail-strength",
         "Ground-only luminance detail recovery (0-70).",
-        "value", "35");
+        "value", "40");
     const QCommandLineOption denoiseOption(
         "denoise-strength",
         "Enable linear RGB multiscale denoise at strength 1-70; 0 disables it.",

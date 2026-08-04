@@ -25,8 +25,9 @@ public:
                                         int w, int h,
                                         std::vector<uint16_t>& dst);
 
-    // Restores small-scale luminance contrast only where skyMask approaches
-    // zero. RGB is rebuilt with one luminance ratio so ground color is stable.
+    // Restores fine texture and medium-scale clarity only where skyMask
+    // approaches zero. The clarity layer favors distant ground near the
+    // horizon; RGB uses one luminance ratio so ground color remains stable.
     static bool enhanceGroundDetail(std::vector<uint16_t>& image,
                                     int w, int h,
                                     const std::vector<uint8_t>& skyMask,

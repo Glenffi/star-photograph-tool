@@ -285,55 +285,99 @@ bool AutoOptimizeEngine::enhanceGroundDetail(
 
     std::vector<uint16_t> luminance(pixelCount);
     std::vector<uint16_t> horizontal(pixelCount);
+    std::vector<int> horizon(static_cast<size_t>(w), h);
     for (size_t pixel = 0; pixel < pixelCount; ++pixel) {
         luminance[pixel] = luminanceAt(image, pixel);
     }
+    for (int x = 0; x < w; ++x) {
+        for (int y = 0; y < h; ++y) {
+            if (skyMask[static_cast<size_t>(y) * w + x] < 128) {
+                horizon[static_cast<size_t>(x)] = y;
+                break;
+            }
+        }
+    }
 
-    // Binomial [1 4 6 4 1] is a compact Gaussian approximation. Keeping the
-    // horizontal pass separate avoids large float planes on 40 MP images.
+    // Binomial [1 4 6 4 1] is a compact Gaussian approximation. An atrous
+    // step lets the same kernel recover both fine texture and medium-scale
+    // clarity without allocating additional full-resolution planes.
     constexpr std::array<uint32_t, 5> kernel = {1, 4, 6, 4, 1};
-    for (int y = 0; y < h; ++y) {
-        for (int x = 0; x < w; ++x) {
-            uint32_t sum = 0;
-            for (int k = -2; k <= 2; ++k) {
-                const int sampleX = std::clamp(x + k, 0, w - 1);
-                sum += kernel[static_cast<size_t>(k + 2)] *
-                    luminance[static_cast<size_t>(y) * w + sampleX];
+    const auto applyDetailPass = [&](int sampleStep, double amountScale,
+                                     double thresholdFloor,
+                                     double thresholdFraction,
+                                     double minimumRatio,
+                                     double maximumRatio,
+                                     bool favorDistantGround) {
+        for (int y = 0; y < h; ++y) {
+            for (int x = 0; x < w; ++x) {
+                uint32_t sum = 0;
+                for (int k = -2; k <= 2; ++k) {
+                    const int sampleX =
+                        std::clamp(x + k * sampleStep, 0, w - 1);
+                    sum += kernel[static_cast<size_t>(k + 2)] *
+                        luminance[static_cast<size_t>(y) * w + sampleX];
+                }
+                horizontal[static_cast<size_t>(y) * w + x] =
+                    static_cast<uint16_t>((sum + 8) / 16);
             }
-            horizontal[static_cast<size_t>(y) * w + x] =
-                static_cast<uint16_t>((sum + 8) / 16);
         }
-    }
 
-    const double amount = strength / 100.0 * 1.15;
-    for (int y = 0; y < h; ++y) {
-        for (int x = 0; x < w; ++x) {
-            const size_t pixel = static_cast<size_t>(y) * w + x;
-            const double groundWeight = (255.0 - skyMask[pixel]) / 255.0;
-            if (groundWeight <= 0.0) continue;
-            uint32_t sum = 0;
-            for (int k = -2; k <= 2; ++k) {
-                const int sampleY = std::clamp(y + k, 0, h - 1);
-                sum += kernel[static_cast<size_t>(k + 2)] *
-                    horizontal[static_cast<size_t>(sampleY) * w + x];
-            }
-            const double blurred = (sum + 8) / 16.0;
-            const double original = luminance[pixel];
-            const double detail = original - blurred;
-            const double threshold = std::max(24.0, original * 0.0015);
-            const double retained = std::copysign(
-                std::max(0.0, std::abs(detail) - threshold), detail);
-            const double target = std::clamp(
-                original + retained * amount * groundWeight, 0.0, 65535.0);
-            if (original <= 1.0 || target == original) continue;
-            const double ratio = std::clamp(target / original, 0.8, 1.25);
-            const size_t base = pixel * 3;
-            for (size_t channel = 0; channel < 3; ++channel) {
-                image[base + channel] = clampToUint16(
-                    image[base + channel] * ratio);
+        const double amount = strength / 100.0 * amountScale;
+        for (int y = 0; y < h; ++y) {
+            for (int x = 0; x < w; ++x) {
+                const size_t pixel = static_cast<size_t>(y) * w + x;
+                const double groundWeight =
+                    (255.0 - skyMask[pixel]) / 255.0;
+                if (groundWeight <= 0.0) continue;
+                double distanceWeight = 1.0;
+                if (favorDistantGround) {
+                    const int boundary = horizon[static_cast<size_t>(x)];
+                    const double depth = boundary < h
+                        ? std::clamp(
+                              static_cast<double>(y - boundary) /
+                                  std::max(1, h - boundary),
+                              0.0, 1.0)
+                        : 0.0;
+                    // Distant ridges need medium-scale contrast more than the
+                    // already textured near foreground. Tapering toward the
+                    // bottom also limits amplified grass and sensor noise.
+                    distanceWeight = 1.0 - 0.6 * depth;
+                }
+                uint32_t sum = 0;
+                for (int k = -2; k <= 2; ++k) {
+                    const int sampleY =
+                        std::clamp(y + k * sampleStep, 0, h - 1);
+                    sum += kernel[static_cast<size_t>(k + 2)] *
+                        horizontal[static_cast<size_t>(sampleY) * w + x];
+                }
+                const double blurred = (sum + 8) / 16.0;
+                const double original = luminance[pixel];
+                const double detail = original - blurred;
+                const double threshold = std::max(
+                    thresholdFloor, original * thresholdFraction);
+                const double retained = std::copysign(
+                    std::max(0.0, std::abs(detail) - threshold), detail);
+                const double current = luminanceAt(image, pixel);
+                const double target = std::clamp(
+                    current + retained * amount * groundWeight * distanceWeight,
+                    0.0, 65535.0);
+                if (current <= 1.0 || target == current) continue;
+                const double ratio = std::clamp(
+                    target / current, minimumRatio, maximumRatio);
+                const size_t base = pixel * 3;
+                for (size_t channel = 0; channel < 3; ++channel) {
+                    image[base + channel] = clampToUint16(
+                        image[base + channel] * ratio);
+                }
             }
         }
-    }
+    };
+
+    applyDetailPass(1, 1.15, 24.0, 0.0015, 0.80, 1.25, false);
+    // Step 4 corresponds to roughly 4 px sigma at full resolution. This layer
+    // makes hazy ridges and buildings read at normal viewing size; the stronger
+    // threshold and tighter ratio limits avoid turning sensor noise into grit.
+    applyDetailPass(4, 2.5, 64.0, 0.0030, 0.86, 1.18, true);
     return true;
 }
 
