@@ -20,6 +20,7 @@
 namespace {
 
 constexpr uint64_t kGiB = 1024ULL * 1024ULL * 1024ULL;
+constexpr uint64_t kComparisonPreviewWorkingBytes = 32ULL * 1024ULL * 1024ULL;
 
 bool checkedMultiply(uint64_t left, uint64_t right, uint64_t& result) {
     if (left != 0 && right > std::numeric_limits<uint64_t>::max() / left) return false;
@@ -89,6 +90,19 @@ uint64_t ProcessingMemoryEstimator::estimatePeakBytes(
 
     uint64_t postProcessPeak = 0;
     if (!checkedMultiply(frameBytes, 2, postProcessPeak)) return 0;
+    const bool createsComparisonPreview = options.skyGroundSeparation ||
+        options.noiseReduction || options.dehaze || options.stretch ||
+        options.starReduction;
+    if (createsComparisonPreview) {
+        if (frameBytes > std::numeric_limits<uint64_t>::max() -
+                             kComparisonPreviewWorkingBytes) {
+            return 0;
+        }
+        // The bounded RGB8 vector and its owned QImage briefly coexist while
+        // the full-resolution stack remains resident.
+        postProcessPeak = std::max(
+            postProcessPeak, frameBytes + kComparisonPreviewWorkingBytes);
+    }
     auto includeFrameEquivalents = [&](bool enabled, uint64_t equivalents) {
         if (!enabled) return true;
         uint64_t stage = 0;

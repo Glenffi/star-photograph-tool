@@ -7,6 +7,8 @@
 
 #include <QMetaObject>
 
+#include <algorithm>
+
 class ThumbnailTask : public QRunnable {
 public:
     ThumbnailTask(const QString& filePath, int maxSize, ThumbnailGenerator* generator)
@@ -75,7 +77,9 @@ private:
 ThumbnailGenerator::ThumbnailGenerator(QObject* parent)
     : QObject(parent)
 {
-    m_pool.setMaxThreadCount(QThread::idealThreadCount());
+    // RAW fallback previews are CPU- and I/O-heavy. A small pool avoids eight
+    // simultaneous LibRaw decodes starving the central preview and UI thread.
+    m_pool.setMaxThreadCount(std::clamp(QThread::idealThreadCount(), 1, 2));
     m_pool.setExpiryTimeout(30000); // 30秒超时
     
     // 在构造函数中一次性连接 batch 进度跟踪，避免 generateBatch 重复连接

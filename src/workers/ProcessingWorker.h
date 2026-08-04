@@ -5,6 +5,7 @@
 #include "core/StarReducer.h"
 
 #include <QThread>
+#include <QImage>
 #include <QString>
 #include <QStringList>
 
@@ -47,6 +48,9 @@ public:
 
     // These accessors are called by the GUI only after QThread::finished.
     std::vector<uint16_t> takeStackedData();
+    QImage takeBeforePreview();
+    uint16_t beforePreviewBlackPoint() const { return m_beforePreviewBlackPoint; }
+    uint16_t beforePreviewWhitePoint() const { return m_beforePreviewWhitePoint; }
     int stackedWidth() const { return m_width; }
     int stackedHeight() const { return m_height; }
     int cropOffsetX() const { return m_cropOffsetX; }
@@ -105,6 +109,12 @@ private:
     QString m_referenceFrame;
     Params m_params;
     std::vector<uint16_t> m_stackedData;
+    // Bounded 8-bit preview captured after stacking/cropping and before the
+    // optional finishing stages. It enables comparison without retaining a
+    // second full-resolution 16-bit RGB frame in memory.
+    QImage m_beforePreview;
+    uint16_t m_beforePreviewBlackPoint = 0;
+    uint16_t m_beforePreviewWhitePoint = 65535;
     int m_width = 0;
     int m_height = 0;
     int m_cropOffsetX = 0;

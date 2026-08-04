@@ -47,6 +47,7 @@ public:
     int featherRadius() const;
     QString groundStackMethod() const;
     int groundDetailStrength() const;
+    QString processingSignature() const;
     void setMaskPreview(const std::vector<uint8_t>& mask, int w, int h);
     void setDetectMaskEnabled(bool enabled);
 
@@ -74,6 +75,7 @@ private:
     QSlider* createSlider(int min, int max, int value, const QString& suffix = QString());
 
     void updateSkyGroundControls();
+    void markPresetCustom();
 
     // 预设
     QComboBox* m_presetCombo = nullptr;
@@ -95,14 +97,17 @@ private:
     QGroupBox* m_optimizeGroup = nullptr;
     QCheckBox* m_dewarpCheck = nullptr;
     QSlider* m_dewarpSlider = nullptr;
+    QLabel* m_dewarpLabel = nullptr;
     QCheckBox* m_noiseReductionCheck = nullptr;
     QSlider* m_noiseReductionSlider = nullptr;
+    QLabel* m_noiseReductionLabel = nullptr;
     QCheckBox* m_stretchCheck = nullptr;
 
     // 缩星组
     QWidget* m_starReduceGroup = nullptr;
     QCheckBox* m_starReduceCheck = nullptr;
     QSlider* m_starReduceSlider = nullptr;
+    QLabel* m_starReduceLabel = nullptr;
 
     // 输出组
     QWidget* m_outputGroup = nullptr;
@@ -120,6 +125,7 @@ private:
     QPushButton* m_importMaskBtn = nullptr;
     QLabel* m_maskPathLabel = nullptr;
     QSlider* m_featherSlider = nullptr;
+    QLabel* m_featherLabel = nullptr;
     QComboBox* m_groundStackMethod = nullptr;
     QSlider* m_groundDetailSlider = nullptr;
     QLabel* m_groundDetailLabel = nullptr;

@@ -1,6 +1,5 @@
 #include "ProjectPanel.h"
 #include "../core/ThumbnailGenerator.h"
-#include "../core/RawImageLoader.h"
 #include <QScrollArea>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -11,13 +10,46 @@
 #include <QMenu>
 #include <QAction>
 #include <QMouseEvent>
-#include <QDebug>
-#include <QPainter>
 #include <QGraphicsOpacityEffect>
 #include <QEnterEvent>
+#include <QResizeEvent>
 #include <QDragEnterEvent>
 #include <QDropEvent>
 #include <QMimeData>
+
+#include <algorithm>
+#include <utility>
+
+namespace {
+
+QString formatExposure(double exposureTime) {
+    if (exposureTime <= 0.0) {
+        return QString::fromUtf8("曝光 --");
+    }
+
+    if (exposureTime >= 1.0) {
+        const int decimals = exposureTime < 10.0 ? 1 : 0;
+        return QString::fromUtf8("%1 s").arg(exposureTime, 0, 'f', decimals);
+    }
+
+    return QString::fromUtf8("1/%1 s").arg(qRound(1.0 / exposureTime));
+}
+
+QString formatMetadata(const FileItem& item) {
+    if (item.iso <= 0 && item.exposureTime <= 0.0 && item.focalLength <= 0) {
+        return QString::fromUtf8("正在读取元数据...");
+    }
+    const QString iso = item.iso > 0
+        ? QString::fromUtf8("ISO %1").arg(item.iso)
+        : QString::fromUtf8("ISO --");
+    const QString focalLength = item.focalLength > 0
+        ? QString::fromUtf8("%1 mm").arg(item.focalLength)
+        : QString::fromUtf8("焦距 --");
+    return QString::fromUtf8("%1 · %2 · %3")
+        .arg(iso, formatExposure(item.exposureTime), focalLength);
+}
+
+} // namespace
 
 // ==================== FileCard ====================
 
@@ -25,88 +57,83 @@ FileCard::FileCard(const FileItem& item, QWidget* parent)
     : QWidget(parent)
     , m_isReference(item.isReferenceFrame)
     , m_isExcluded(item.isExcluded)
+    , m_fileName(item.fileName)
 {
-    setFixedHeight(72);
+    setFixedHeight(76);
+    setMinimumWidth(0);
     setCursor(Qt::PointingHandCursor);
     setContextMenuPolicy(Qt::CustomContextMenu);
 
     auto* layout = new QHBoxLayout(this);
-    layout->setContentsMargins(12, 8, 12, 8);
-    layout->setSpacing(10);
+    layout->setContentsMargins(10, 10, 10, 10);
+    layout->setSpacing(9);
 
     // 缩略图
     m_thumbnailLabel = new QLabel(this);
-    m_thumbnailLabel->setFixedSize(48, 48);
+    m_thumbnailLabel->setFixedSize(52, 52);
     m_thumbnailLabel->setScaledContents(true);
-    m_thumbnailLabel->setStyleSheet("border-radius: 4px; background-color: #21262D;");
+    m_thumbnailLabel->setStyleSheet(
+        "border: 1px solid #2A3035; border-radius: 5px; background-color: #1D2125;"
+    );
     if (!item.thumbnail.isNull() && item.hasThumbnail) {
-        m_thumbnailLabel->setPixmap(item.thumbnail.scaled(48, 48, Qt::KeepAspectRatio, Qt::SmoothTransformation));
+        m_thumbnailLabel->setPixmap(item.thumbnail.scaled(52, 52, Qt::KeepAspectRatio, Qt::SmoothTransformation));
     } else {
-        QPixmap placeholder(48, 48);
-        placeholder.fill(QColor("#30363D"));
+        QPixmap placeholder(52, 52);
+        placeholder.fill(QColor("#1D2125"));
         m_thumbnailLabel->setPixmap(placeholder);
     }
     layout->addWidget(m_thumbnailLabel, 0, Qt::AlignVCenter);
 
     // 文本区域
     auto* textLayout = new QVBoxLayout();
-    textLayout->setSpacing(2);
+    textLayout->setSpacing(4);
     textLayout->setContentsMargins(0, 0, 0, 0);
 
     m_nameLabel = new QLabel(this);
-    m_nameLabel->setStyleSheet("font-size: 13px; font-weight: bold; color: #E6EDF3; background-color: transparent;");
-    m_nameLabel->setText(item.fileName);
+    m_nameLabel->setMinimumWidth(0);
+    m_nameLabel->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+    m_nameLabel->setToolTip(item.fileName);
+    m_nameLabel->setStyleSheet(
+        "font-size: 13px; font-weight: 600; color: #F2F4F5; background-color: transparent;"
+    );
+    m_nameLabel->setText(m_fileName);
     textLayout->addWidget(m_nameLabel);
 
     // 元数据行
-    QStringList metaParts;
-    if (item.iso > 0) metaParts.append(QString("ISO %1").arg(item.iso));
-    if (item.exposureTime > 0) {
-        if (item.exposureTime >= 1.0) {
-            metaParts.append(QString("%1s").arg(item.exposureTime, 0, 'f', 1));
-        } else {
-            metaParts.append(QString("1/%1s").arg(qRound(1.0 / item.exposureTime)));
-        }
-    }
-    // FWHM 占位，后续实现
-    metaParts.append(QString::fromUtf8("FWHM —"));
-
     m_metaLabel = new QLabel(this);
-    m_metaLabel->setStyleSheet("font-size: 11px; color: #8B949E; background-color: transparent;");
-    m_metaLabel->setText(metaParts.join(" | "));
+    m_metaLabel->setMinimumWidth(0);
+    m_metaLabel->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+    m_metaLabel->setStyleSheet(
+        "font-size: 11px; color: #99A2AA; background-color: transparent;"
+    );
+    m_metaLabel->setText(formatMetadata(item));
     textLayout->addWidget(m_metaLabel);
 
     layout->addLayout(textLayout, 1);
 
     // 状态标签（参考/排除）
     m_statusLabel = new QLabel(this);
-    m_statusLabel->setStyleSheet("font-size: 10px; font-weight: bold; background-color: transparent; padding: 2px 6px; border-radius: 4px;");
+    m_statusLabel->setFixedWidth(34);
     m_statusLabel->setAlignment(Qt::AlignCenter);
     layout->addWidget(m_statusLabel, 0, Qt::AlignVCenter);
 
+    m_opacityEffect = new QGraphicsOpacityEffect(this);
+    setGraphicsEffect(m_opacityEffect);
     updateStyle();
 }
 
 void FileCard::updateFromItem(const FileItem& item) {
     m_isReference = item.isReferenceFrame;
     m_isExcluded = item.isExcluded;
-    m_nameLabel->setText(item.fileName);
+    m_fileName = item.fileName;
+    m_nameLabel->setToolTip(m_fileName);
+    updateElidedName();
 
     if (!item.thumbnail.isNull() && item.hasThumbnail) {
-        m_thumbnailLabel->setPixmap(item.thumbnail.scaled(48, 48, Qt::KeepAspectRatio, Qt::SmoothTransformation));
+        m_thumbnailLabel->setPixmap(item.thumbnail.scaled(52, 52, Qt::KeepAspectRatio, Qt::SmoothTransformation));
     }
 
-    QStringList metaParts;
-    if (item.iso > 0) metaParts.append(QString("ISO %1").arg(item.iso));
-    if (item.exposureTime > 0) {
-        if (item.exposureTime >= 1.0) {
-            metaParts.append(QString("%1s").arg(item.exposureTime, 0, 'f', 1));
-        } else {
-            metaParts.append(QString("1/%1s").arg(qRound(1.0 / item.exposureTime)));
-        }
-    }
-    metaParts.append(QString::fromUtf8("FWHM —"));
-    m_metaLabel->setText(metaParts.join(" | "));
+    m_metaLabel->setText(formatMetadata(item));
 
     updateStyle();
 }
@@ -117,18 +144,18 @@ void FileCard::setSelected(bool selected) {
 }
 
 void FileCard::updateStyle() {
-    QString borderColor = m_selected ? "#58A6FF" : "transparent";
+    const QString borderColor = m_selected ? "#5EA7FF" : "#2A3035";
     QString bgColor;
     if (m_selected) {
-        bgColor = "#21262D";
+        bgColor = "#1D2125";
     } else if (m_hovered) {
-        bgColor = "#21262D";
+        bgColor = "#171A1D";
     } else {
-        bgColor = "transparent";
+        bgColor = "#111315";
     }
 
-    int leftBorder = m_isReference ? 3 : 0;
-    QString leftBorderColor = m_isReference ? "#F0B90B" : "transparent";
+    const int leftBorder = m_isReference ? 3 : 1;
+    const QString leftBorderColor = m_isReference ? "#F4B740" : borderColor;
 
     setStyleSheet(QString(
         "FileCard {"
@@ -142,25 +169,33 @@ void FileCard::updateStyle() {
     // 状态标签
     if (m_isReference) {
         m_statusLabel->setText(QString::fromUtf8("参考"));
-        m_statusLabel->setStyleSheet("font-size: 10px; font-weight: bold; color: #F0B90B; background-color: transparent; padding: 2px 6px; border-radius: 4px;");
+        m_statusLabel->setStyleSheet(
+            "font-size: 10px; font-weight: 600; color: #F4B740; background-color: transparent;"
+        );
     } else if (m_isExcluded) {
         m_statusLabel->setText(QString::fromUtf8("排除"));
-        m_statusLabel->setStyleSheet("font-size: 10px; font-weight: bold; color: #8B949E; background-color: transparent; padding: 2px 6px; border-radius: 4px;");
+        m_statusLabel->setStyleSheet(
+            "font-size: 10px; font-weight: 600; color: #99A2AA; background-color: transparent;"
+        );
     } else {
         m_statusLabel->setText("");
+        m_statusLabel->setStyleSheet("background-color: transparent;");
     }
 
-    // 排除状态：整体透明度
-    if (m_isExcluded) {
-        setGraphicsEffect(nullptr);
-        QGraphicsOpacityEffect* opacity = new QGraphicsOpacityEffect(this);
-        opacity->setOpacity(0.5);
-        setGraphicsEffect(opacity);
-    } else {
-        setGraphicsEffect(nullptr);
-    }
+    m_opacityEffect->setOpacity(m_isExcluded ? 0.48 : 1.0);
 
     update();
+}
+
+void FileCard::updateElidedName() {
+    const int availableWidth = m_nameLabel->width();
+    if (availableWidth <= 0) {
+        m_nameLabel->setText(m_fileName);
+        return;
+    }
+    m_nameLabel->setText(
+        m_nameLabel->fontMetrics().elidedText(m_fileName, Qt::ElideMiddle, availableWidth)
+    );
 }
 
 void FileCard::mousePressEvent(QMouseEvent* event) {
@@ -182,6 +217,11 @@ void FileCard::leaveEvent(QEvent* event) {
     QWidget::leaveEvent(event);
 }
 
+void FileCard::resizeEvent(QResizeEvent* event) {
+    QWidget::resizeEvent(event);
+    updateElidedName();
+}
+
 // ==================== ProjectPanel ====================
 
 ProjectPanel::ProjectPanel(QWidget* parent)
@@ -200,26 +240,53 @@ ProjectPanel::ProjectPanel(QWidget* parent)
 ProjectPanel::~ProjectPanel() = default;
 
 void ProjectPanel::setupUI() {
+    setStyleSheet("ProjectPanel { background-color: #111315; }");
+
     auto* layout = new QVBoxLayout(this);
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(0);
 
     // 标题栏
     auto* titleBar = new QWidget(this);
-    titleBar->setFixedHeight(36);
-    titleBar->setStyleSheet("background-color: #161B22; border-bottom: 1px solid #30363D;");
+    titleBar->setFixedHeight(44);
+    titleBar->setStyleSheet("background-color: #171A1D; border-bottom: 1px solid #2A3035;");
     auto* titleLayout = new QHBoxLayout(titleBar);
-    titleLayout->setContentsMargins(12, 0, 12, 0);
-    titleLayout->setSpacing(0);
-    auto* titleLabel = new QLabel(QString::fromUtf8("📁 项目文件"), titleBar);
-    titleLabel->setStyleSheet("font-size: 13px; font-weight: bold; color: #E6EDF3; background-color: transparent;");
+    titleLayout->setContentsMargins(12, 0, 8, 0);
+    titleLayout->setSpacing(8);
+    auto* titleLabel = new QLabel(QString::fromUtf8("素材"), titleBar);
+    titleLabel->setStyleSheet(
+        "font-size: 14px; font-weight: 600; color: #F2F4F5; background-color: transparent;"
+    );
     titleLayout->addWidget(titleLabel);
+
+    m_countLabel = new QLabel(QStringLiteral("0"), titleBar);
+    m_countLabel->setAlignment(Qt::AlignCenter);
+    m_countLabel->setMinimumWidth(24);
+    m_countLabel->setFixedHeight(20);
+    m_countLabel->setStyleSheet(
+        "color: #99A2AA; background-color: #1D2125; border: 1px solid #2A3035;"
+        "border-radius: 5px; padding: 0 6px; font-size: 11px;"
+    );
+    titleLayout->addWidget(m_countLabel);
     titleLayout->addStretch();
+
+    m_headerImportBtn = new QPushButton(QStringLiteral("+"), titleBar);
+    m_headerImportBtn->setFixedSize(28, 28);
+    m_headerImportBtn->setCursor(Qt::PointingHandCursor);
+    m_headerImportBtn->setToolTip(QString::fromUtf8("导入 RAW 文件"));
+    m_headerImportBtn->setStyleSheet(
+        "QPushButton { color: #F2F4F5; background-color: transparent; border: 1px solid #2A3035;"
+        "border-radius: 5px; font-size: 18px; font-weight: 400; padding: 0; }"
+        "QPushButton:hover { color: #111315; background-color: #3CC7A5; border-color: #3CC7A5; }"
+        "QPushButton:pressed { background-color: #32AD90; border-color: #32AD90; }"
+    );
+    connect(m_headerImportBtn, &QPushButton::clicked, this, &ProjectPanel::onImportClicked);
+    titleLayout->addWidget(m_headerImportBtn);
     layout->addWidget(titleBar);
 
     // 内容区域（文件列表或空状态）
     auto* contentWidget = new QWidget(this);
-    contentWidget->setStyleSheet("background-color: #0D1117;");
+    contentWidget->setStyleSheet("background-color: #111315;");
     auto* contentLayout = new QVBoxLayout(contentWidget);
     contentLayout->setContentsMargins(0, 0, 0, 0);
     contentLayout->setSpacing(0);
@@ -242,27 +309,27 @@ void ProjectPanel::setupUI() {
     // 右键菜单
     m_contextMenu = new QMenu(this);
     m_contextMenu->setStyleSheet(
-        "QMenu { background-color: #161B22; color: #E6EDF3; border: 1px solid #30363D; padding: 4px; }"
-        "QMenu::item { padding: 6px 20px; border-radius: 4px; }"
-        "QMenu::item:selected { background-color: #30363D; }"
-        "QMenu::separator { height: 1px; background-color: #30363D; margin: 4px 8px; }"
+        "QMenu { background-color: #171A1D; color: #F2F4F5; border: 1px solid #2A3035; padding: 5px; }"
+        "QMenu::item { padding: 7px 22px 7px 10px; border-radius: 4px; }"
+        "QMenu::item:selected { background-color: #1D2125; color: #F2F4F5; }"
+        "QMenu::separator { height: 1px; background-color: #2A3035; margin: 5px 8px; }"
     );
 
-    m_referenceAction = new QAction(QString::fromUtf8("⭐ 设为参考帧"), this);
+    m_referenceAction = new QAction(QString::fromUtf8("设为参考帧"), this);
     connect(m_referenceAction, &QAction::triggered, this, &ProjectPanel::onSetReferenceFrame);
     m_contextMenu->addAction(m_referenceAction);
 
-    m_excludeAction = new QAction(QString::fromUtf8("🚫 排除 / 恢复"), this);
+    m_excludeAction = new QAction(QString::fromUtf8("排除 / 恢复"), this);
     connect(m_excludeAction, &QAction::triggered, this, &ProjectPanel::onExcludeSelected);
     m_contextMenu->addAction(m_excludeAction);
 
     m_contextMenu->addSeparator();
 
-    m_metadataAction = new QAction(QString::fromUtf8("📄 查看元数据"), this);
+    m_metadataAction = new QAction(QString::fromUtf8("查看元数据"), this);
     connect(m_metadataAction, &QAction::triggered, this, &ProjectPanel::onViewMetadata);
     m_contextMenu->addAction(m_metadataAction);
 
-    m_removeAction = new QAction(QString::fromUtf8("❌ 从列表移除"), this);
+    m_removeAction = new QAction(QString::fromUtf8("从列表移除"), this);
     connect(m_removeAction, &QAction::triggered, this, &ProjectPanel::onRemoveFromList);
     m_contextMenu->addAction(m_removeAction);
 }
@@ -271,42 +338,43 @@ void ProjectPanel::setupEmptyState() {
     m_emptyState = new QWidget(this);
     m_emptyState->setStyleSheet("background-color: transparent;");
     m_emptyLayout = new QVBoxLayout(m_emptyState);
-    m_emptyLayout->setSpacing(12);
+    m_emptyLayout->setContentsMargins(24, 24, 24, 24);
+    m_emptyLayout->setSpacing(8);
     m_emptyLayout->setAlignment(Qt::AlignCenter);
 
-    auto* iconLabel = new QLabel(QString::fromUtf8("📁"), m_emptyState);
-    iconLabel->setStyleSheet("font-size: 48px; color: #484F58; background-color: transparent;");
-    iconLabel->setAlignment(Qt::AlignCenter);
-    m_emptyLayout->addWidget(iconLabel);
-
-    auto* textLabel = new QLabel(QString::fromUtf8("拖入 RAW 文件或点击导入"), m_emptyState);
-    textLabel->setStyleSheet("font-size: 14px; color: #8B949E; background-color: transparent;");
+    auto* textLabel = new QLabel(QString::fromUtf8("拖放 RAW 文件到这里"), m_emptyState);
+    textLabel->setStyleSheet(
+        "font-size: 14px; font-weight: 600; color: #F2F4F5; background-color: transparent;"
+    );
     textLabel->setAlignment(Qt::AlignCenter);
     m_emptyLayout->addWidget(textLabel);
 
-    auto* formatLabel = new QLabel(QString::fromUtf8("支持 NEF, CR2, ARW, DNG, RAW, ORF, RAF, PEF, CR3"), m_emptyState);
-    formatLabel->setStyleSheet("font-size: 11px; color: #6E7681; background-color: transparent;");
+    auto* formatLabel = new QLabel(QString::fromUtf8("支持常见相机 RAW 格式"), m_emptyState);
+    formatLabel->setStyleSheet("font-size: 11px; color: #99A2AA; background-color: transparent;");
     formatLabel->setAlignment(Qt::AlignCenter);
     m_emptyLayout->addWidget(formatLabel);
 
-    m_emptyImportBtn = new QPushButton(QString::fromUtf8("📁 导入 RAW 文件"), m_emptyState);
-    m_emptyImportBtn->setFixedHeight(36);
+    m_emptyLayout->addSpacing(8);
+
+    m_emptyImportBtn = new QPushButton(QString::fromUtf8("导入文件"), m_emptyState);
+    m_emptyImportBtn->setFixedSize(112, 34);
     m_emptyImportBtn->setCursor(Qt::PointingHandCursor);
     m_emptyImportBtn->setStyleSheet(
         "QPushButton {"
-        "  background-color: #F0B90B;"
-        "  color: #0D1117;"
-        "  border: none;"
-        "  border-radius: 6px;"
-        "  padding: 8px 20px;"
+        "  background-color: #1D2125;"
+        "  color: #DDE1E4;"
+        "  border: 1px solid #30373D;"
+        "  border-radius: 5px;"
+        "  padding: 0 16px;"
         "  font-size: 13px;"
-        "  font-weight: bold;"
+        "  font-weight: 600;"
         "}"
         "QPushButton:hover {"
-        "  background-color: #F5C518;"
+        "  background-color: #272C31;"
+        "  border-color: #465059;"
         "}"
         "QPushButton:pressed {"
-        "  background-color: #D4A009;"
+        "  background-color: #30373D;"
         "}"
     );
     connect(m_emptyImportBtn, &QPushButton::clicked, this, &ProjectPanel::onImportClicked);
@@ -318,17 +386,18 @@ void ProjectPanel::setupFileList() {
     m_scrollArea->setWidgetResizable(true);
     m_scrollArea->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     m_scrollArea->setStyleSheet(
-        "QScrollArea { background-color: #0D1117; border: none; }"
-        "QScrollBar:vertical { background-color: #0D1117; width: 12px; border-radius: 6px; }"
-        "QScrollBar::handle:vertical { background-color: #30363D; border-radius: 6px; min-height: 20px; }"
-        "QScrollBar::handle:vertical:hover { background-color: #484F58; }"
+        "QScrollArea { background-color: #111315; border: none; }"
+        "QScrollBar:vertical { background-color: #111315; width: 10px; margin: 2px; }"
+        "QScrollBar::handle:vertical { background-color: #2A3035; border-radius: 3px; min-height: 28px; }"
+        "QScrollBar::handle:vertical:hover { background-color: #3A4248; }"
+        "QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }"
     );
 
     m_listContainer = new QWidget();
-    m_listContainer->setStyleSheet("background-color: #0D1117;");
+    m_listContainer->setStyleSheet("background-color: #111315;");
     m_listLayout = new QVBoxLayout(m_listContainer);
     m_listLayout->setContentsMargins(8, 8, 8, 8);
-    m_listLayout->setSpacing(4);
+    m_listLayout->setSpacing(6);
     m_listLayout->addStretch();
 
     m_scrollArea->setWidget(m_listContainer);
@@ -336,12 +405,12 @@ void ProjectPanel::setupFileList() {
 
 void ProjectPanel::setupBottomBar() {
     m_bottomLabel = new QLabel(this);
-    m_bottomLabel->setFixedHeight(28);
+    m_bottomLabel->setFixedHeight(32);
     m_bottomLabel->setStyleSheet(
-        "QLabel { background-color: #161B22; color: #8B949E; font-size: 11px; "
-        "padding: 4px 12px; border-top: 1px solid #30363D; }"
+        "QLabel { background-color: #171A1D; color: #99A2AA; font-size: 11px; "
+        "padding: 4px 12px; border-top: 1px solid #2A3035; }"
     );
-    m_bottomLabel->setText(QString::fromUtf8("共 0 张 | 已选 0 张 | 参考帧 0 张"));
+    m_bottomLabel->setText(QString::fromUtf8("可用 0 / 共 0 · 排除 0 · 参考 自动"));
 }
 
 void ProjectPanel::showFileList() {
@@ -356,6 +425,7 @@ void ProjectPanel::showEmptyState() {
 
 void ProjectPanel::addFiles(const QStringList& filePaths) {
     bool added = false;
+    QStringList thumbnailQueue;
     for (const QString& filePath : filePaths) {
         if (findIndexByPath(filePath) >= 0) continue;
 
@@ -368,14 +438,63 @@ void ProjectPanel::addFiles(const QStringList& filePaths) {
 
         m_fileItems.append(item);
         addFileCard(item);
-        m_thumbnailGen->generateAsync(filePath, 96);
+        thumbnailQueue.append(filePath);
         added = true;
     }
 
     if (added) {
         showFileList();
+        // Import should immediately produce a useful preview instead of
+        // leaving the centre canvas in its empty state.
+        QString centralPreviewPath;
+        if (m_currentIndex < 0 && !m_cards.isEmpty()) {
+            setCurrentIndex(0);
+            centralPreviewPath = m_fileItems[0].filePath;
+        }
+        // The selected first frame is decoded by PreviewPanel and feeds its
+        // thumbnail back into this list. Skip a duplicate task for that file;
+        // the remaining cards can populate concurrently in the background.
+        for (const QString& filePath : thumbnailQueue) {
+            if (filePath == centralPreviewPath) continue;
+            if (centralPreviewPath.isEmpty()) {
+                m_thumbnailGen->generateAsync(filePath, 96);
+            } else {
+                m_pendingThumbnailPaths.append(filePath);
+            }
+        }
         updateBottomBar();
         emit filesChanged();
+    }
+}
+
+void ProjectPanel::applyPreviewData(const QString& filePath,
+                                    const QImage& image, int iso,
+                                    double exposureTime, double aperture,
+                                    int focalLength) {
+    const int index = findIndexByPath(filePath);
+    if (index < 0 || image.isNull()) return;
+    m_fileItems[index].thumbnail = QPixmap::fromImage(image.scaled(
+        96, 96, Qt::KeepAspectRatio, Qt::SmoothTransformation));
+    m_fileItems[index].hasThumbnail = true;
+    m_fileItems[index].iso = iso;
+    m_fileItems[index].exposureTime = exposureTime;
+    m_fileItems[index].aperture = aperture;
+    m_fileItems[index].focalLength = focalLength;
+    updateCard(index);
+    updateBottomBar();
+    for (const QString& pending : std::exchange(
+             m_pendingThumbnailPaths, QStringList())) {
+        m_thumbnailGen->generateAsync(pending, 96);
+    }
+}
+
+void ProjectPanel::requestThumbnail(const QString& filePath) {
+    if (findIndexByPath(filePath) >= 0) {
+        m_thumbnailGen->generateAsync(filePath, 96);
+    }
+    for (const QString& pending : std::exchange(
+             m_pendingThumbnailPaths, QStringList())) {
+        m_thumbnailGen->generateAsync(pending, 96);
     }
 }
 
@@ -400,6 +519,7 @@ void ProjectPanel::clearFiles() {
     }
     m_cards.clear();
     m_fileItems.clear();
+    m_pendingThumbnailPaths.clear();
     m_currentIndex = -1;
     showEmptyState();
     updateBottomBar();
@@ -409,8 +529,10 @@ void ProjectPanel::clearFiles() {
 void ProjectPanel::removeSelected() {
     if (m_currentIndex < 0 || m_currentIndex >= m_cards.size()) return;
 
-    // 单选模式下移除当前选中
-    int idx = m_currentIndex;
+    // Keep the canvas and list selection in sync after removing the active
+    // source. Selecting the nearest surviving frame also invalidates any
+    // asynchronous preview result that may arrive for the removed file.
+    const int idx = m_currentIndex;
     auto* card = m_cards.takeAt(idx);
     card->deleteLater();
     m_fileItems.removeAt(idx);
@@ -418,6 +540,9 @@ void ProjectPanel::removeSelected() {
 
     if (m_cards.isEmpty()) {
         showEmptyState();
+        emit fileSelected(QString());
+    } else {
+        setCurrentIndex(std::min(idx, static_cast<int>(m_cards.size()) - 1));
     }
     updateBottomBar();
     emit filesChanged();
@@ -501,16 +626,48 @@ void ProjectPanel::updateAllCardStyles() {
 }
 
 void ProjectPanel::updateBottomBar() {
-    int total = m_fileItems.size();
-    int selected = (m_currentIndex >= 0) ? 1 : 0;
-    int ref = 0;
+    const int total = m_fileItems.size();
+    int excluded = 0;
+    QString referenceName;
     for (const auto& item : m_fileItems) {
-        if (item.isReferenceFrame) ref++;
+        if (item.isExcluded) {
+            ++excluded;
+        }
+        if (item.isReferenceFrame) {
+            referenceName = item.fileName;
+        }
     }
-    m_bottomLabel->setText(
-        QString::fromUtf8("共 %1 张 | 已选 %2 张 | 参考帧 %3 张")
-            .arg(total).arg(selected).arg(ref)
+
+    const int available = total - excluded;
+    const QString reference = referenceName.isEmpty()
+        ? QString::fromUtf8("自动")
+        : referenceName;
+    const QString prefix = QString::fromUtf8("可用 %1 / 共 %2 · 排除 %3 · 参考 ")
+        .arg(available)
+        .arg(total)
+        .arg(excluded);
+    const QString summary = prefix + reference;
+
+    const int textWidth = qMax(0, m_bottomLabel->width() - 24);
+    const int referenceWidth = qMax(
+        0,
+        textWidth - m_bottomLabel->fontMetrics().horizontalAdvance(prefix)
     );
+    const QString elidedReference = m_bottomLabel->fontMetrics().elidedText(
+        reference,
+        Qt::ElideMiddle,
+        referenceWidth
+    );
+    m_bottomLabel->setText(prefix + elidedReference);
+    m_bottomLabel->setToolTip(summary);
+    if (m_countLabel) {
+        m_countLabel->setText(QString::number(total));
+    }
+}
+
+void ProjectPanel::resizeEvent(QResizeEvent* event) {
+    QWidget::resizeEvent(event);
+    updateBottomBar();
 }
 
 int ProjectPanel::findIndexByPath(const QString& filePath) const {
@@ -566,12 +723,13 @@ void ProjectPanel::onViewMetadata() {
 void ProjectPanel::onRemoveFromList() {
     if (m_contextMenuIndex < 0 || m_contextMenuIndex >= m_fileItems.size()) return;
 
-    int idx = m_contextMenuIndex;
+    const int idx = m_contextMenuIndex;
+    const bool removedCurrent = m_currentIndex == idx;
     auto* card = m_cards.takeAt(idx);
     card->deleteLater();
     m_fileItems.removeAt(idx);
 
-    if (m_currentIndex == idx) {
+    if (removedCurrent) {
         m_currentIndex = -1;
     } else if (m_currentIndex > idx) {
         m_currentIndex--;
@@ -579,6 +737,9 @@ void ProjectPanel::onRemoveFromList() {
 
     if (m_cards.isEmpty()) {
         showEmptyState();
+        emit fileSelected(QString());
+    } else if (removedCurrent) {
+        setCurrentIndex(std::min(idx, static_cast<int>(m_cards.size()) - 1));
     }
     updateAllCardStyles();
     updateBottomBar();

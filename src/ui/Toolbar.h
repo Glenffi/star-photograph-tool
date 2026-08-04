@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QWidget>
+#include <QIcon>
 
 class QPushButton;
 class QLabel;
@@ -11,6 +12,8 @@ public:
     explicit Toolbar(QWidget* parent = nullptr);
     void enableProcess(bool enabled);
     void enableExport(bool enabled);
+    void setProcessing(bool processing);
+    void setProjectSummary(const QString& summary);
 
 signals:
     void importFilesClicked();
@@ -23,8 +26,10 @@ signals:
 
 private:
     void setupUI();
-    QPushButton* createIconButton(const QString& icon, const QString& tooltip);
-    QPushButton* createActionButton(const QString& icon, const QString& text, bool isPrimary = false);
+    void updateButtonStates();
+    QPushButton* createIconButton(const QIcon& icon, const QString& tooltip);
+    QPushButton* createActionButton(const QIcon& icon, const QString& text,
+                                    bool isPrimary = false);
 
     QPushButton* m_importFilesBtn = nullptr;
     QPushButton* m_importFolderBtn = nullptr;
@@ -35,4 +40,8 @@ private:
     QPushButton* m_aboutBtn = nullptr;
     QLabel* m_brandLabel = nullptr;
     QLabel* m_versionLabel = nullptr;
+    QLabel* m_projectSummaryLabel = nullptr;
+    bool m_canProcess = false;
+    bool m_canExport = false;
+    bool m_processing = false;
 };

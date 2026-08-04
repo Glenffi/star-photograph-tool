@@ -74,6 +74,40 @@ std::vector<uint16_t> collectSamples(size_t pixelCount, SampleFn sample) {
     return samples;
 }
 
+PreviewImage8 renderRgb16(const std::vector<uint16_t>& rgb,
+                          int width, int height,
+                          uint16_t black, uint16_t white,
+                          int maxLongSide) {
+    PreviewImage8 result;
+    if (!validPixelCount(width, height, 3, rgb.size()) || white <= black) {
+        return result;
+    }
+    result.blackPoint = black;
+    result.whitePoint = white;
+    const auto lut = makeLut(black, white);
+    previewDimensions(width, height, maxLongSide, result.width, result.height);
+    result.rgb.resize(static_cast<size_t>(result.width) * result.height * 3);
+
+    for (int y = 0; y < result.height; ++y) {
+        const int sourceY = std::min(
+            height - 1,
+            static_cast<int>((static_cast<int64_t>(y) * height) / result.height));
+        for (int x = 0; x < result.width; ++x) {
+            const int sourceX = std::min(
+                width - 1,
+                static_cast<int>((static_cast<int64_t>(x) * width) / result.width));
+            const size_t source =
+                (static_cast<size_t>(sourceY) * width + sourceX) * 3;
+            const size_t target =
+                (static_cast<size_t>(y) * result.width + x) * 3;
+            result.rgb[target] = lut[rgb[source]];
+            result.rgb[target + 1] = lut[rgb[source + 1]];
+            result.rgb[target + 2] = lut[rgb[source + 2]];
+        }
+    }
+    return result;
+}
+
 } // namespace
 
 PreviewImage8 PreviewToneMapper::mapMono16(const std::vector<uint16_t>& data,
@@ -86,6 +120,8 @@ PreviewImage8 PreviewToneMapper::mapMono16(const std::vector<uint16_t>& data,
     const size_t pixelCount = static_cast<size_t>(width) * height;
     auto samples = collectSamples(pixelCount, [&](size_t i) { return data[i]; });
     const auto [black, white] = displayRange(samples);
+    result.blackPoint = black;
+    result.whitePoint = white;
     const auto lut = makeLut(black, white);
     previewDimensions(width, height, maxLongSide, result.width, result.height);
     result.rgb.resize(static_cast<size_t>(result.width) * result.height * 3);
@@ -119,20 +155,12 @@ PreviewImage8 PreviewToneMapper::mapRgb16(const std::vector<uint16_t>& rgb,
         return static_cast<uint16_t>(luminance >> 16);
     });
     const auto [black, white] = displayRange(samples);
-    const auto lut = makeLut(black, white);
-    previewDimensions(width, height, maxLongSide, result.width, result.height);
-    result.rgb.resize(static_cast<size_t>(result.width) * result.height * 3);
+    return renderRgb16(rgb, width, height, black, white, maxLongSide);
+}
 
-    for (int y = 0; y < result.height; ++y) {
-        const int sourceY = std::min(height - 1, static_cast<int>((static_cast<int64_t>(y) * height) / result.height));
-        for (int x = 0; x < result.width; ++x) {
-            const int sourceX = std::min(width - 1, static_cast<int>((static_cast<int64_t>(x) * width) / result.width));
-            const size_t source = (static_cast<size_t>(sourceY) * width + sourceX) * 3;
-            const size_t target = (static_cast<size_t>(y) * result.width + x) * 3;
-            result.rgb[target] = lut[rgb[source]];
-            result.rgb[target + 1] = lut[rgb[source + 1]];
-            result.rgb[target + 2] = lut[rgb[source + 2]];
-        }
-    }
-    return result;
+PreviewImage8 PreviewToneMapper::mapRgb16WithRange(
+    const std::vector<uint16_t>& rgb, int width, int height,
+    uint16_t blackPoint, uint16_t whitePoint, int maxLongSide) {
+    return renderRgb16(rgb, width, height, blackPoint, whitePoint,
+                       maxLongSide);
 }

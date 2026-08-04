@@ -3,6 +3,7 @@
 #include <QPushButton>
 #include <QLabel>
 #include <QFrame>
+#include <QStyle>
 
 Toolbar::Toolbar(QWidget* parent)
     : QWidget(parent)
@@ -11,158 +12,178 @@ Toolbar::Toolbar(QWidget* parent)
 }
 
 void Toolbar::setupUI() {
-    setFixedHeight(40);
+    setFixedHeight(56);
     setStyleSheet(
-        "QWidget { background-color: #161B22; }"
-        "QLabel { color: #E6EDF3; background-color: transparent; }"
+        "Toolbar { background-color: #171A1D; border-bottom: 1px solid #2A3035; }"
+        "QLabel { color: #F2F4F5; background-color: transparent; }"
     );
 
     auto* layout = new QHBoxLayout(this);
-    layout->setContentsMargins(12, 0, 12, 0);
-    layout->setSpacing(8);
+    layout->setContentsMargins(16, 0, 12, 0);
+    layout->setSpacing(6);
 
-    // 左侧：品牌名 + 版本
-    auto* leftLayout = new QHBoxLayout();
-    leftLayout->setSpacing(6);
+    // 品牌与项目状态始终留在最左侧，形成稳定的视觉锚点。
+    auto* leftLayout = new QVBoxLayout();
+    leftLayout->setSpacing(1);
     leftLayout->setContentsMargins(0, 0, 0, 0);
 
+    auto* brandRow = new QHBoxLayout();
+    brandRow->setSpacing(7);
     m_brandLabel = new QLabel("StarProcessor", this);
     m_brandLabel->setStyleSheet(
-        "font-size: 15px; font-weight: bold; color: #E6EDF3; background-color: transparent;"
+        "font-size: 16px; font-weight: 700; color: #F2F4F5;"
     );
-    leftLayout->addWidget(m_brandLabel);
+    brandRow->addWidget(m_brandLabel);
 
-    m_versionLabel = new QLabel("v0.4.0", this);
+    m_versionLabel = new QLabel("BETA", this);
     m_versionLabel->setStyleSheet(
-        "font-size: 10px; color: #8B949E; background-color: #21262D; "
-        "border-radius: 4px; padding: 2px 6px;"
+        "font-size: 9px; font-weight: 700; color: #3CC7A5; "
+        "background-color: #17342D; border-radius: 3px; padding: 1px 5px;"
     );
-    leftLayout->addWidget(m_versionLabel);
+    brandRow->addWidget(m_versionLabel);
+    leftLayout->addLayout(brandRow);
+
+    m_projectSummaryLabel = new QLabel(QString::fromUtf8("等待导入素材"), this);
+    m_projectSummaryLabel->setStyleSheet("font-size: 10px; color: #7F8992;");
+    leftLayout->addWidget(m_projectSummaryLabel);
 
     layout->addLayout(leftLayout);
-    layout->addSpacing(20);
+    layout->addSpacing(14);
 
-    // 中间：操作按钮组
-    m_importFilesBtn = createActionButton(QString::fromUtf8("📁"), QString::fromUtf8("导入 RAW"), true);
+    auto* separator = new QFrame(this);
+    separator->setFrameShape(QFrame::VLine);
+    separator->setStyleSheet("color: #2A3035;");
+    separator->setFixedWidth(1);
+    separator->setFixedHeight(30);
+    layout->addWidget(separator);
+    layout->addSpacing(8);
+
+    // 素材命令保持克制；真正的主操作是右侧“开始处理”。
+    m_importFilesBtn = createActionButton(
+        style()->standardIcon(QStyle::SP_DialogOpenButton),
+        QString::fromUtf8("添加照片"));
     connect(m_importFilesBtn, &QPushButton::clicked, this, &Toolbar::importFilesClicked);
     layout->addWidget(m_importFilesBtn);
 
-    m_importFolderBtn = createActionButton(QString::fromUtf8("📂"), QString::fromUtf8("导入文件夹"));
+    m_importFolderBtn = createIconButton(
+        style()->standardIcon(QStyle::SP_DirOpenIcon),
+        QString::fromUtf8("导入文件夹"));
     connect(m_importFolderBtn, &QPushButton::clicked, this, &Toolbar::importFolderClicked);
     layout->addWidget(m_importFolderBtn);
 
-    m_clearProjectBtn = createActionButton(QString::fromUtf8("🗑️"), QString::fromUtf8("清空项目"));
+    m_clearProjectBtn = createIconButton(
+        style()->standardIcon(QStyle::SP_TrashIcon),
+        QString::fromUtf8("清空项目"));
     connect(m_clearProjectBtn, &QPushButton::clicked, this, &Toolbar::clearProjectClicked);
     layout->addWidget(m_clearProjectBtn);
 
-    // 分隔线
-    auto* separator = new QFrame(this);
-    separator->setFrameShape(QFrame::VLine);
-    separator->setStyleSheet("color: #30363D;");
-    separator->setFixedWidth(1);
-    layout->addWidget(separator);
+    layout->addStretch();
 
-    m_startProcessBtn = createActionButton(QString::fromUtf8("⏯"), QString::fromUtf8("开始处理"));
-    m_startProcessBtn->setEnabled(false);
-    connect(m_startProcessBtn, &QPushButton::clicked, this, &Toolbar::startProcessClicked);
-    layout->addWidget(m_startProcessBtn);
-
-    m_exportResultBtn = createActionButton(QString::fromUtf8("💾"), QString::fromUtf8("导出结果"));
-    m_exportResultBtn->setEnabled(false);
+    m_exportResultBtn = createActionButton(
+        style()->standardIcon(QStyle::SP_DialogSaveButton),
+        QString::fromUtf8("导出"));
     connect(m_exportResultBtn, &QPushButton::clicked, this, &Toolbar::exportResultClicked);
     layout->addWidget(m_exportResultBtn);
 
-    layout->addStretch();
+    m_startProcessBtn = createActionButton(
+        style()->standardIcon(QStyle::SP_MediaPlay),
+        QString::fromUtf8("开始处理"), true);
+    connect(m_startProcessBtn, &QPushButton::clicked, this, &Toolbar::startProcessClicked);
+    layout->addWidget(m_startProcessBtn);
 
-    // 右侧：图标按钮
-    m_settingsBtn = createIconButton(QString::fromUtf8("⚙️"), QString::fromUtf8("设置"));
+    layout->addSpacing(6);
+    m_settingsBtn = createIconButton(
+        style()->standardIcon(QStyle::SP_FileDialogDetailedView),
+        QString::fromUtf8("设置"));
     connect(m_settingsBtn, &QPushButton::clicked, this, &Toolbar::settingsClicked);
     layout->addWidget(m_settingsBtn);
 
-    m_aboutBtn = createIconButton(QString::fromUtf8("ⓘ"), QString::fromUtf8("关于"));
+    m_aboutBtn = createIconButton(
+        style()->standardIcon(QStyle::SP_MessageBoxInformation),
+        QString::fromUtf8("关于"));
     connect(m_aboutBtn, &QPushButton::clicked, this, &Toolbar::aboutClicked);
     layout->addWidget(m_aboutBtn);
 
-    // 底部边框
-    setAutoFillBackground(true);
-    QPalette pal = palette();
-    pal.setColor(QPalette::Window, QColor("#161B22"));
-    setPalette(pal);
+    updateButtonStates();
 }
 
-QPushButton* Toolbar::createIconButton(const QString& icon, const QString& tooltip) {
-    auto* btn = new QPushButton(icon, this);
+QPushButton* Toolbar::createIconButton(const QIcon& icon, const QString& tooltip) {
+    auto* btn = new QPushButton(this);
+    btn->setIcon(icon);
+    btn->setIconSize(QSize(16, 16));
     btn->setToolTip(tooltip);
+    btn->setAccessibleName(tooltip);
     btn->setFixedSize(32, 32);
     btn->setStyleSheet(
         "QPushButton {"
         "  background-color: transparent;"
-        "  color: #8B949E;"
-        "  border: none;"
-        "  border-radius: 6px;"
-        "  font-size: 14px;"
+        "  border: 1px solid transparent;"
+        "  border-radius: 5px;"
         "  padding: 0;"
         "}"
         "QPushButton:hover {"
-        "  background-color: #21262D;"
-        "  color: #E6EDF3;"
+        "  background-color: #22272B;"
+        "  border-color: #30373D;"
         "}"
         "QPushButton:pressed {"
-        "  background-color: #30363D;"
+        "  background-color: #2A3035;"
         "}"
     );
     btn->setCursor(Qt::PointingHandCursor);
     return btn;
 }
 
-QPushButton* Toolbar::createActionButton(const QString& icon, const QString& text, bool isPrimary) {
-    auto* btn = new QPushButton(icon + "  " + text, this);
+QPushButton* Toolbar::createActionButton(const QIcon& icon, const QString& text,
+                                         bool isPrimary) {
+    auto* btn = new QPushButton(text, this);
+    btn->setIcon(icon);
+    btn->setIconSize(QSize(16, 16));
     btn->setCursor(Qt::PointingHandCursor);
-    btn->setFixedHeight(28);
+    btn->setFixedHeight(34);
 
     if (isPrimary) {
         btn->setStyleSheet(
             "QPushButton {"
-            "  background-color: #F0B90B;"
-            "  color: #0D1117;"
+            "  background-color: #3CC7A5;"
+            "  color: #0E1714;"
             "  border: none;"
-            "  border-radius: 6px;"
-            "  padding: 4px 14px;"
+            "  border-radius: 5px;"
+            "  padding: 5px 16px;"
             "  font-size: 12px;"
-            "  font-weight: bold;"
+            "  font-weight: 700;"
             "}"
             "QPushButton:hover {"
-            "  background-color: #F5C518;"
+            "  background-color: #53D4B3;"
             "}"
             "QPushButton:pressed {"
-            "  background-color: #D4A009;"
+            "  background-color: #2EAB8D;"
             "}"
             "QPushButton:disabled {"
-            "  background-color: #30363D;"
-            "  color: #8B949E;"
+            "  background-color: #27302E;"
+            "  color: #64716D;"
             "}"
         );
     } else {
         btn->setStyleSheet(
             "QPushButton {"
-            "  background-color: #21262D;"
-            "  color: #E6EDF3;"
-            "  border: 1px solid #30363D;"
-            "  border-radius: 6px;"
-            "  padding: 4px 14px;"
+            "  background-color: #1D2125;"
+            "  color: #DDE1E4;"
+            "  border: 1px solid #30373D;"
+            "  border-radius: 5px;"
+            "  padding: 5px 13px;"
             "  font-size: 12px;"
             "}"
             "QPushButton:hover {"
-            "  background-color: #30363D;"
-            "  border: 1px solid #484F58;"
+            "  background-color: #272C31;"
+            "  border-color: #465059;"
             "}"
             "QPushButton:pressed {"
-            "  background-color: #484F58;"
+            "  background-color: #30373D;"
             "}"
             "QPushButton:disabled {"
-            "  background-color: #161B22;"
-            "  color: #484F58;"
-            "  border: 1px solid #21262D;"
+            "  background-color: #171A1D;"
+            "  color: #566068;"
+            "  border-color: #24292D;"
             "}"
         );
     }
@@ -170,9 +191,33 @@ QPushButton* Toolbar::createActionButton(const QString& icon, const QString& tex
 }
 
 void Toolbar::enableProcess(bool enabled) {
-    if (m_startProcessBtn) m_startProcessBtn->setEnabled(enabled);
+    m_canProcess = enabled;
+    updateButtonStates();
 }
 
 void Toolbar::enableExport(bool enabled) {
-    if (m_exportResultBtn) m_exportResultBtn->setEnabled(enabled);
+    m_canExport = enabled;
+    updateButtonStates();
+}
+
+void Toolbar::setProcessing(bool processing) {
+    m_processing = processing;
+    if (m_startProcessBtn) {
+        m_startProcessBtn->setText(processing
+            ? QString::fromUtf8("处理中...")
+            : QString::fromUtf8("开始处理"));
+    }
+    updateButtonStates();
+}
+
+void Toolbar::setProjectSummary(const QString& summary) {
+    if (m_projectSummaryLabel) m_projectSummaryLabel->setText(summary);
+}
+
+void Toolbar::updateButtonStates() {
+    if (m_startProcessBtn) m_startProcessBtn->setEnabled(m_canProcess && !m_processing);
+    if (m_exportResultBtn) m_exportResultBtn->setEnabled(m_canExport && !m_processing);
+    if (m_importFilesBtn) m_importFilesBtn->setEnabled(!m_processing);
+    if (m_importFolderBtn) m_importFolderBtn->setEnabled(!m_processing);
+    if (m_clearProjectBtn) m_clearProjectBtn->setEnabled(!m_processing);
 }

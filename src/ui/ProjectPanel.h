@@ -13,7 +13,9 @@ class QAction;
 class QLabel;
 class QEnterEvent;
 class QGraphicsOpacityEffect;
+class QResizeEvent;
 class ThumbnailGenerator;
+class QImage;
 
 struct FileItem {
     QString filePath;
@@ -42,17 +44,21 @@ protected:
     void mousePressEvent(QMouseEvent* event) override;
     void enterEvent(QEnterEvent* event) override;
     void leaveEvent(QEvent* event) override;
+    void resizeEvent(QResizeEvent* event) override;
 
 private:
     void updateStyle();
+    void updateElidedName();
     bool m_selected = false;
     bool m_hovered = false;
     bool m_isReference = false;
     bool m_isExcluded = false;
+    QString m_fileName;
     QLabel* m_thumbnailLabel = nullptr;
     QLabel* m_nameLabel = nullptr;
     QLabel* m_metaLabel = nullptr;
     QLabel* m_statusLabel = nullptr;
+    QGraphicsOpacityEffect* m_opacityEffect = nullptr;
 };
 
 class ProjectPanel : public QWidget {
@@ -71,6 +77,10 @@ public:
     QStringList includedFilePaths() const;  // 未排除的文件
     QString currentFilePath() const;
     QString referenceFramePath() const;
+    void applyPreviewData(const QString& filePath, const QImage& image,
+                          int iso, double exposureTime, double aperture,
+                          int focalLength);
+    void requestThumbnail(const QString& filePath);
 
 signals:
     void fileSelected(const QString& filePath);
@@ -93,6 +103,7 @@ private slots:
 protected:
     void dragEnterEvent(QDragEnterEvent* event) override;
     void dropEvent(QDropEvent* event) override;
+    void resizeEvent(QResizeEvent* event) override;
 
 private:
     void setupUI();
@@ -115,7 +126,9 @@ private:
     QVBoxLayout* m_listLayout = nullptr;
     QWidget* m_emptyState = nullptr;
     QVBoxLayout* m_emptyLayout = nullptr;
+    QLabel* m_countLabel = nullptr;
     QLabel* m_bottomLabel = nullptr;
+    QPushButton* m_headerImportBtn = nullptr;
     QPushButton* m_emptyImportBtn = nullptr;
 
     // 右键菜单
@@ -129,6 +142,7 @@ private:
     ThumbnailGenerator* m_thumbnailGen = nullptr;
     QList<FileItem> m_fileItems;
     QList<FileCard*> m_cards;
+    QStringList m_pendingThumbnailPaths;
     int m_currentIndex = -1;
     int m_contextMenuIndex = -1;
 };

@@ -8,6 +8,7 @@
 #include "core/NoiseReductionEngine.h"
 #include "core/PhotometricNormalizer.h"
 #include "core/ProcessingMemoryEstimator.h"
+#include "core/PreviewToneMapper.h"
 #include "core/RawImageLoader.h"
 #include "core/StackingEngine.h"
 #include "core/StarDetector.h"
@@ -408,6 +409,10 @@ std::vector<uint16_t> ProcessingWorker::takeStackedData() {
     return std::move(m_stackedData);
 }
 
+QImage ProcessingWorker::takeBeforePreview() {
+    return std::move(m_beforePreview);
+}
+
 double ProcessingWorker::averageAlignmentRms() const {
     const int alignedSources = m_affineFrameCount + m_homographyFrameCount;
     return alignedSources > 0 ? m_alignmentRmsSum / alignedSources : 0.0;
@@ -432,6 +437,9 @@ bool ProcessingWorker::stopIfCancelled() {
 void ProcessingWorker::run() {
     m_errorString.clear();
     m_stackedData.clear();
+    m_beforePreview = QImage();
+    m_beforePreviewBlackPoint = 0;
+    m_beforePreviewWhitePoint = 65535;
     m_width = 0;
     m_height = 0;
     m_cropOffsetX = 0;
@@ -968,6 +976,29 @@ void ProcessingWorker::run() {
         height = commonBounds.height;
         m_width = width;
         m_height = height;
+    }
+
+    const bool hasFinishingStage =
+        (m_params.noiseReductionEnabled && m_params.noiseReductionStrength > 0)
+        || m_params.dewarpEnabled
+        || m_params.stretchEnabled
+        || (m_params.skyGroundSepEnabled && m_params.groundDetailStrength > 0)
+        || (m_params.starReduceEnabled && m_params.starReduceStrength > 0);
+    if (hasFinishingStage) {
+        constexpr int kComparisonLongSide = 2400;
+        // Before/after comparison must use one fixed transfer function. If each
+        // side chooses its own percentile range, contrast and black-point
+        // changes introduced by finishing would be visually hidden.
+        const PreviewImage8 preview = PreviewToneMapper::mapRgb16WithRange(
+            resultRgb, width, height, 0, 65535, kComparisonLongSide);
+        if (!preview.rgb.empty()) {
+            const QImage borrowed(preview.rgb.data(), preview.width,
+                                  preview.height, preview.width * 3,
+                                  QImage::Format_RGB888);
+            m_beforePreview = borrowed.copy();
+            m_beforePreviewBlackPoint = preview.blackPoint;
+            m_beforePreviewWhitePoint = preview.whitePoint;
+        }
     }
 
     if (m_params.noiseReductionEnabled &&

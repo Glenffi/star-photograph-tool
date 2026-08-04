@@ -551,6 +551,22 @@ void testPreviewToneMapper() {
           "RGB preview should return exactly three bytes per output pixel");
     check(PreviewToneMapper::mapRgb16(rgb, 7, 4).rgb.empty(),
           "Preview mapper should reject a mismatched RGB buffer");
+
+    const std::vector<uint16_t> rangedRgb = {
+        0, 0, 0,
+        32768, 32768, 32768,
+        65535, 65535, 65535,
+    };
+    const PreviewImage8 rangedPreview = PreviewToneMapper::mapRgb16WithRange(
+        rangedRgb, 3, 1, 0, 65535, 3);
+    check(rangedPreview.blackPoint == 0 && rangedPreview.whitePoint == 65535,
+          "Explicit preview range should be retained for comparable images");
+    check(rangedPreview.rgb.front() == 0 && rangedPreview.rgb.back() == 255
+              && rangedPreview.rgb[3] > 0 && rangedPreview.rgb[3] < 255,
+          "Explicit preview range should map black, midtone, and white consistently");
+    check(PreviewToneMapper::mapRgb16WithRange(
+              rangedRgb, 3, 1, 1000, 1000, 3).rgb.empty(),
+          "Preview mapper should reject an empty explicit display range");
 }
 
 void testTransformDirection() {
