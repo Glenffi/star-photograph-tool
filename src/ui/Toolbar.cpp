@@ -14,8 +14,8 @@ Toolbar::Toolbar(QWidget* parent)
 void Toolbar::setupUI() {
     setFixedHeight(56);
     setStyleSheet(
-        "Toolbar { background-color: #171A1D; border-bottom: 1px solid #2A3035; }"
-        "QLabel { color: #F2F4F5; background-color: transparent; }"
+        "Toolbar { background-color: #FBFDFC; border-bottom: 1px solid #D3E0DA; }"
+        "QLabel { color: #1E312A; background-color: transparent; }"
     );
 
     auto* layout = new QHBoxLayout(this);
@@ -31,20 +31,20 @@ void Toolbar::setupUI() {
     brandRow->setSpacing(7);
     m_brandLabel = new QLabel("StarProcessor", this);
     m_brandLabel->setStyleSheet(
-        "font-size: 16px; font-weight: 700; color: #F2F4F5;"
+        "font-size: 16px; font-weight: 700; color: #1E312A;"
     );
     brandRow->addWidget(m_brandLabel);
 
     m_versionLabel = new QLabel("BETA", this);
     m_versionLabel->setStyleSheet(
-        "font-size: 9px; font-weight: 700; color: #3CC7A5; "
-        "background-color: #17342D; border-radius: 3px; padding: 1px 5px;"
+        "font-size: 9px; font-weight: 700; color: #28B58E; "
+        "background-color: #DDF5EC; border-radius: 3px; padding: 1px 5px;"
     );
     brandRow->addWidget(m_versionLabel);
     leftLayout->addLayout(brandRow);
 
     m_projectSummaryLabel = new QLabel(QString::fromUtf8("等待导入素材"), this);
-    m_projectSummaryLabel->setStyleSheet("font-size: 10px; color: #7F8992;");
+    m_projectSummaryLabel->setStyleSheet("font-size: 10px; color: #657A72;");
     leftLayout->addWidget(m_projectSummaryLabel);
 
     layout->addLayout(leftLayout);
@@ -52,7 +52,7 @@ void Toolbar::setupUI() {
 
     auto* separator = new QFrame(this);
     separator->setFrameShape(QFrame::VLine);
-    separator->setStyleSheet("color: #2A3035;");
+    separator->setStyleSheet("color: #D3E0DA;");
     separator->setFixedWidth(1);
     separator->setFixedHeight(30);
     layout->addWidget(separator);
@@ -122,11 +122,11 @@ QPushButton* Toolbar::createIconButton(const QIcon& icon, const QString& tooltip
         "  padding: 0;"
         "}"
         "QPushButton:hover {"
-        "  background-color: #22272B;"
-        "  border-color: #30373D;"
+        "  background-color: #EAF2EF;"
+        "  border-color: #C6D6CF;"
         "}"
         "QPushButton:pressed {"
-        "  background-color: #2A3035;"
+        "  background-color: #D3E0DA;"
         "}"
     );
     btn->setCursor(Qt::PointingHandCursor);
@@ -144,8 +144,8 @@ QPushButton* Toolbar::createActionButton(const QIcon& icon, const QString& text,
     if (isPrimary) {
         btn->setStyleSheet(
             "QPushButton {"
-            "  background-color: #3CC7A5;"
-            "  color: #0E1714;"
+            "  background-color: #28B58E;"
+            "  color: #FFFFFF;"
             "  border: none;"
             "  border-radius: 5px;"
             "  padding: 5px 16px;"
@@ -153,37 +153,37 @@ QPushButton* Toolbar::createActionButton(const QIcon& icon, const QString& text,
             "  font-weight: 700;"
             "}"
             "QPushButton:hover {"
-            "  background-color: #53D4B3;"
+            "  background-color: #39C59F;"
             "}"
             "QPushButton:pressed {"
-            "  background-color: #2EAB8D;"
+            "  background-color: #179976;"
             "}"
             "QPushButton:disabled {"
-            "  background-color: #27302E;"
-            "  color: #64716D;"
+            "  background-color: #E7EEEB;"
+            "  color: #A6B5AF;"
             "}"
         );
     } else {
         btn->setStyleSheet(
             "QPushButton {"
-            "  background-color: #1D2125;"
-            "  color: #DDE1E4;"
-            "  border: 1px solid #30373D;"
+            "  background-color: #EFF5F2;"
+            "  color: #30463E;"
+            "  border: 1px solid #C6D6CF;"
             "  border-radius: 5px;"
             "  padding: 5px 13px;"
             "  font-size: 12px;"
             "}"
             "QPushButton:hover {"
-            "  background-color: #272C31;"
-            "  border-color: #465059;"
+            "  background-color: #E6F0EC;"
+            "  border-color: #AFC4BA;"
             "}"
             "QPushButton:pressed {"
-            "  background-color: #30373D;"
+            "  background-color: #C6D6CF;"
             "}"
             "QPushButton:disabled {"
-            "  background-color: #171A1D;"
-            "  color: #566068;"
-            "  border-color: #24292D;"
+            "  background-color: #FBFDFC;"
+            "  color: #9DAEA7;"
+            "  border-color: #DDE7E2;"
             "}"
         );
     }

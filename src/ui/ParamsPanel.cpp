@@ -38,23 +38,23 @@ void ParamsPanel::setupUI() {
     // 标题栏与预设保持固定，长参数放入各自可滚动的工作阶段页。
     auto* titleBar = new QWidget(this);
     titleBar->setFixedHeight(44);
-    titleBar->setStyleSheet("background-color: #171A1D; border-bottom: 1px solid #2A3035;");
+    titleBar->setStyleSheet("background-color: #FBFDFC; border-bottom: 1px solid #D3E0DA;");
     auto* titleLayout = new QHBoxLayout(titleBar);
     titleLayout->setContentsMargins(12, 0, 12, 0);
     auto* titleLabel = new QLabel(QString::fromUtf8("处理参数"), titleBar);
-    titleLabel->setStyleSheet("font-size: 13px; font-weight: 700; color: #F2F4F5; background-color: transparent;");
+    titleLabel->setStyleSheet("font-size: 13px; font-weight: 700; color: #1E312A; background-color: transparent;");
     titleLayout->addWidget(titleLabel);
     titleLayout->addStretch();
     layout->addWidget(titleBar);
 
     auto* presetBar = new QWidget(this);
     presetBar->setFixedHeight(50);
-    presetBar->setStyleSheet("background-color: #141719; border-bottom: 1px solid #24292D;");
+    presetBar->setStyleSheet("background-color: #F6FAF8; border-bottom: 1px solid #DDE7E2;");
     auto* presetRow = new QHBoxLayout(presetBar);
     presetRow->setContentsMargins(12, 8, 12, 8);
     presetRow->setSpacing(8);
     auto* presetLabel = new QLabel(QString::fromUtf8("预设"), presetBar);
-    presetLabel->setStyleSheet("font-size: 11px; color: #8F99A2; background-color: transparent;");
+    presetLabel->setStyleSheet("font-size: 11px; color: #5F746C; background-color: transparent;");
     presetRow->addWidget(presetLabel);
     m_presetCombo = new QComboBox(presetBar);
     m_presetCombo->addItem(QString::fromUtf8("自定义"));
@@ -62,11 +62,11 @@ void ParamsPanel::setupUI() {
         m_presetCombo->addItem(preset.name);
     }
     m_presetCombo->setStyleSheet(
-        "QComboBox { background-color: #1D2125; color: #DDE1E4; border: 1px solid #30373D; "
+        "QComboBox { background-color: #EFF5F2; color: #30463E; border: 1px solid #C6D6CF; "
         "border-radius: 5px; padding: 5px 8px; font-size: 11px; }"
         "QComboBox::drop-down { border: none; }"
-        "QComboBox QAbstractItemView { background-color: #1D2125; color: #DDE1E4; "
-        "border: 1px solid #30373D; selection-background-color: #2E5D52; }"
+        "QComboBox QAbstractItemView { background-color: #EFF5F2; color: #30463E; "
+        "border: 1px solid #C6D6CF; selection-background-color: #D8F1E8; }"
     );
     connect(m_presetCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &ParamsPanel::onPresetChanged);
     presetRow->addWidget(m_presetCombo, 1);
@@ -75,25 +75,25 @@ void ParamsPanel::setupUI() {
     auto* tabs = new QTabWidget(this);
     tabs->setDocumentMode(true);
     tabs->setStyleSheet(
-        "QTabWidget::pane { border: none; background-color: #111315; }"
-        "QTabBar { background-color: #171A1D; }"
-        "QTabBar::tab { background-color: #171A1D; color: #77828A; border: none; "
+        "QTabWidget::pane { border: none; background-color: #F1F6F3; }"
+        "QTabBar { background-color: #FBFDFC; }"
+        "QTabBar::tab { background-color: #FBFDFC; color: #6C7F78; border: none; "
         "  border-bottom: 2px solid transparent; padding: 9px 18px; font-size: 11px; }"
-        "QTabBar::tab:hover { color: #DDE1E4; background-color: #1D2125; }"
-        "QTabBar::tab:selected { color: #F2F4F5; border-bottom-color: #3CC7A5; font-weight: 700; }"
+        "QTabBar::tab:hover { color: #30463E; background-color: #EFF5F2; }"
+        "QTabBar::tab:selected { color: #1E312A; border-bottom-color: #28B58E; font-weight: 700; }"
     );
 
     auto createPage = [tabs](const QString& name) -> QVBoxLayout* {
         auto* page = new QWidget(tabs);
-        page->setStyleSheet("background-color: #111315;");
+        page->setStyleSheet("background-color: #F1F6F3;");
         auto* pageLayout = new QVBoxLayout(page);
         pageLayout->setContentsMargins(0, 0, 0, 0);
         auto* scroll = new QScrollArea(page);
         scroll->setWidgetResizable(true);
         scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-        scroll->setStyleSheet("QScrollArea { background-color: #111315; border: none; }");
+        scroll->setStyleSheet("QScrollArea { background-color: #F1F6F3; border: none; }");
         auto* content = new QWidget(scroll);
-        content->setStyleSheet("background-color: #111315;");
+        content->setStyleSheet("background-color: #F1F6F3;");
         auto* contentLayout = new QVBoxLayout(content);
         contentLayout->setContentsMargins(10, 10, 10, 12);
         contentLayout->setSpacing(8);
@@ -115,16 +115,16 @@ void ParamsPanel::setupUI() {
 
     auto* methodRow = new QHBoxLayout();
     auto* methodLabel = new QLabel(QString::fromUtf8("方法:"), m_alignGroup);
-    methodLabel->setStyleSheet("font-size: 12px; color: #DDE1E4; background-color: transparent;");
+    methodLabel->setStyleSheet("font-size: 12px; color: #30463E; background-color: transparent;");
     methodRow->addWidget(methodLabel);
     m_alignMethod = new QComboBox(m_alignGroup);
     m_alignMethod->addItem(QString::fromUtf8("星点对齐"));
     m_alignMethod->setStyleSheet(
-        "QComboBox { background-color: #1D2125; color: #F2F4F5; border: 1px solid #30373D; "
+        "QComboBox { background-color: #EFF5F2; color: #1E312A; border: 1px solid #C6D6CF; "
         "border-radius: 4px; padding: 4px 8px; font-size: 12px; }"
         "QComboBox::drop-down { border: none; }"
-        "QComboBox QAbstractItemView { background-color: #1D2125; color: #F2F4F5; "
-        "border: 1px solid #30373D; selection-background-color: #30373D; }"
+        "QComboBox QAbstractItemView { background-color: #EFF5F2; color: #1E312A; "
+        "border: 1px solid #C6D6CF; selection-background-color: #C6D6CF; }"
     );
     connect(m_alignMethod, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this](int index) {
         if (index > 0) {
@@ -137,7 +137,7 @@ void ParamsPanel::setupUI() {
 
     auto* refRow = new QHBoxLayout();
     auto* refLabel = new QLabel(QString::fromUtf8("参考帧:"), m_alignGroup);
-    refLabel->setStyleSheet("font-size: 12px; color: #DDE1E4; background-color: transparent;");
+    refLabel->setStyleSheet("font-size: 12px; color: #30463E; background-color: transparent;");
     refRow->addWidget(refLabel);
     m_refFrame = new QComboBox(m_alignGroup);
     m_refFrame->addItem(QString::fromUtf8("自动选择"));
@@ -155,7 +155,7 @@ void ParamsPanel::setupUI() {
 
     auto* algoRow = new QHBoxLayout();
     auto* algoLabel = new QLabel(QString::fromUtf8("算法:"), m_stackGroup);
-    algoLabel->setStyleSheet("font-size: 12px; color: #DDE1E4; background-color: transparent;");
+    algoLabel->setStyleSheet("font-size: 12px; color: #30463E; background-color: transparent;");
     algoRow->addWidget(algoLabel);
     m_stackAlgorithm = new QComboBox(m_stackGroup);
     m_stackAlgorithm->addItems({"Median", "Mean", "Kappa-Sigma", "Winsorized"});
@@ -169,19 +169,32 @@ void ParamsPanel::setupUI() {
     m_stackAlgorithm->setStyleSheet(m_alignMethod->styleSheet());
     connect(m_stackAlgorithm, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this](int index) {
         m_userChangedStackMethod = true;
+        updateStackMethodDescription();
         onComboChanged(index);
     });
     algoRow->addWidget(m_stackAlgorithm, 1);
     stackLayout->addLayout(algoRow);
 
+    m_stackMethodDescription = new QLabel(m_stackGroup);
+    m_stackMethodDescription->setWordWrap(true);
+    m_stackMethodDescription->setMinimumHeight(46);
+    m_stackMethodDescription->setStyleSheet(
+        "QLabel { color: #5F746C; background-color: #EAF6F1; "
+        "border-left: 3px solid #28B58E; border-radius: 4px; "
+        "padding: 7px 9px; font-size: 11px; }"
+    );
+    stackLayout->addWidget(m_stackMethodDescription);
+
     auto* kappaRow = new QHBoxLayout();
-    auto* kappaLabel = new QLabel(QString::fromUtf8("κ值:"), m_stackGroup);
-    kappaLabel->setStyleSheet("font-size: 12px; color: #DDE1E4; background-color: transparent;");
-    kappaLabel->setToolTip(QString::fromUtf8("κ (kappa)：异常值剔除阈值系数\n"
+    m_kappaNameLabel = new QLabel(QString::fromUtf8("κ值:"), m_stackGroup);
+    m_kappaNameLabel->setStyleSheet(
+        "QLabel { font-size: 12px; color: #30463E; background-color: transparent; }"
+        "QLabel:disabled { color: #9DAEA7; }");
+    m_kappaNameLabel->setToolTip(QString::fromUtf8("κ (kappa)：异常值剔除阈值系数\n"
         "• 值越小，剔除越严格，可能误删微弱星点\n"
         "• 值越大，保留越多，可能残留飞机轨迹\n"
         "• 推荐值：2.0~3.0，深空常用 2.5"));
-    kappaRow->addWidget(kappaLabel);
+    kappaRow->addWidget(m_kappaNameLabel);
     m_kappaSlider = createSlider(10, 50, 25);
     m_kappaSlider->setMinimumWidth(96);
     m_kappaSlider->setToolTip(QString::fromUtf8("拖动调整 κ 值，值越小剔除越严格"));
@@ -191,9 +204,12 @@ void ParamsPanel::setupUI() {
     connect(m_kappaSlider, &QSlider::sliderReleased, this, &ParamsPanel::onSliderReleased);
     kappaRow->addWidget(m_kappaSlider, 1);
     m_kappaLabel = new QLabel("2.5", m_stackGroup);
-    m_kappaLabel->setStyleSheet("font-size: 12px; color: #8F99A2; background-color: transparent; min-width: 24px;");
+    m_kappaLabel->setStyleSheet(
+        "QLabel { font-size: 12px; color: #5F746C; background-color: transparent; min-width: 24px; }"
+        "QLabel:disabled { color: #9DAEA7; }");
     kappaRow->addWidget(m_kappaLabel);
     stackLayout->addLayout(kappaRow);
+    updateStackMethodDescription();
 
     m_autoRejectQualityCheck = new QCheckBox(
         QString::fromUtf8("自动排除严重差帧"), m_stackGroup);
@@ -201,7 +217,7 @@ void ParamsPanel::setupUI() {
     m_autoRejectQualityCheck->setToolTip(QString::fromUtf8(
         "通过轻量预览识别明显失焦、拖星或云层遮挡的离群帧；正常差异不会自动删除"));
     m_autoRejectQualityCheck->setStyleSheet(
-        "QCheckBox { font-size: 12px; color: #DDE1E4; background-color: transparent; }"
+        "QCheckBox { font-size: 12px; color: #30463E; background-color: transparent; }"
         "QCheckBox::indicator { width: 14px; height: 14px; }");
     connect(m_autoRejectQualityCheck, &QCheckBox::toggled,
             this, &ParamsPanel::onCheckChanged);
@@ -213,7 +229,7 @@ void ParamsPanel::setupUI() {
     m_photometricCheck->setToolTip(QString::fromUtf8(
         "将每帧曝光和背景色偏匹配到参考帧，减少薄云、光污染变化造成的堆栈斑块"));
     m_photometricCheck->setStyleSheet(
-        "QCheckBox { font-size: 12px; color: #DDE1E4; background-color: transparent; }"
+        "QCheckBox { font-size: 12px; color: #30463E; background-color: transparent; }"
         "QCheckBox::indicator { width: 14px; height: 14px; }");
     connect(m_photometricCheck, &QCheckBox::toggled,
             this, &ParamsPanel::onCheckChanged);
@@ -227,7 +243,7 @@ void ParamsPanel::setupUI() {
     // style self-contained also prevents construction order from becoming a
     // hidden dependency between otherwise unrelated parameter groups.
     m_skyGroundCheck->setStyleSheet(
-        "QCheckBox { font-size: 12px; color: #DDE1E4; background-color: transparent; }"
+        "QCheckBox { font-size: 12px; color: #30463E; background-color: transparent; }"
         "QCheckBox::indicator { width: 14px; height: 14px; }"
     );
     connect(m_skyGroundCheck, &QCheckBox::toggled, this, &ParamsPanel::onCheckChanged);
@@ -259,16 +275,16 @@ void ParamsPanel::setupUI() {
     m_detectMaskBtn->setVisible(false);
     m_detectMaskBtn->setStyleSheet(
         "QPushButton {"
-        "  background-color: #1D2125;"
-        "  color: #F2F4F5;"
-        "  border: 1px solid #30373D;"
+        "  background-color: #EFF5F2;"
+        "  color: #1E312A;"
+        "  border: 1px solid #C6D6CF;"
         "  border-radius: 4px;"
         "  padding: 4px 12px;"
         "  font-size: 11px;"
         "}"
         "QPushButton:hover {"
-        "  background-color: #30373D;"
-        "  border: 1px solid #465059;"
+        "  background-color: #C6D6CF;"
+        "  border: 1px solid #AFC4BA;"
         "}"
     );
     connect(m_detectMaskBtn, &QPushButton::clicked, this, &ParamsPanel::maskPreviewRequested);
@@ -293,7 +309,7 @@ void ParamsPanel::setupUI() {
 
     m_maskPathLabel = new QLabel(m_stackGroup);
     m_maskPathLabel->setVisible(false);
-    m_maskPathLabel->setStyleSheet("font-size: 10px; color: #8F99A2;");
+    m_maskPathLabel->setStyleSheet("font-size: 10px; color: #5F746C;");
     stackLayout->addWidget(m_maskPathLabel);
 
     // 羽化宽度
@@ -366,7 +382,7 @@ void ParamsPanel::setupUI() {
         "在线性堆栈结果上抑制亮度和色彩噪声\n"
         "建议在去雾和曲线拉伸之前使用"));
     m_noiseReductionCheck->setStyleSheet(
-        "QCheckBox { font-size: 12px; color: #DDE1E4; background-color: transparent; }"
+        "QCheckBox { font-size: 12px; color: #30463E; background-color: transparent; }"
         "QCheckBox::indicator { width: 14px; height: 14px; }"
     );
     connect(m_noiseReductionCheck, &QCheckBox::toggled, this, &ParamsPanel::onCheckChanged);
@@ -393,7 +409,7 @@ void ParamsPanel::setupUI() {
         "亮度引导的 Dark Channel Prior 去雾\n"
         "适合明显薄雾；银河暗尘丰富时建议关闭"));
     m_dewarpCheck->setStyleSheet(
-        "QCheckBox { font-size: 12px; color: #DDE1E4; background-color: transparent; }"
+        "QCheckBox { font-size: 12px; color: #30463E; background-color: transparent; }"
         "QCheckBox::indicator { width: 14px; height: 14px; }"
     );
     connect(m_dewarpCheck, &QCheckBox::toggled, this, &ParamsPanel::onCheckChanged);
@@ -426,14 +442,14 @@ void ParamsPanel::setupUI() {
     // 缩星组（始终展开，不可折叠）
     m_starReduceGroup = new QWidget(this);
     m_starReduceGroup->setStyleSheet(
-        "QWidget { background-color: #171A1D; border: 1px solid #30373D; border-radius: 6px; }"
+        "QWidget { background-color: #FBFDFC; border: 1px solid #C6D6CF; border-radius: 6px; }"
     );
     auto* starLayout = new QVBoxLayout(m_starReduceGroup);
     starLayout->setContentsMargins(12, 12, 12, 12);
     starLayout->setSpacing(8);
 
     auto* starTitle = new QLabel(QString::fromUtf8("缩星"), m_starReduceGroup);
-    starTitle->setStyleSheet("font-size: 12px; font-weight: 700; color: #F2F4F5; background-color: transparent;");
+    starTitle->setStyleSheet("font-size: 12px; font-weight: 700; color: #1E312A; background-color: transparent;");
     starLayout->addWidget(starTitle);
 
     auto* starRow = new QHBoxLayout();
@@ -449,7 +465,7 @@ void ParamsPanel::setupUI() {
 
     auto* strengthRow = new QHBoxLayout();
     auto* strengthLabel = new QLabel(QString::fromUtf8("强度:"), m_starReduceGroup);
-    strengthLabel->setStyleSheet("font-size: 12px; color: #DDE1E4; background-color: transparent;");
+    strengthLabel->setStyleSheet("font-size: 12px; color: #30463E; background-color: transparent;");
     strengthLabel->setToolTip(QString::fromUtf8(
         "缩星强度：40 温和，70 强烈，90 接近清星\n"
         "请在 100% 预览下判断，过高会损失星点细节"));
@@ -477,19 +493,19 @@ void ParamsPanel::setupUI() {
     // 输出组（始终展开，不可折叠）
     m_outputGroup = new QWidget(this);
     m_outputGroup->setStyleSheet(
-        "QWidget { background-color: #171A1D; border: 1px solid #30373D; border-radius: 6px; }"
+        "QWidget { background-color: #FBFDFC; border: 1px solid #C6D6CF; border-radius: 6px; }"
     );
     auto* outputLayout = new QVBoxLayout(m_outputGroup);
     outputLayout->setContentsMargins(12, 12, 12, 12);
     outputLayout->setSpacing(8);
 
     auto* outTitle = new QLabel(QString::fromUtf8("文件设置"), m_outputGroup);
-    outTitle->setStyleSheet("font-size: 12px; font-weight: 700; color: #F2F4F5; background-color: transparent;");
+    outTitle->setStyleSheet("font-size: 12px; font-weight: 700; color: #1E312A; background-color: transparent;");
     outputLayout->addWidget(outTitle);
 
     auto* formatRow = new QHBoxLayout();
     auto* formatLabel = new QLabel(QString::fromUtf8("格式:"), m_outputGroup);
-    formatLabel->setStyleSheet("font-size: 12px; color: #DDE1E4; background-color: transparent;");
+    formatLabel->setStyleSheet("font-size: 12px; color: #30463E; background-color: transparent;");
     formatLabel->setToolTip(QString::fromUtf8("TIFF 16-bit：最高质量，保留完整动态范围（推荐）\nPNG 8-bit：无损压缩，预览/分享首选"));
     formatRow->addWidget(formatLabel);
     m_outputFormat = new QComboBox(m_outputGroup);
@@ -506,13 +522,13 @@ void ParamsPanel::setupUI() {
     // 输出路径选择
     auto* pathRow = new QHBoxLayout();
     auto* pathLabel = new QLabel(QString::fromUtf8("输出到:"), m_outputGroup);
-    pathLabel->setStyleSheet("font-size: 12px; color: #DDE1E4; background-color: transparent;");
+    pathLabel->setStyleSheet("font-size: 12px; color: #30463E; background-color: transparent;");
     pathRow->addWidget(pathLabel);
     auto* pathEdit = new QLineEdit(QDir::homePath() + "/StarProcessor/Output", m_outputGroup);
     m_outputPath = pathEdit;
     pathEdit->setStyleSheet(
-        "QLineEdit { background-color: #1D2125; color: #F2F4F5; "
-        "  border: 1px solid #30373D; border-radius: 4px; padding: 4px 8px; font-size: 11px; }"
+        "QLineEdit { background-color: #EFF5F2; color: #1E312A; "
+        "  border: 1px solid #C6D6CF; border-radius: 4px; padding: 4px 8px; font-size: 11px; }"
     );
     pathEdit->setReadOnly(true);
     pathRow->addWidget(pathEdit, 1);
@@ -522,9 +538,9 @@ void ParamsPanel::setupUI() {
     pathBtn->setAccessibleName(pathBtn->toolTip());
     pathBtn->setFixedSize(28, 28);
     pathBtn->setStyleSheet(
-        "QPushButton { background-color: #1D2125; color: #F2F4F5; "
-        "  border: 1px solid #30373D; border-radius: 4px; font-size: 11px; }"
-        "QPushButton:hover { background-color: #30373D; }"
+        "QPushButton { background-color: #EFF5F2; color: #1E312A; "
+        "  border: 1px solid #C6D6CF; border-radius: 4px; font-size: 11px; }"
+        "QPushButton:hover { background-color: #C6D6CF; }"
     );
     connect(pathBtn, &QPushButton::clicked, this, [this]() {
         QString dir = QFileDialog::getExistingDirectory(nullptr, QString::fromUtf8("选择输出目录"));
@@ -543,7 +559,7 @@ void ParamsPanel::setupUI() {
     // 底部按钮栏
     auto* btnBar = new QWidget(this);
     btnBar->setFixedHeight(44);
-    btnBar->setStyleSheet("background-color: #171A1D; border-top: 1px solid #30373D;");
+    btnBar->setStyleSheet("background-color: #FBFDFC; border-top: 1px solid #C6D6CF;");
     auto* btnLayout = new QHBoxLayout(btnBar);
     btnLayout->setContentsMargins(12, 0, 12, 0);
     btnLayout->setSpacing(8);
@@ -554,15 +570,15 @@ void ParamsPanel::setupUI() {
     m_restoreBtn->setStyleSheet(
         "QPushButton {"
         "  background-color: transparent;"
-        "  color: #8F99A2;"
-        "  border: 1px solid #30373D;"
+        "  color: #5F746C;"
+        "  border: 1px solid #C6D6CF;"
         "  border-radius: 4px;"
         "  padding: 4px 12px;"
         "  font-size: 11px;"
         "}"
         "QPushButton:hover {"
-        "  background-color: #1D2125;"
-        "  color: #F2F4F5;"
+        "  background-color: #EFF5F2;"
+        "  color: #1E312A;"
         "}"
     );
     connect(m_restoreBtn, &QPushButton::clicked, this, &ParamsPanel::onRestoreDefaults);
@@ -575,16 +591,16 @@ void ParamsPanel::setupUI() {
     m_savePresetBtn->setCursor(Qt::PointingHandCursor);
     m_savePresetBtn->setStyleSheet(
         "QPushButton {"
-        "  background-color: #1D2125;"
-        "  color: #F2F4F5;"
-        "  border: 1px solid #30373D;"
+        "  background-color: #EFF5F2;"
+        "  color: #1E312A;"
+        "  border: 1px solid #C6D6CF;"
         "  border-radius: 4px;"
         "  padding: 4px 12px;"
         "  font-size: 11px;"
         "}"
         "QPushButton:hover {"
-        "  background-color: #30373D;"
-        "  border: 1px solid #465059;"
+        "  background-color: #C6D6CF;"
+        "  border: 1px solid #AFC4BA;"
         "}"
     );
     connect(m_savePresetBtn, &QPushButton::clicked, this, &ParamsPanel::onSavePreset);
@@ -649,9 +665,9 @@ QGroupBox* ParamsPanel::createCollapsibleGroup(const QString& title, bool expand
     group->setCheckable(false);
     group->setStyleSheet(
         "QGroupBox {"
-        "  background-color: #171A1D;"
-        "  color: #F2F4F5;"
-        "  border: 1px solid #30373D;"
+        "  background-color: #FBFDFC;"
+        "  color: #1E312A;"
+        "  border: 1px solid #C6D6CF;"
         "  border-radius: 6px;"
         "  margin-top: 12px;"
         "  padding: 10px 12px 12px 12px;"
@@ -662,7 +678,7 @@ QGroupBox* ParamsPanel::createCollapsibleGroup(const QString& title, bool expand
         "  subcontrol-origin: margin;"
         "  left: 8px;"
         "  padding: 0 4px;"
-        "  background-color: #111315;"
+        "  background-color: #F1F6F3;"
         "}"
     );
     return group;
@@ -675,19 +691,19 @@ QSlider* ParamsPanel::createSlider(int min, int max, int value, const QString& s
     slider->setValue(value);
     slider->setStyleSheet(
         "QSlider::groove:horizontal {"
-        "  background-color: #30373D;"
+        "  background-color: #C6D6CF;"
         "  height: 4px;"
         "  border-radius: 2px;"
         "}"
         "QSlider::handle:horizontal {"
-        "  background-color: #3CC7A5;"
+        "  background-color: #28B58E;"
         "  width: 14px;"
         "  height: 14px;"
         "  border-radius: 7px;"
         "  margin: -5px 0;"
         "}"
         "QSlider::sub-page:horizontal {"
-        "  background-color: #3CC7A5;"
+        "  background-color: #28B58E;"
         "  height: 4px;"
         "  border-radius: 2px;"
         "}"
@@ -695,10 +711,10 @@ QSlider* ParamsPanel::createSlider(int min, int max, int value, const QString& s
         "  background-color: transparent;"
         "}"
         "QSlider::handle:horizontal:disabled {"
-        "  background-color: #465059;"
+        "  background-color: #AFC4BA;"
         "}"
         "QSlider::sub-page:horizontal:disabled {"
-        "  background-color: #465059;"
+        "  background-color: #AFC4BA;"
         "}"
     );
     return slider;
@@ -765,6 +781,7 @@ void ParamsPanel::onRestoreDefaults() {
         m_kappaSlider->setValue(25);
         m_kappaLabel->setText("2.5");
     }
+    updateStackMethodDescription();
     m_dewarpCheck->setChecked(false);
     m_dewarpSlider->setValue(30);
     m_noiseReductionCheck->setChecked(false);
@@ -848,6 +865,7 @@ void ParamsPanel::recommendStackMethod(int frameCount) {
         QSignalBlocker blocker(m_stackAlgorithm);
         m_stackAlgorithm->setCurrentIndex(recommendedIndex);
     }
+    updateStackMethodDescription();
 }
 
 void ParamsPanel::saveCurrentSettings() {
@@ -986,6 +1004,7 @@ void ParamsPanel::loadPreset() {
     m_groundDetailLabel->setText(
         QString::number(m_groundDetailSlider->value()) + "%");
     updateSkyGroundControls();
+    updateStackMethodDescription();
 
     if (lastPresetIndex >= 0 && lastPresetIndex < m_presetCombo->count()) {
         m_presetCombo->setCurrentIndex(lastPresetIndex);
@@ -1131,6 +1150,7 @@ void ParamsPanel::applyPreset(const Preset& preset) {
     if (preset.outputFormat == "tiff16") m_outputFormat->setCurrentIndex(0);
     else if (preset.outputFormat == "png8") m_outputFormat->setCurrentIndex(1);
 
+    updateStackMethodDescription();
     emitParamsChanged();
 }
 
@@ -1142,6 +1162,40 @@ void ParamsPanel::markPresetCustom() {
     if (!m_presetCombo || m_presetCombo->currentIndex() == 0) return;
     const QSignalBlocker blocker(m_presetCombo);
     m_presetCombo->setCurrentIndex(0);
+}
+
+void ParamsPanel::updateStackMethodDescription() {
+    if (!m_stackAlgorithm || !m_stackMethodDescription) return;
+
+    QString description;
+    switch (m_stackAlgorithm->currentIndex()) {
+        case 0:
+            description = QString::fromUtf8(
+                "少帧稳健。逐像素取中位数，能压制飞机轨迹和热像素；信噪比提升低于平均值。");
+            break;
+        case 1:
+            description = QString::fromUtf8(
+                "细节优先。逐像素平均，信噪比利用率最高；异常轨迹、坏点和薄云更容易残留。");
+            break;
+        case 2:
+            description = QString::fromUtf8(
+                "均衡推荐。迭代剔除超出 κ 阈值的异常像素，适合 6–15 帧；κ 越小剔除越严格。");
+            break;
+        case 3:
+            description = QString::fromUtf8(
+                "长序列稳健。限制极端值后求均值，兼顾信噪比与异常值抑制；帧数越多越稳定。");
+            break;
+        default:
+            break;
+    }
+    m_stackMethodDescription->setText(description);
+
+    // κ only affects Kappa-Sigma. Disabling it for the other algorithms makes
+    // the relationship visible and prevents users from tuning a no-op value.
+    const bool usesKappa = m_stackAlgorithm->currentIndex() == 2;
+    if (m_kappaNameLabel) m_kappaNameLabel->setEnabled(usesKappa);
+    if (m_kappaSlider) m_kappaSlider->setEnabled(usesKappa);
+    if (m_kappaLabel) m_kappaLabel->setEnabled(usesKappa);
 }
 
 QString ParamsPanel::alignMethod() const {

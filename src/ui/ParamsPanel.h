@@ -75,6 +75,7 @@ private:
     QSlider* createSlider(int min, int max, int value, const QString& suffix = QString());
 
     void updateSkyGroundControls();
+    void updateStackMethodDescription();
     void markPresetCustom();
 
     // 预设
@@ -88,6 +89,8 @@ private:
     // 堆栈组
     QGroupBox* m_stackGroup = nullptr;
     QComboBox* m_stackAlgorithm = nullptr;
+    QLabel* m_stackMethodDescription = nullptr;
+    QLabel* m_kappaNameLabel = nullptr;
     QSlider* m_kappaSlider = nullptr;
     QLabel* m_kappaLabel = nullptr;
     QCheckBox* m_autoRejectQualityCheck = nullptr;

@@ -73,13 +73,13 @@ FileCard::FileCard(const FileItem& item, QWidget* parent)
     m_thumbnailLabel->setFixedSize(52, 52);
     m_thumbnailLabel->setScaledContents(true);
     m_thumbnailLabel->setStyleSheet(
-        "border: 1px solid #2A3035; border-radius: 5px; background-color: #1D2125;"
+        "border: 1px solid #D3E0DA; border-radius: 5px; background-color: #EFF5F2;"
     );
     if (!item.thumbnail.isNull() && item.hasThumbnail) {
         m_thumbnailLabel->setPixmap(item.thumbnail.scaled(52, 52, Qt::KeepAspectRatio, Qt::SmoothTransformation));
     } else {
         QPixmap placeholder(52, 52);
-        placeholder.fill(QColor("#1D2125"));
+        placeholder.fill(QColor("#EFF5F2"));
         m_thumbnailLabel->setPixmap(placeholder);
     }
     layout->addWidget(m_thumbnailLabel, 0, Qt::AlignVCenter);
@@ -94,7 +94,7 @@ FileCard::FileCard(const FileItem& item, QWidget* parent)
     m_nameLabel->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
     m_nameLabel->setToolTip(item.fileName);
     m_nameLabel->setStyleSheet(
-        "font-size: 13px; font-weight: 600; color: #F2F4F5; background-color: transparent;"
+        "font-size: 13px; font-weight: 600; color: #1E312A; background-color: transparent;"
     );
     m_nameLabel->setText(m_fileName);
     textLayout->addWidget(m_nameLabel);
@@ -104,7 +104,7 @@ FileCard::FileCard(const FileItem& item, QWidget* parent)
     m_metaLabel->setMinimumWidth(0);
     m_metaLabel->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
     m_metaLabel->setStyleSheet(
-        "font-size: 11px; color: #99A2AA; background-color: transparent;"
+        "font-size: 11px; color: #667A72; background-color: transparent;"
     );
     m_metaLabel->setText(formatMetadata(item));
     textLayout->addWidget(m_metaLabel);
@@ -144,18 +144,18 @@ void FileCard::setSelected(bool selected) {
 }
 
 void FileCard::updateStyle() {
-    const QString borderColor = m_selected ? "#5EA7FF" : "#2A3035";
+    const QString borderColor = m_selected ? "#3B82C4" : "#D3E0DA";
     QString bgColor;
     if (m_selected) {
-        bgColor = "#1D2125";
+        bgColor = "#EAF3FB";
     } else if (m_hovered) {
-        bgColor = "#171A1D";
+        bgColor = "#FBFDFC";
     } else {
-        bgColor = "#111315";
+        bgColor = "#F1F6F3";
     }
 
     const int leftBorder = m_isReference ? 3 : 1;
-    const QString leftBorderColor = m_isReference ? "#F4B740" : borderColor;
+    const QString leftBorderColor = m_isReference ? "#D99A24" : borderColor;
 
     setStyleSheet(QString(
         "FileCard {"
@@ -170,12 +170,12 @@ void FileCard::updateStyle() {
     if (m_isReference) {
         m_statusLabel->setText(QString::fromUtf8("参考"));
         m_statusLabel->setStyleSheet(
-            "font-size: 10px; font-weight: 600; color: #F4B740; background-color: transparent;"
+            "font-size: 10px; font-weight: 600; color: #D99A24; background-color: transparent;"
         );
     } else if (m_isExcluded) {
         m_statusLabel->setText(QString::fromUtf8("排除"));
         m_statusLabel->setStyleSheet(
-            "font-size: 10px; font-weight: 600; color: #99A2AA; background-color: transparent;"
+            "font-size: 10px; font-weight: 600; color: #667A72; background-color: transparent;"
         );
     } else {
         m_statusLabel->setText("");
@@ -240,7 +240,7 @@ ProjectPanel::ProjectPanel(QWidget* parent)
 ProjectPanel::~ProjectPanel() = default;
 
 void ProjectPanel::setupUI() {
-    setStyleSheet("ProjectPanel { background-color: #111315; }");
+    setStyleSheet("ProjectPanel { background-color: #F1F6F3; }");
 
     auto* layout = new QVBoxLayout(this);
     layout->setContentsMargins(0, 0, 0, 0);
@@ -249,13 +249,13 @@ void ProjectPanel::setupUI() {
     // 标题栏
     auto* titleBar = new QWidget(this);
     titleBar->setFixedHeight(44);
-    titleBar->setStyleSheet("background-color: #171A1D; border-bottom: 1px solid #2A3035;");
+    titleBar->setStyleSheet("background-color: #FBFDFC; border-bottom: 1px solid #D3E0DA;");
     auto* titleLayout = new QHBoxLayout(titleBar);
     titleLayout->setContentsMargins(12, 0, 8, 0);
     titleLayout->setSpacing(8);
     auto* titleLabel = new QLabel(QString::fromUtf8("素材"), titleBar);
     titleLabel->setStyleSheet(
-        "font-size: 14px; font-weight: 600; color: #F2F4F5; background-color: transparent;"
+        "font-size: 14px; font-weight: 600; color: #1E312A; background-color: transparent;"
     );
     titleLayout->addWidget(titleLabel);
 
@@ -264,7 +264,7 @@ void ProjectPanel::setupUI() {
     m_countLabel->setMinimumWidth(24);
     m_countLabel->setFixedHeight(20);
     m_countLabel->setStyleSheet(
-        "color: #99A2AA; background-color: #1D2125; border: 1px solid #2A3035;"
+        "color: #667A72; background-color: #EFF5F2; border: 1px solid #D3E0DA;"
         "border-radius: 5px; padding: 0 6px; font-size: 11px;"
     );
     titleLayout->addWidget(m_countLabel);
@@ -275,10 +275,10 @@ void ProjectPanel::setupUI() {
     m_headerImportBtn->setCursor(Qt::PointingHandCursor);
     m_headerImportBtn->setToolTip(QString::fromUtf8("导入 RAW 文件"));
     m_headerImportBtn->setStyleSheet(
-        "QPushButton { color: #F2F4F5; background-color: transparent; border: 1px solid #2A3035;"
+        "QPushButton { color: #1E312A; background-color: transparent; border: 1px solid #D3E0DA;"
         "border-radius: 5px; font-size: 18px; font-weight: 400; padding: 0; }"
-        "QPushButton:hover { color: #111315; background-color: #3CC7A5; border-color: #3CC7A5; }"
-        "QPushButton:pressed { background-color: #32AD90; border-color: #32AD90; }"
+        "QPushButton:hover { color: #F1F6F3; background-color: #28B58E; border-color: #28B58E; }"
+        "QPushButton:pressed { background-color: #179976; border-color: #179976; }"
     );
     connect(m_headerImportBtn, &QPushButton::clicked, this, &ProjectPanel::onImportClicked);
     titleLayout->addWidget(m_headerImportBtn);
@@ -286,7 +286,7 @@ void ProjectPanel::setupUI() {
 
     // 内容区域（文件列表或空状态）
     auto* contentWidget = new QWidget(this);
-    contentWidget->setStyleSheet("background-color: #111315;");
+    contentWidget->setStyleSheet("background-color: #F1F6F3;");
     auto* contentLayout = new QVBoxLayout(contentWidget);
     contentLayout->setContentsMargins(0, 0, 0, 0);
     contentLayout->setSpacing(0);
@@ -309,10 +309,10 @@ void ProjectPanel::setupUI() {
     // 右键菜单
     m_contextMenu = new QMenu(this);
     m_contextMenu->setStyleSheet(
-        "QMenu { background-color: #171A1D; color: #F2F4F5; border: 1px solid #2A3035; padding: 5px; }"
+        "QMenu { background-color: #FBFDFC; color: #1E312A; border: 1px solid #D3E0DA; padding: 5px; }"
         "QMenu::item { padding: 7px 22px 7px 10px; border-radius: 4px; }"
-        "QMenu::item:selected { background-color: #1D2125; color: #F2F4F5; }"
-        "QMenu::separator { height: 1px; background-color: #2A3035; margin: 5px 8px; }"
+        "QMenu::item:selected { background-color: #EFF5F2; color: #1E312A; }"
+        "QMenu::separator { height: 1px; background-color: #D3E0DA; margin: 5px 8px; }"
     );
 
     m_referenceAction = new QAction(QString::fromUtf8("设为参考帧"), this);
@@ -344,13 +344,13 @@ void ProjectPanel::setupEmptyState() {
 
     auto* textLabel = new QLabel(QString::fromUtf8("拖放 RAW 文件到这里"), m_emptyState);
     textLabel->setStyleSheet(
-        "font-size: 14px; font-weight: 600; color: #F2F4F5; background-color: transparent;"
+        "font-size: 14px; font-weight: 600; color: #1E312A; background-color: transparent;"
     );
     textLabel->setAlignment(Qt::AlignCenter);
     m_emptyLayout->addWidget(textLabel);
 
     auto* formatLabel = new QLabel(QString::fromUtf8("支持常见相机 RAW 格式"), m_emptyState);
-    formatLabel->setStyleSheet("font-size: 11px; color: #99A2AA; background-color: transparent;");
+    formatLabel->setStyleSheet("font-size: 11px; color: #667A72; background-color: transparent;");
     formatLabel->setAlignment(Qt::AlignCenter);
     m_emptyLayout->addWidget(formatLabel);
 
@@ -361,20 +361,20 @@ void ProjectPanel::setupEmptyState() {
     m_emptyImportBtn->setCursor(Qt::PointingHandCursor);
     m_emptyImportBtn->setStyleSheet(
         "QPushButton {"
-        "  background-color: #1D2125;"
-        "  color: #DDE1E4;"
-        "  border: 1px solid #30373D;"
+        "  background-color: #EFF5F2;"
+        "  color: #30463E;"
+        "  border: 1px solid #C6D6CF;"
         "  border-radius: 5px;"
         "  padding: 0 16px;"
         "  font-size: 13px;"
         "  font-weight: 600;"
         "}"
         "QPushButton:hover {"
-        "  background-color: #272C31;"
-        "  border-color: #465059;"
+        "  background-color: #E6F0EC;"
+        "  border-color: #AFC4BA;"
         "}"
         "QPushButton:pressed {"
-        "  background-color: #30373D;"
+        "  background-color: #C6D6CF;"
         "}"
     );
     connect(m_emptyImportBtn, &QPushButton::clicked, this, &ProjectPanel::onImportClicked);
@@ -386,15 +386,15 @@ void ProjectPanel::setupFileList() {
     m_scrollArea->setWidgetResizable(true);
     m_scrollArea->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     m_scrollArea->setStyleSheet(
-        "QScrollArea { background-color: #111315; border: none; }"
-        "QScrollBar:vertical { background-color: #111315; width: 10px; margin: 2px; }"
-        "QScrollBar::handle:vertical { background-color: #2A3035; border-radius: 3px; min-height: 28px; }"
-        "QScrollBar::handle:vertical:hover { background-color: #3A4248; }"
+        "QScrollArea { background-color: #F1F6F3; border: none; }"
+        "QScrollBar:vertical { background-color: #F1F6F3; width: 10px; margin: 2px; }"
+        "QScrollBar::handle:vertical { background-color: #D3E0DA; border-radius: 3px; min-height: 28px; }"
+        "QScrollBar::handle:vertical:hover { background-color: #B9CBC4; }"
         "QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }"
     );
 
     m_listContainer = new QWidget();
-    m_listContainer->setStyleSheet("background-color: #111315;");
+    m_listContainer->setStyleSheet("background-color: #F1F6F3;");
     m_listLayout = new QVBoxLayout(m_listContainer);
     m_listLayout->setContentsMargins(8, 8, 8, 8);
     m_listLayout->setSpacing(6);
@@ -407,8 +407,8 @@ void ProjectPanel::setupBottomBar() {
     m_bottomLabel = new QLabel(this);
     m_bottomLabel->setFixedHeight(32);
     m_bottomLabel->setStyleSheet(
-        "QLabel { background-color: #171A1D; color: #99A2AA; font-size: 11px; "
-        "padding: 4px 12px; border-top: 1px solid #2A3035; }"
+        "QLabel { background-color: #FBFDFC; color: #667A72; font-size: 11px; "
+        "padding: 4px 12px; border-top: 1px solid #D3E0DA; }"
     );
     m_bottomLabel->setText(QString::fromUtf8("可用 0 / 共 0 · 排除 0 · 参考 自动"));
 }
