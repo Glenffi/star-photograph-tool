@@ -111,6 +111,7 @@ set(APP_SOURCES
     src/ui/PreviewPanel.cpp
     src/ui/Toolbar.cpp
     src/ui/ParamsPanel.cpp
+    src/ui/UiAssets.cpp
 )
 
 set(CORE_HEADERS
@@ -137,6 +138,7 @@ set(APP_HEADERS
     src/ui/PreviewPanel.h
     src/ui/Toolbar.h
     src/ui/ParamsPanel.h
+    src/ui/UiAssets.h
 )
 
 # 核心库不依赖 Widgets；ImageExporter、PresetManager 和 SkyGroundMask

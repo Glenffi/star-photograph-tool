@@ -38,6 +38,7 @@ private:
     QPushButton* m_exportResultBtn = nullptr;
     QPushButton* m_settingsBtn = nullptr;
     QPushButton* m_aboutBtn = nullptr;
+    QLabel* m_logoLabel = nullptr;
     QLabel* m_brandLabel = nullptr;
     QLabel* m_versionLabel = nullptr;
     QLabel* m_projectSummaryLabel = nullptr;

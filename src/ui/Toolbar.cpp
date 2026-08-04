@@ -1,9 +1,9 @@
 #include "Toolbar.h"
+#include "UiAssets.h"
 #include <QHBoxLayout>
 #include <QPushButton>
 #include <QLabel>
 #include <QFrame>
-#include <QStyle>
 
 Toolbar::Toolbar(QWidget* parent)
     : QWidget(parent)
@@ -12,47 +12,54 @@ Toolbar::Toolbar(QWidget* parent)
 }
 
 void Toolbar::setupUI() {
-    setFixedHeight(56);
+    setFixedHeight(64);
     setStyleSheet(
-        "Toolbar { background-color: #FBFDFC; border-bottom: 1px solid #D3E0DA; }"
-        "QLabel { color: #1E312A; background-color: transparent; }"
+        "Toolbar { background-color: #131A1C; border-bottom: 1px solid #293638; }"
+        "QLabel { color: #F3F7F6; background-color: transparent; }"
     );
 
     auto* layout = new QHBoxLayout(this);
-    layout->setContentsMargins(16, 0, 12, 0);
-    layout->setSpacing(6);
+    layout->setContentsMargins(14, 0, 14, 0);
+    layout->setSpacing(7);
 
-    // 品牌与项目状态始终留在最左侧，形成稳定的视觉锚点。
+    // The mark combines stacked frames and a star, giving the workspace a
+    // recognisable product identity instead of a platform toolbar silhouette.
+    m_logoLabel = new QLabel(this);
+    m_logoLabel->setFixedSize(38, 38);
+    m_logoLabel->setPixmap(UiAssets::logoMark(38));
+    m_logoLabel->setAlignment(Qt::AlignCenter);
+    layout->addWidget(m_logoLabel);
+
     auto* leftLayout = new QVBoxLayout();
-    leftLayout->setSpacing(1);
+    leftLayout->setSpacing(0);
     leftLayout->setContentsMargins(0, 0, 0, 0);
 
     auto* brandRow = new QHBoxLayout();
     brandRow->setSpacing(7);
     m_brandLabel = new QLabel("StarProcessor", this);
     m_brandLabel->setStyleSheet(
-        "font-size: 16px; font-weight: 700; color: #1E312A;"
+        "font-size: 16px; font-weight: 700; color: #F3F7F6;"
     );
     brandRow->addWidget(m_brandLabel);
 
     m_versionLabel = new QLabel("BETA", this);
     m_versionLabel->setStyleSheet(
-        "font-size: 9px; font-weight: 700; color: #28B58E; "
-        "background-color: #DDF5EC; border-radius: 3px; padding: 1px 5px;"
+        "font-size: 8px; font-weight: 700; color: #4ED7AE; "
+        "background-color: #183B33; border-radius: 3px; padding: 1px 5px;"
     );
     brandRow->addWidget(m_versionLabel);
     leftLayout->addLayout(brandRow);
 
     m_projectSummaryLabel = new QLabel(QString::fromUtf8("等待导入素材"), this);
-    m_projectSummaryLabel->setStyleSheet("font-size: 10px; color: #657A72;");
+    m_projectSummaryLabel->setStyleSheet("font-size: 10px; color: #81938F;");
     leftLayout->addWidget(m_projectSummaryLabel);
 
     layout->addLayout(leftLayout);
-    layout->addSpacing(14);
+    layout->addSpacing(10);
 
     auto* separator = new QFrame(this);
     separator->setFrameShape(QFrame::VLine);
-    separator->setStyleSheet("color: #D3E0DA;");
+    separator->setStyleSheet("color: #2B393B;");
     separator->setFixedWidth(1);
     separator->setFixedHeight(30);
     layout->addWidget(separator);
@@ -60,19 +67,19 @@ void Toolbar::setupUI() {
 
     // 素材命令保持克制；真正的主操作是右侧“开始处理”。
     m_importFilesBtn = createActionButton(
-        style()->standardIcon(QStyle::SP_DialogOpenButton),
+        UiAssets::icon(UiAssets::Glyph::AddPhotos, QColor("#B7C7C3")),
         QString::fromUtf8("添加照片"));
     connect(m_importFilesBtn, &QPushButton::clicked, this, &Toolbar::importFilesClicked);
     layout->addWidget(m_importFilesBtn);
 
     m_importFolderBtn = createIconButton(
-        style()->standardIcon(QStyle::SP_DirOpenIcon),
+        UiAssets::icon(UiAssets::Glyph::Folder, QColor("#A7B8B4")),
         QString::fromUtf8("导入文件夹"));
     connect(m_importFolderBtn, &QPushButton::clicked, this, &Toolbar::importFolderClicked);
     layout->addWidget(m_importFolderBtn);
 
     m_clearProjectBtn = createIconButton(
-        style()->standardIcon(QStyle::SP_TrashIcon),
+        UiAssets::icon(UiAssets::Glyph::Trash, QColor("#A7B8B4")),
         QString::fromUtf8("清空项目"));
     connect(m_clearProjectBtn, &QPushButton::clicked, this, &Toolbar::clearProjectClicked);
     layout->addWidget(m_clearProjectBtn);
@@ -80,26 +87,26 @@ void Toolbar::setupUI() {
     layout->addStretch();
 
     m_exportResultBtn = createActionButton(
-        style()->standardIcon(QStyle::SP_DialogSaveButton),
+        UiAssets::icon(UiAssets::Glyph::Export, QColor("#B7C7C3")),
         QString::fromUtf8("导出"));
     connect(m_exportResultBtn, &QPushButton::clicked, this, &Toolbar::exportResultClicked);
     layout->addWidget(m_exportResultBtn);
 
     m_startProcessBtn = createActionButton(
-        style()->standardIcon(QStyle::SP_MediaPlay),
+        UiAssets::icon(UiAssets::Glyph::Play, QColor("#0D211B")),
         QString::fromUtf8("开始处理"), true);
     connect(m_startProcessBtn, &QPushButton::clicked, this, &Toolbar::startProcessClicked);
     layout->addWidget(m_startProcessBtn);
 
     layout->addSpacing(6);
     m_settingsBtn = createIconButton(
-        style()->standardIcon(QStyle::SP_FileDialogDetailedView),
+        UiAssets::icon(UiAssets::Glyph::Sliders, QColor("#A7B8B4")),
         QString::fromUtf8("设置"));
     connect(m_settingsBtn, &QPushButton::clicked, this, &Toolbar::settingsClicked);
     layout->addWidget(m_settingsBtn);
 
     m_aboutBtn = createIconButton(
-        style()->standardIcon(QStyle::SP_MessageBoxInformation),
+        UiAssets::icon(UiAssets::Glyph::Info, QColor("#A7B8B4")),
         QString::fromUtf8("关于"));
     connect(m_aboutBtn, &QPushButton::clicked, this, &Toolbar::aboutClicked);
     layout->addWidget(m_aboutBtn);
@@ -122,11 +129,11 @@ QPushButton* Toolbar::createIconButton(const QIcon& icon, const QString& tooltip
         "  padding: 0;"
         "}"
         "QPushButton:hover {"
-        "  background-color: #EAF2EF;"
-        "  border-color: #C6D6CF;"
+        "  background-color: #202A2D;"
+        "  border-color: #344548;"
         "}"
         "QPushButton:pressed {"
-        "  background-color: #D3E0DA;"
+        "  background-color: #293638;"
         "}"
     );
     btn->setCursor(Qt::PointingHandCursor);
@@ -144,8 +151,8 @@ QPushButton* Toolbar::createActionButton(const QIcon& icon, const QString& text,
     if (isPrimary) {
         btn->setStyleSheet(
             "QPushButton {"
-            "  background-color: #28B58E;"
-            "  color: #FFFFFF;"
+            "  background-color: #4ED7AE;"
+            "  color: #0D211B;"
             "  border: none;"
             "  border-radius: 5px;"
             "  padding: 5px 16px;"
@@ -153,37 +160,37 @@ QPushButton* Toolbar::createActionButton(const QIcon& icon, const QString& text,
             "  font-weight: 700;"
             "}"
             "QPushButton:hover {"
-            "  background-color: #39C59F;"
+            "  background-color: #67E2BE;"
             "}"
             "QPushButton:pressed {"
-            "  background-color: #179976;"
+            "  background-color: #32B98F;"
             "}"
             "QPushButton:disabled {"
-            "  background-color: #E7EEEB;"
-            "  color: #A6B5AF;"
+            "  background-color: #242E31;"
+            "  color: #526663;"
             "}"
         );
     } else {
         btn->setStyleSheet(
             "QPushButton {"
-            "  background-color: #EFF5F2;"
-            "  color: #30463E;"
-            "  border: 1px solid #C6D6CF;"
+            "  background-color: #202A2D;"
+            "  color: #D2DDDA;"
+            "  border: 1px solid #344548;"
             "  border-radius: 5px;"
             "  padding: 5px 13px;"
             "  font-size: 12px;"
             "}"
             "QPushButton:hover {"
-            "  background-color: #E6F0EC;"
-            "  border-color: #AFC4BA;"
+            "  background-color: #293638;"
+            "  border-color: #4D6265;"
             "}"
             "QPushButton:pressed {"
-            "  background-color: #C6D6CF;"
+            "  background-color: #344548;"
             "}"
             "QPushButton:disabled {"
-            "  background-color: #FBFDFC;"
-            "  color: #9DAEA7;"
-            "  border-color: #DDE7E2;"
+            "  background-color: #171F21;"
+            "  color: #536763;"
+            "  border-color: #263234;"
             "}"
         );
     }

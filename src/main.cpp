@@ -12,8 +12,6 @@
 #include <QMenuBar>
 #include <QMenu>
 #include <QAction>
-#include <QStyle>
-#include <QStyleFactory>
 #include <QFileInfo>
 #include <QDir>
 #include <QDialog>
@@ -35,6 +33,7 @@
 #include "ui/PreviewPanel.h"
 #include "ui/ParamsPanel.h"
 #include "ui/Toolbar.h"
+#include "ui/UiAssets.h"
 
 #include "core/RawImageLoader.h"
 #include "core/ImageExporter.h"
@@ -131,7 +130,7 @@ private:
         m_stepBar = new QWidget(this);
         m_stepBar->setFixedHeight(40);
         m_stepBar->setStyleSheet(
-            "QWidget { background-color: #F1F6F3; border-bottom: 1px solid #DDE7E2; }"
+            "QWidget { background-color: #111719; border-bottom: 1px solid #263234; }"
         );
         auto* stepLayout = new QHBoxLayout(m_stepBar);
         stepLayout->setContentsMargins(16, 0, 12, 0);
@@ -148,7 +147,7 @@ private:
             stepLayout->addWidget(label);
             if (i + 1 < steps.size()) {
                 auto* connector = new QLabel(QString::fromUtf8("›"), m_stepBar);
-                connector->setStyleSheet("color: #91A49C; border: none; font-size: 15px;");
+                connector->setStyleSheet("color: #536763; border: none; font-size: 15px;");
                 stepLayout->addWidget(connector);
             }
         }
@@ -159,14 +158,14 @@ private:
         m_inlineProgress->setFixedSize(110, 5);
         m_inlineProgress->setVisible(false);
         m_inlineProgress->setStyleSheet(
-            "QProgressBar { background-color: #D3E0DA; border: none; border-radius: 2px; }"
-            "QProgressBar::chunk { background-color: #28B58E; border-radius: 2px; }"
+            "QProgressBar { background-color: #2B393B; border: none; border-radius: 2px; }"
+            "QProgressBar::chunk { background-color: #4ED7AE; border-radius: 2px; }"
         );
         stepLayout->addWidget(m_inlineProgress);
         m_workflowStatus = new QLabel(m_stepBar);
         m_workflowStatus->setMinimumWidth(210);
         m_workflowStatus->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
-        m_workflowStatus->setStyleSheet("color: #657A72; border: none; font-size: 10px;");
+        m_workflowStatus->setStyleSheet("color: #81938F; border: none; font-size: 10px;");
         stepLayout->addWidget(m_workflowStatus);
         mainLayout->addWidget(m_stepBar);
 
@@ -174,7 +173,7 @@ private:
         auto* contentSplitter = new QSplitter(Qt::Horizontal, this);
         contentSplitter->setHandleWidth(2);
         contentSplitter->setStyleSheet(
-            "QSplitter::handle { background-color: #DDE7E2; }"
+            "QSplitter::handle { background-color: #263234; }"
         );
 
         // 左侧面板：ProjectPanel（卡片式文件列表）
@@ -295,7 +294,7 @@ private:
 
     void setupStatusBar() {
         statusBar()->setStyleSheet(
-            "QStatusBar { background-color: #FBFDFC; color: #657A72; border-top: 1px solid #D3E0DA; }"
+            "QStatusBar { background-color: #171F21; color: #81938F; border-top: 1px solid #2B393B; }"
         );
     }
 
@@ -314,20 +313,20 @@ private:
                                QStringList{QString::fromUtf8("素材"), QString::fromUtf8("对齐"),
                                            QString::fromUtf8("堆栈"), QString::fromUtf8("结果")}.value(i));
                 label->setStyleSheet(
-                    "color: #28B58E; border: none; font-size: 10px; font-weight: 600; padding: 4px 7px;"
+                    "color: #4ED7AE; border: none; font-size: 10px; font-weight: 600; padding: 4px 7px;"
                 );
             } else if (i == current) {
                 label->setText(QStringList{QString::fromUtf8("素材"), QString::fromUtf8("对齐"),
                                            QString::fromUtf8("堆栈"), QString::fromUtf8("结果")}.value(i));
                 label->setStyleSheet(
-                    "color: #1E312A; background-color: #EAF2EF; border: 1px solid #B9CBC4; "
+                    "color: #F3F7F6; background-color: #1B2527; border: 1px solid #465B5E; "
                     "border-radius: 5px; font-size: 10px; font-weight: 700; padding: 4px 7px;"
                 );
             } else {
                 label->setText(QStringList{QString::fromUtf8("素材"), QString::fromUtf8("对齐"),
                                            QString::fromUtf8("堆栈"), QString::fromUtf8("结果")}.value(i));
                 label->setStyleSheet(
-                    "color: #7B8D86; border: none; font-size: 10px; padding: 4px 7px;"
+                    "color: #667B77; border: none; font-size: 10px; padding: 4px 7px;"
                 );
             }
         }
@@ -529,10 +528,10 @@ private:
     }
 
     QString menuStyleSheet() const {
-        return "QMenu { background-color: #FBFDFC; color: #30463E; border: 1px solid #C6D6CF; padding: 5px; }"
+        return "QMenu { background-color: #171F21; color: #D2DDDA; border: 1px solid #344548; padding: 5px; }"
                "QMenu::item { padding: 7px 22px 7px 10px; border-radius: 4px; }"
-               "QMenu::item:selected { background-color: #E6F0EC; color: #1E312A; }"
-               "QMenu::separator { height: 1px; background-color: #D3E0DA; margin: 5px 8px; }";
+               "QMenu::item:selected { background-color: #273336; color: #F3F7F6; }"
+               "QMenu::separator { height: 1px; background-color: #2B393B; margin: 5px 8px; }";
     }
 
     static QString formatExposureTime(double seconds) {
@@ -730,13 +729,13 @@ private slots:
         dialog->setCancelButtonText("取消");
         dialog->setWindowModality(Qt::NonModal);
         dialog->setStyleSheet(
-            "QProgressDialog { background-color: #FBFDFC; color: #1E312A; }"
-            "QLabel { color: #30463E; }"
-            "QProgressBar { border: 1px solid #C6D6CF; border-radius: 4px; "
-            "  background-color: #F1F6F3; color: #30463E; text-align: center; }"
-            "QProgressBar::chunk { background-color: #28B58E; border-radius: 3px; }"
-            "QPushButton { background-color: #EFF5F2; color: #30463E; "
-            "  border: 1px solid #C6D6CF; border-radius: 5px; padding: 6px 16px; }"
+            "QProgressDialog { background-color: #171F21; color: #F3F7F6; }"
+            "QLabel { color: #D2DDDA; }"
+            "QProgressBar { border: 1px solid #344548; border-radius: 4px; "
+            "  background-color: #111719; color: #D2DDDA; text-align: center; }"
+            "QProgressBar::chunk { background-color: #4ED7AE; border-radius: 3px; }"
+            "QPushButton { background-color: #202A2D; color: #D2DDDA; "
+            "  border: 1px solid #344548; border-radius: 5px; padding: 6px 16px; }"
         );
 
         // 4. 创建后台线程
@@ -890,15 +889,15 @@ private slots:
         dialog->setWindowTitle("设置");
         dialog->setFixedSize(480, 240);
         dialog->setStyleSheet(
-            "QDialog { background-color: #FBFDFC; color: #1E312A; }"
-            "QLabel { color: #30463E; background-color: transparent; }"
-            "QLineEdit { background-color: #EFF5F2; color: #30463E; "
-            "  border: 1px solid #C6D6CF; border-radius: 5px; padding: 5px 8px; }"
-            "QPushButton { background-color: #EFF5F2; color: #30463E; "
-            "  border: 1px solid #C6D6CF; border-radius: 5px; padding: 6px 16px; }"
-            "QPushButton:hover { background-color: #E6F0EC; border-color: #AFC4BA; }"
-            "QComboBox { background-color: #EFF5F2; color: #30463E; "
-            "  border: 1px solid #C6D6CF; border-radius: 5px; padding: 5px 8px; }"
+            "QDialog { background-color: #171F21; color: #F3F7F6; }"
+            "QLabel { color: #D2DDDA; background-color: transparent; }"
+            "QLineEdit { background-color: #202A2D; color: #D2DDDA; "
+            "  border: 1px solid #344548; border-radius: 5px; padding: 5px 8px; }"
+            "QPushButton { background-color: #202A2D; color: #D2DDDA; "
+            "  border: 1px solid #344548; border-radius: 5px; padding: 6px 16px; }"
+            "QPushButton:hover { background-color: #273336; border-color: #4D6265; }"
+            "QComboBox { background-color: #202A2D; color: #D2DDDA; "
+            "  border: 1px solid #344548; border-radius: 5px; padding: 5px 8px; }"
         );
 
         auto* layout = new QVBoxLayout(dialog);
@@ -906,7 +905,7 @@ private slots:
         layout->setContentsMargins(20, 20, 20, 20);
 
         auto* title = new QLabel(QString::fromUtf8("应用设置"), dialog);
-        title->setStyleSheet("font-size: 16px; font-weight: 700; color: #1E312A;");
+        title->setStyleSheet("font-size: 16px; font-weight: 700; color: #F3F7F6;");
         layout->addWidget(title);
 
         // 输出目录
@@ -917,7 +916,8 @@ private slots:
         auto* outDirEdit = new QLineEdit(defaultOutDir, dialog);
         outDirEdit->setReadOnly(true);
         auto* outDirBtn = new QPushButton(dialog);
-        outDirBtn->setIcon(style()->standardIcon(QStyle::SP_DirOpenIcon));
+        outDirBtn->setIcon(
+            UiAssets::icon(UiAssets::Glyph::Folder, QColor("#A7B8B4")));
         outDirBtn->setToolTip(QString::fromUtf8("选择输出目录"));
         outDirBtn->setFixedSize(28, 28);
         connect(outDirBtn, &QPushButton::clicked, this, [outDirEdit]() {
@@ -936,7 +936,8 @@ private slots:
         auto* cacheEdit = new QLineEdit(defaultCacheDir, dialog);
         cacheEdit->setReadOnly(true);
         auto* cacheBtn = new QPushButton(dialog);
-        cacheBtn->setIcon(style()->standardIcon(QStyle::SP_DirOpenIcon));
+        cacheBtn->setIcon(
+            UiAssets::icon(UiAssets::Glyph::Folder, QColor("#A7B8B4")));
         cacheBtn->setToolTip(QString::fromUtf8("选择缓存目录"));
         cacheBtn->setFixedSize(28, 28);
         connect(cacheBtn, &QPushButton::clicked, this, [cacheEdit]() {
@@ -955,9 +956,9 @@ private slots:
         btnRow->addStretch();
         auto* okBtn = new QPushButton("确定", dialog);
         okBtn->setStyleSheet(
-            "QPushButton { background-color: #28B58E; color: #FFFFFF; "
+            "QPushButton { background-color: #4ED7AE; color: #0D211B; "
             "  font-weight: 700; border: none; border-radius: 5px; padding: 6px 24px; }"
-            "QPushButton:hover { background-color: #39C59F; }"
+            "QPushButton:hover { background-color: #67E2BE; }"
         );
         connect(okBtn, &QPushButton::clicked, dialog, [this, dialog, outDirEdit, cacheEdit]() {
             QSettings s("StarProcessor", "App");
@@ -1011,24 +1012,25 @@ int main(int argc, char* argv[]) {
     app.setApplicationName("StarProcessor");
     app.setApplicationVersion("0.4.0");
     app.setOrganizationName("StarProcessor");
+    app.setWindowIcon(UiAssets::appIcon());
 
     app.setStyleSheet(
-        "QMainWindow, QDialog, QMessageBox, QFileDialog { background-color: #F1F6F3; color: #1E312A; }"
-        "QWidget { color: #30463E; letter-spacing: 0px; }"
-        "QMenuBar { background-color: #FBFDFC; color: #344A42; border-bottom: 1px solid #DDE7E2; }"
+        "QMainWindow, QDialog, QMessageBox, QFileDialog { background-color: #111719; color: #F3F7F6; }"
+        "QWidget { color: #D2DDDA; letter-spacing: 0px; }"
+        "QMenuBar { background-color: #171F21; color: #C7D3D0; border-bottom: 1px solid #263234; }"
         "QMenuBar::item { padding: 5px 11px; background-color: transparent; }"
-        "QMenuBar::item:selected { background-color: #E6F0EC; color: #1E312A; }"
-        "QStatusBar { background-color: #FBFDFC; color: #657A72; }"
-        "QSplitter::handle { background-color: #DDE7E2; }"
-        "QScrollBar:vertical { background-color: #F1F6F3; width: 10px; }"
-        "QScrollBar::handle:vertical { background-color: #C6D6CF; border-radius: 5px; min-height: 24px; }"
-        "QScrollBar::handle:vertical:hover { background-color: #AFC4BA; }"
+        "QMenuBar::item:selected { background-color: #273336; color: #F3F7F6; }"
+        "QStatusBar { background-color: #171F21; color: #81938F; }"
+        "QSplitter::handle { background-color: #263234; }"
+        "QScrollBar:vertical { background-color: #111719; width: 10px; }"
+        "QScrollBar::handle:vertical { background-color: #344548; border-radius: 5px; min-height: 24px; }"
+        "QScrollBar::handle:vertical:hover { background-color: #4D6265; }"
         "QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }"
-        "QScrollBar:horizontal { background-color: #F1F6F3; height: 10px; }"
-        "QScrollBar::handle:horizontal { background-color: #C6D6CF; border-radius: 5px; min-width: 24px; }"
-        "QScrollBar::handle:horizontal:hover { background-color: #AFC4BA; }"
+        "QScrollBar:horizontal { background-color: #111719; height: 10px; }"
+        "QScrollBar::handle:horizontal { background-color: #344548; border-radius: 5px; min-width: 24px; }"
+        "QScrollBar::handle:horizontal:hover { background-color: #4D6265; }"
         "QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal { width: 0; }"
-        "QToolTip { background-color: #E7F0EC; color: #1E312A; border: 1px solid #AFC4BA; "
+        "QToolTip { background-color: #273336; color: #F3F7F6; border: 1px solid #4D6265; "
         "  border-radius: 4px; padding: 5px 7px; }"
     );
 

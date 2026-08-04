@@ -1,4 +1,5 @@
 #include "PreviewPanel.h"
+#include "UiAssets.h"
 #include "../core/PreviewToneMapper.h"
 #include "../core/RawImageLoader.h"
 #include <QScrollArea>
@@ -7,7 +8,6 @@
 #include <QLabel>
 #include <QPushButton>
 #include <QButtonGroup>
-#include <QStyle>
 #include <QPointer>
 #include <QMetaObject>
 #include <QWheelEvent>
@@ -43,9 +43,9 @@ void PreviewPanel::setupUI() {
 
     // 图像区域（空状态 + 图像视图）
     auto* contentWidget = new QWidget(this);
-    // Empty state belongs to the light workspace. The scroll area's image
-    // canvas remains dark once a photo is loaded.
-    contentWidget->setStyleSheet("background-color: #EAF2EF;");
+    // The empty state is slightly lifted from the darker image canvas so the
+    // central workspace stays legible before a source is selected.
+    contentWidget->setStyleSheet("background-color: #1B2527;");
     auto* contentLayout = new QVBoxLayout(contentWidget);
     contentLayout->setContentsMargins(0, 0, 0, 0);
     contentLayout->setSpacing(0);
@@ -66,14 +66,14 @@ void PreviewPanel::setupUI() {
 void PreviewPanel::setupTopBar() {
     m_topBar = new QWidget(this);
     m_topBar->setFixedHeight(44);
-    m_topBar->setStyleSheet("background-color: #FBFDFC; border-bottom: 1px solid #D3E0DA;");
+    m_topBar->setStyleSheet("background-color: #171F21; border-bottom: 1px solid #2B393B;");
 
     auto* layout = new QHBoxLayout(m_topBar);
     layout->setContentsMargins(12, 0, 10, 0);
     layout->setSpacing(4);
 
     auto* title = new QLabel(QString::fromUtf8("预览"), m_topBar);
-    title->setStyleSheet("font-size: 12px; font-weight: 700; color: #30463E;");
+    title->setStyleSheet("font-size: 12px; font-weight: 700; color: #D2DDDA;");
     layout->addWidget(title);
     layout->addSpacing(8);
 
@@ -82,33 +82,36 @@ void PreviewPanel::setupTopBar() {
         btn->setToolTip(tooltip);
         btn->setAccessibleName(tooltip);
         btn->setFixedHeight(28);
+        btn->setIconSize(QSize(16, 16));
         btn->setCursor(Qt::PointingHandCursor);
         btn->setStyleSheet(
             "QPushButton {"
             "  background-color: transparent;"
-            "  color: #50665E;"
-            "  border: 1px solid #C6D6CF;"
+            "  color: #A7B8B4;"
+            "  border: 1px solid #344548;"
             "  border-radius: 5px;"
             "  padding: 2px 9px;"
             "  font-size: 11px;"
             "}"
             "QPushButton:hover {"
-            "  background-color: #E7F0EC;"
-            "  color: #1E312A;"
-            "  border-color: #AFC4BA;"
+            "  background-color: #273336;"
+            "  color: #F3F7F6;"
+            "  border-color: #4D6265;"
             "}"
             "QPushButton:pressed {"
-            "  background-color: #C6D6CF;"
+            "  background-color: #344548;"
             "}"
             "QPushButton:disabled {"
-            "  color: #9DAEA7;"
-            "  border-color: #DDE7E2;"
+            "  color: #536763;"
+            "  border-color: #263234;"
             "}"
         );
         return btn;
     };
 
-    m_fitBtn = createToolBtn(QString::fromUtf8("适应"), QString::fromUtf8("适应视图"));
+    m_fitBtn = createToolBtn(QString(), QString::fromUtf8("适应视图"));
+    m_fitBtn->setIcon(UiAssets::icon(UiAssets::Glyph::Fit, QColor("#A7B8B4")));
+    m_fitBtn->setFixedWidth(30);
     connect(m_fitBtn, &QPushButton::clicked, this, &PreviewPanel::onFitView);
     layout->addWidget(m_fitBtn);
 
@@ -116,24 +119,29 @@ void PreviewPanel::setupTopBar() {
     connect(m_zoom100Btn, &QPushButton::clicked, this, &PreviewPanel::onZoom100);
     layout->addWidget(m_zoom100Btn);
 
-    m_zoomInBtn = createToolBtn(QString::fromUtf8("+"), QString::fromUtf8("放大"));
+    m_zoomInBtn = createToolBtn(QString(), QString::fromUtf8("放大"));
+    m_zoomInBtn->setIcon(UiAssets::icon(UiAssets::Glyph::ZoomIn, QColor("#A7B8B4")));
+    m_zoomInBtn->setFixedWidth(30);
     connect(m_zoomInBtn, &QPushButton::clicked, this, &PreviewPanel::onZoomIn);
     layout->addWidget(m_zoomInBtn);
 
-    m_zoomOutBtn = createToolBtn(QString::fromUtf8("−"), QString::fromUtf8("缩小"));
+    m_zoomOutBtn = createToolBtn(QString(), QString::fromUtf8("缩小"));
+    m_zoomOutBtn->setIcon(UiAssets::icon(UiAssets::Glyph::ZoomOut, QColor("#A7B8B4")));
+    m_zoomOutBtn->setFixedWidth(30);
     connect(m_zoomOutBtn, &QPushButton::clicked, this, &PreviewPanel::onZoomOut);
     layout->addWidget(m_zoomOutBtn);
 
     m_zoomLabel = new QLabel("100%", m_topBar);
     m_zoomLabel->setMinimumWidth(38);
     m_zoomLabel->setAlignment(Qt::AlignCenter);
-    m_zoomLabel->setStyleSheet("font-size: 10px; color: #657A72;");
+    m_zoomLabel->setStyleSheet("font-size: 10px; color: #81938F;");
     layout->addWidget(m_zoomLabel);
 
     layout->addStretch();
 
     m_resultBtn = createToolBtn(QString::fromUtf8("查看结果"),
                                 QString::fromUtf8("返回最近一次处理结果"));
+    m_resultBtn->setIcon(UiAssets::icon(UiAssets::Glyph::Result, QColor("#6FA8FF")));
     m_resultBtn->setVisible(false);
     connect(m_resultBtn, &QPushButton::clicked,
             this, &PreviewPanel::resultRequested);
@@ -142,11 +150,11 @@ void PreviewPanel::setupTopBar() {
     // 有真实的堆栈前预览后才显示三个比较模式。
     m_compareControl = new QWidget(m_topBar);
     m_compareControl->setStyleSheet(
-        "QWidget { background-color: #F1F6F3; border: 1px solid #D3E0DA; border-radius: 5px; }"
-        "QPushButton { background-color: transparent; color: #5F746C; border: none; "
+        "QWidget { background-color: #111719; border: 1px solid #2B393B; border-radius: 5px; }"
+        "QPushButton { background-color: transparent; color: #91A39F; border: none; "
         "  border-radius: 4px; padding: 4px 10px; font-size: 10px; }"
-        "QPushButton:hover { color: #1E312A; }"
-        "QPushButton:checked { background-color: #D3E0DA; color: #1E312A; font-weight: 700; }"
+        "QPushButton:hover { color: #F3F7F6; }"
+        "QPushButton:checked { background-color: #2B393B; color: #F3F7F6; font-weight: 700; }"
     );
     auto* compareLayout = new QHBoxLayout(m_compareControl);
     compareLayout->setContentsMargins(2, 2, 2, 2);
@@ -171,7 +179,9 @@ void PreviewPanel::setupTopBar() {
     layout->addWidget(m_compareControl);
     layout->addSpacing(6);
 
-    m_infoBtn = createToolBtn(QString::fromUtf8("信息"), QString::fromUtf8("显示或隐藏图像信息"));
+    m_infoBtn = createToolBtn(QString(), QString::fromUtf8("显示或隐藏图像信息"));
+    m_infoBtn->setIcon(UiAssets::icon(UiAssets::Glyph::Info, QColor("#A7B8B4")));
+    m_infoBtn->setFixedWidth(30);
     m_infoBtn->setCheckable(true);
     m_infoBtn->setChecked(true);
     connect(m_infoBtn, &QPushButton::clicked, this, &PreviewPanel::onToggleInfo);
@@ -186,17 +196,18 @@ void PreviewPanel::setupEmptyState() {
     emptyLayout->setSpacing(12);
     emptyLayout->setAlignment(Qt::AlignCenter);
 
-    m_emptyIcon = new QLabel(QString::fromUtf8("RAW"), m_emptyState);
-    m_emptyIcon->setFixedSize(64, 42);
+    m_emptyIcon = new QLabel(m_emptyState);
+    m_emptyIcon->setFixedSize(72, 72);
+    m_emptyIcon->setPixmap(UiAssets::logoMark(54));
     m_emptyIcon->setStyleSheet(
-        "font-size: 12px; font-weight: 700; color: #6E817A; background-color: #FBFDFC; "
-        "border: 1px solid #C6D6CF; border-radius: 6px;"
+        "background-color: #171F21; "
+        "border: 1px solid #344548; border-radius: 6px;"
     );
     m_emptyIcon->setAlignment(Qt::AlignCenter);
     emptyLayout->addWidget(m_emptyIcon);
 
     m_emptyText = new QLabel(QString::fromUtf8("导入一组连续拍摄的 RAW 照片"), m_emptyState);
-    m_emptyText->setStyleSheet("font-size: 14px; font-weight: 600; color: #30463E; background-color: transparent;");
+    m_emptyText->setStyleSheet("font-size: 14px; font-weight: 600; color: #D2DDDA; background-color: transparent;");
     m_emptyText->setAlignment(Qt::AlignCenter);
     emptyLayout->addWidget(m_emptyText);
 
@@ -204,19 +215,20 @@ void PreviewPanel::setupEmptyState() {
         QString::fromUtf8("支持 NEF, CR2, ARW, DNG, RAW, ORF, RAF, PEF, CR3"),
         m_emptyState
     );
-    m_emptyFormat->setStyleSheet("font-size: 11px; color: #71847D; background-color: transparent;");
+    m_emptyFormat->setStyleSheet("font-size: 11px; color: #718681; background-color: transparent;");
     m_emptyFormat->setAlignment(Qt::AlignCenter);
     emptyLayout->addWidget(m_emptyFormat);
 
     m_emptyImportBtn = new QPushButton(QString::fromUtf8("添加照片"), m_emptyState);
-    m_emptyImportBtn->setIcon(style()->standardIcon(QStyle::SP_DialogOpenButton));
+    m_emptyImportBtn->setIcon(
+        UiAssets::icon(UiAssets::Glyph::AddPhotos, QColor("#0D211B")));
     m_emptyImportBtn->setIconSize(QSize(16, 16));
     m_emptyImportBtn->setFixedHeight(36);
     m_emptyImportBtn->setCursor(Qt::PointingHandCursor);
     m_emptyImportBtn->setStyleSheet(
         "QPushButton {"
-        "  background-color: #28B58E;"
-        "  color: #FFFFFF;"
+        "  background-color: #4ED7AE;"
+        "  color: #0D211B;"
         "  border: none;"
         "  border-radius: 5px;"
         "  padding: 8px 20px;"
@@ -224,10 +236,10 @@ void PreviewPanel::setupEmptyState() {
         "  font-weight: 700;"
         "}"
         "QPushButton:hover {"
-        "  background-color: #39C59F;"
+        "  background-color: #67E2BE;"
         "}"
         "QPushButton:pressed {"
-        "  background-color: #179976;"
+        "  background-color: #32B98F;"
         "}"
     );
     connect(m_emptyImportBtn, &QPushButton::clicked, this, &PreviewPanel::importRequested);
@@ -240,17 +252,17 @@ void PreviewPanel::setupImageView() {
     m_scrollArea->setWidgetResizable(true);
     m_scrollArea->setAlignment(Qt::AlignCenter);
     m_scrollArea->setStyleSheet(
-        "QScrollArea { background-color: #0C0E10; border: none; }"
-        "QScrollBar:vertical { background-color: #F1F6F3; width: 10px; }"
-        "QScrollBar::handle:vertical { background-color: #C6D6CF; border-radius: 5px; min-height: 24px; }"
-        "QScrollBar::handle:vertical:hover { background-color: #AFC4BA; }"
-        "QScrollBar:horizontal { background-color: #F1F6F3; height: 10px; }"
-        "QScrollBar::handle:horizontal { background-color: #C6D6CF; border-radius: 5px; min-width: 24px; }"
-        "QScrollBar::handle:horizontal:hover { background-color: #AFC4BA; }"
+        "QScrollArea { background-color: #090D0F; border: none; }"
+        "QScrollBar:vertical { background-color: #111719; width: 10px; }"
+        "QScrollBar::handle:vertical { background-color: #344548; border-radius: 5px; min-height: 24px; }"
+        "QScrollBar::handle:vertical:hover { background-color: #4D6265; }"
+        "QScrollBar:horizontal { background-color: #111719; height: 10px; }"
+        "QScrollBar::handle:horizontal { background-color: #344548; border-radius: 5px; min-width: 24px; }"
+        "QScrollBar::handle:horizontal:hover { background-color: #4D6265; }"
     );
 
     m_imageContainer = new QWidget();
-    m_imageContainer->setStyleSheet("background-color: #0C0E10;");
+    m_imageContainer->setStyleSheet("background-color: #090D0F;");
     auto* containerLayout = new QVBoxLayout(m_imageContainer);
     containerLayout->setContentsMargins(0, 0, 0, 0);
     containerLayout->setAlignment(Qt::AlignCenter);
@@ -268,20 +280,20 @@ void PreviewPanel::setupImageView() {
 void PreviewPanel::setupBottomBar() {
     m_bottomBar = new QWidget(this);
     m_bottomBar->setFixedHeight(34);
-    m_bottomBar->setStyleSheet("background-color: #FBFDFC; border-top: 1px solid #D3E0DA;");
+    m_bottomBar->setStyleSheet("background-color: #171F21; border-top: 1px solid #2B393B;");
 
     auto* layout = new QHBoxLayout(m_bottomBar);
     layout->setContentsMargins(10, 0, 10, 0);
     layout->setSpacing(12);
 
     m_bottomInfo = new QLabel(this);
-    m_bottomInfo->setStyleSheet("font-size: 10px; color: #5F746C; background-color: transparent;");
+    m_bottomInfo->setStyleSheet("font-size: 10px; color: #91A39F; background-color: transparent;");
     m_bottomInfo->setText(QString::fromUtf8("缩放: 100% | 就绪"));
     layout->addWidget(m_bottomInfo);
 
     m_mouseInfo = new QLabel(this);
     layout->addStretch();
-    m_mouseInfo->setStyleSheet("font-size: 10px; color: #71847D; background-color: transparent;");
+    m_mouseInfo->setStyleSheet("font-size: 10px; color: #718681; background-color: transparent;");
     m_mouseInfo->setText(QString::fromUtf8("鼠标: — | RGB: —"));
     layout->addWidget(m_mouseInfo);
 }
