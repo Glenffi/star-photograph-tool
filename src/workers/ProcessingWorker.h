@@ -32,6 +32,8 @@ public:
         QString outputPath;
         bool skyGroundSepEnabled = false;
         SkyGroundMask::Mode skyGroundMode = SkyGroundMask::AutoDetect;
+        QString groundStackMethod = "average";
+        int groundDetailStrength = 35;
         QString userMaskPath;
         int featherRadius = 20;
         // Optional diagnostic artifact. The GUI leaves this empty; the sample

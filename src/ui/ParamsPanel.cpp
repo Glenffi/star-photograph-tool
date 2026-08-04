@@ -19,6 +19,8 @@
 
 #include <QSignalBlocker>
 
+#include <algorithm>
+
 ParamsPanel::ParamsPanel(QWidget* parent)
     : QWidget(parent)
 {
@@ -286,6 +288,45 @@ void ParamsPanel::setupUI() {
     featherRow->addWidget(new QLabel("px"));
     stackLayout->addLayout(featherRow);
 
+    // Ground frames are deliberately not aligned to the sky. Average is the
+    // stable default; the other modes are useful when local motion or absolute
+    // sharpness matters more than foreground noise.
+    auto* groundMethodRow = new QHBoxLayout();
+    m_groundStackMethod = new QComboBox(m_stackGroup);
+    m_groundStackMethod->addItem(QString::fromUtf8("平均降噪（推荐）"), "average");
+    m_groundStackMethod->addItem(QString::fromUtf8("参考帧（单帧）"), "reference");
+    m_groundStackMethod->addItem(QString::fromUtf8("中值（运动地景）"), "median");
+    m_groundStackMethod->setEnabled(false);
+    m_groundStackMethod->setStyleSheet(m_alignMethod->styleSheet());
+    m_groundStackMethod->setToolTip(QString::fromUtf8(
+        "平均降噪适合静止地景；参考单帧更锐但噪声和光照可能不同；中值可抑制短暂人物或车灯"));
+    connect(m_groundStackMethod,
+            QOverload<int>::of(&QComboBox::currentIndexChanged),
+            this, &ParamsPanel::onComboChanged);
+    groundMethodRow->addWidget(new QLabel(QString::fromUtf8("地景合成:")));
+    groundMethodRow->addWidget(m_groundStackMethod, 1);
+    stackLayout->addLayout(groundMethodRow);
+
+    auto* groundDetailRow = new QHBoxLayout();
+    m_groundDetailSlider = createSlider(0, 70, 35);
+    m_groundDetailSlider->setEnabled(false);
+    m_groundDetailSlider->setFixedWidth(120);
+    m_groundDetailSlider->setToolTip(QString::fromUtf8(
+        "恢复山体和建筑的局部细节；值过高会同时增强地景噪声"));
+    m_groundDetailLabel = new QLabel("35%", m_stackGroup);
+    m_groundDetailLabel->setMinimumWidth(32);
+    connect(m_groundDetailSlider, &QSlider::valueChanged, this,
+            [this](int value) {
+                m_groundDetailLabel->setText(QString::number(value) + "%");
+                onSliderValueChanged(value);
+            });
+    connect(m_groundDetailSlider, &QSlider::sliderReleased,
+            this, &ParamsPanel::onSliderReleased);
+    groundDetailRow->addWidget(new QLabel(QString::fromUtf8("地景细节:")));
+    groundDetailRow->addWidget(m_groundDetailSlider);
+    groundDetailRow->addWidget(m_groundDetailLabel);
+    stackLayout->addLayout(groundDetailRow);
+
     auto* stackHint = new QLabel(QString::fromUtf8("ℹ️ Sigma Clipping: 剔除偏离中值过远的像素，适合有飞机/卫星轨迹的情况\nℹ️ κ=2.5: 异常值剔除阈值，值越小剔除越严格"), m_stackGroup);
     stackHint->setStyleSheet("font-size: 10px; color: #58A6FF; background-color: transparent; padding-top: 4px;");
     stackHint->setWordWrap(true);
@@ -549,6 +590,12 @@ void ParamsPanel::updateSkyGroundControls() {
     if (m_featherSlider) {
         m_featherSlider->setEnabled(enabled);
     }
+    if (m_groundStackMethod) {
+        m_groundStackMethod->setEnabled(enabled);
+    }
+    if (m_groundDetailSlider) {
+        m_groundDetailSlider->setEnabled(enabled);
+    }
 }
 
 QGroupBox* ParamsPanel::createCollapsibleGroup(const QString& title, bool expanded) {
@@ -679,6 +726,8 @@ void ParamsPanel::onRestoreDefaults() {
     m_skyGroundCheck->setChecked(false);
     m_skyGroundMode->setCurrentIndex(0);
     m_featherSlider->setValue(20);
+    m_groundStackMethod->setCurrentIndex(0);
+    m_groundDetailSlider->setValue(35);
     m_userMaskPath.clear();
     m_maskPathLabel->clear();
     m_maskPathLabel->setVisible(false);
@@ -719,6 +768,8 @@ void ParamsPanel::onSavePreset() {
     settings.setValue("skyGroundMode", m_skyGroundMode->currentIndex());
     settings.setValue("userMaskPath", m_userMaskPath);
     settings.setValue("featherRadius", m_featherSlider->value());
+    settings.setValue("groundStackMethod", m_groundStackMethod->currentIndex());
+    settings.setValue("groundDetailStrength", m_groundDetailSlider->value());
     settings.endArray();
 
     m_presetCombo->addItem(name);
@@ -770,6 +821,8 @@ void ParamsPanel::saveCurrentSettings() {
     settings.setValue("skyGroundMode", m_skyGroundMode->currentIndex());
     settings.setValue("userMaskPath", m_userMaskPath);
     settings.setValue("featherRadius", m_featherSlider->value());
+    settings.setValue("groundStackMethod", m_groundStackMethod->currentIndex());
+    settings.setValue("groundDetailStrength", m_groundDetailSlider->value());
 }
 
 void ParamsPanel::loadCustomPresets() {
@@ -815,6 +868,8 @@ void ParamsPanel::loadPreset() {
     int skyGroundModeIdx = settings.value("skyGroundMode", 0).toInt();
     QString userMaskPath = settings.value("userMaskPath", QString()).toString();
     int featherRadius = settings.value("featherRadius", 20).toInt();
+    int groundStackMethod = settings.value("groundStackMethod", 0).toInt();
+    int groundDetailStrength = settings.value("groundDetailStrength", 35).toInt();
 
     // 使用信号阻塞避免触发 paramsChanged
     QSignalBlocker blocker1(m_alignMethod);
@@ -834,6 +889,8 @@ void ParamsPanel::loadPreset() {
     QSignalBlocker blocker15(m_featherSlider);
     QSignalBlocker blocker16(m_photometricCheck);
     QSignalBlocker blocker17(m_autoRejectQualityCheck);
+    QSignalBlocker blocker18(m_groundStackMethod);
+    QSignalBlocker blocker19(m_groundDetailSlider);
 
     m_alignMethod->setCurrentIndex(alignIndex);
     m_stackAlgorithm->setCurrentIndex(stackIndex);
@@ -862,6 +919,11 @@ void ParamsPanel::loadPreset() {
         m_maskPathLabel->setText(QFileInfo(m_userMaskPath).fileName());
     }
     m_featherSlider->setValue(featherRadius);
+    m_groundStackMethod->setCurrentIndex(
+        std::clamp(groundStackMethod, 0, m_groundStackMethod->count() - 1));
+    m_groundDetailSlider->setValue(std::clamp(groundDetailStrength, 0, 70));
+    m_groundDetailLabel->setText(
+        QString::number(m_groundDetailSlider->value()) + "%");
     updateSkyGroundControls();
 
     if (lastPresetIndex >= 0 && lastPresetIndex < m_presetCombo->count()) {
@@ -916,9 +978,13 @@ void ParamsPanel::onPresetChanged(int index) {
             int sgm = settings.value("skyGroundMode", 0).toInt();
             QString ump = settings.value("userMaskPath", QString()).toString();
             int fr = settings.value("featherRadius", 20).toInt();
+            int gsm = settings.value("groundStackMethod", 0).toInt();
+            int gds = settings.value("groundDetailStrength", 35).toInt();
             QSignalBlocker sgBlocker1(m_skyGroundCheck);
             QSignalBlocker sgBlocker2(m_skyGroundMode);
             QSignalBlocker sgBlocker3(m_featherSlider);
+            QSignalBlocker sgBlocker4(m_groundStackMethod);
+            QSignalBlocker sgBlocker5(m_groundDetailSlider);
             m_skyGroundCheck->setChecked(sgs);
             m_skyGroundMode->setCurrentIndex(sgm);
             m_userMaskPath = ump;
@@ -926,7 +992,13 @@ void ParamsPanel::onPresetChanged(int index) {
                 m_maskPathLabel->setText(QFileInfo(m_userMaskPath).fileName());
             }
             m_featherSlider->setValue(fr);
+            m_groundStackMethod->setCurrentIndex(
+                std::clamp(gsm, 0, m_groundStackMethod->count() - 1));
+            m_groundDetailSlider->setValue(std::clamp(gds, 0, 70));
+            m_groundDetailLabel->setText(
+                QString::number(m_groundDetailSlider->value()) + "%");
             updateSkyGroundControls();
+            emitParamsChanged();
         }
         settings.endArray();
     }
@@ -1112,6 +1184,15 @@ QString ParamsPanel::userMaskPath() const {
 
 int ParamsPanel::featherRadius() const {
     return m_featherSlider ? m_featherSlider->value() : 20;
+}
+
+QString ParamsPanel::groundStackMethod() const {
+    return m_groundStackMethod
+        ? m_groundStackMethod->currentData().toString() : QString("average");
+}
+
+int ParamsPanel::groundDetailStrength() const {
+    return m_groundDetailSlider ? m_groundDetailSlider->value() : 35;
 }
 
 void ParamsPanel::setMaskPreview(const std::vector<uint8_t>& mask, int w, int h) {

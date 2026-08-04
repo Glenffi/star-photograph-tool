@@ -156,7 +156,8 @@ uint16_t blendImageSample(uint16_t first, uint16_t second, double amount) {
 } // namespace
 
 bool StarReducer::reduce(std::vector<uint16_t>& image, int width, int height,
-                         int strength, StarReductionStats* stats) {
+                         int strength, StarReductionStats* stats,
+                         const std::vector<uint8_t>* processingMask) {
     if (stats) *stats = {};
     if (width <= 0 || height <= 0 || width > 65536 || height > 65536 ||
         width > INT_MAX / height) {
@@ -165,7 +166,8 @@ bool StarReducer::reduce(std::vector<uint16_t>& image, int width, int height,
 
     const size_t pixelCount = static_cast<size_t>(width) * height;
     if (pixelCount > std::numeric_limits<size_t>::max() / 3 ||
-        image.size() != pixelCount * 3 || strength < 0) {
+        image.size() != pixelCount * 3 || strength < 0 ||
+        (processingMask && processingMask->size() != pixelCount)) {
         return false;
     }
     if (strength == 0) return true;
@@ -193,6 +195,14 @@ bool StarReducer::reduce(std::vector<uint16_t>& image, int width, int height,
     double fwhmSum = 0.0;
     for (size_t starIndex = 0; starIndex < stars.size(); ++starIndex) {
         const StarPoint& star = stars[starIndex];
+        const int centerX = std::clamp(
+            static_cast<int>(std::lround(star.x)), 0, width - 1);
+        const int centerY = std::clamp(
+            static_cast<int>(std::lround(star.y)), 0, height - 1);
+        if (processingMask &&
+            (*processingMask)[static_cast<size_t>(centerY) * width + centerX] < 128) {
+            continue;
+        }
         const bool prominent =
             starIndex < std::min<size_t>(2000, stars.size() / 20);
         const bool compact =
@@ -241,8 +251,11 @@ bool StarReducer::reduce(std::vector<uint16_t>& image, int width, int height,
         for (int y = y0; y <= y1; ++y) {
             for (int x = x0; x <= x1; ++x) {
                 const double distance = std::hypot(x - star.x, y - star.y);
-                const double weight =
-                    featheredFootprint(distance, footprintRadius);
+                double weight = featheredFootprint(distance, footprintRadius);
+                if (processingMask) {
+                    weight *= (*processingMask)[
+                        static_cast<size_t>(y) * width + x] / 255.0;
+                }
                 if (weight <= 0.0) continue;
                 const size_t pixel = static_cast<size_t>(y) * width + x;
                 if (originalLuminance[pixel] <=

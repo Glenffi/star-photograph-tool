@@ -570,6 +570,8 @@ private slots:
         params.skyGroundMode = m_paramsPanel->skyGroundMode();
         params.userMaskPath = m_paramsPanel->userMaskPath();
         params.featherRadius = m_paramsPanel->featherRadius();
+        params.groundStackMethod = m_paramsPanel->groundStackMethod();
+        params.groundDetailStrength = m_paramsPanel->groundDetailStrength();
 
         // A new run invalidates the previous export immediately. A cancelled or
         // failed run must never leave an old result looking current.

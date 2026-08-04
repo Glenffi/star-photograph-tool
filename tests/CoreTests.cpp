@@ -143,9 +143,24 @@ void testStacking() {
           "Mask stacking should succeed with matching frame counts");
     check(result == std::vector<uint16_t>({110, 210, 1200, 1300}),
           "Mask stacking should select aligned sky and original ground");
+    check(engine.stackWithMask(frames, {originals.front()}, 2, 2,
+                               StackingEngine::Average, 2.5, mask, result,
+                               StackingEngine::GroundReferenceFrame) &&
+              result == std::vector<uint16_t>({110, 210, 1000, 1100}),
+          "Reference ground mode should preserve the first ground frame");
     check(!engine.stackWithMask(frames, {originals.front()}, 2, 2,
                                 StackingEngine::Average, 2.5, mask, result),
           "Mask stacking should reject mismatched frame counts");
+    const std::vector<std::vector<uint16_t>> movingGround = {
+        {900, 900, 1000, 1000},
+        {900, 900, 1100, 60000},
+        {900, 900, 1200, 1200}
+    };
+    check(engine.stackWithMask(frames, movingGround, 2, 2,
+                               StackingEngine::Average, 2.5, mask, result,
+                               StackingEngine::GroundMedian) &&
+              result == std::vector<uint16_t>({110, 210, 1100, 1200}),
+          "Median ground mode should reject transient foreground outliers");
 
     const std::vector<std::vector<uint16_t>> rgbFrames = {
         {100, 200, 300, 0, 500, 600},
@@ -243,6 +258,29 @@ void testImageBufferUtils() {
     check(!ImageBufferUtils::extractLuminance(rgb, 3, 1, luminance) &&
               luminance == previous,
           "A failed buffer conversion should leave its output unchanged");
+
+    std::vector<uint16_t> processed = {
+        100, 200, 300,
+        400, 500, 600,
+        700, 800, 900
+    };
+    const std::vector<uint16_t> protectedGround = {
+        1000, 2000, 3000,
+        4000, 5000, 6000,
+        7000, 8000, 9000
+    };
+    const std::vector<uint8_t> blendMask = {255, 128, 0};
+    check(ImageBufferUtils::blendSkyGroundInPlace(
+              processed, protectedGround, blendMask, 3, 1),
+          "Sky/ground RGB blending should accept exact buffers");
+    check(processed[0] == 100 && processed[1] == 200 && processed[2] == 300,
+          "Sky/ground RGB blending should preserve fully processed sky");
+    check(processed[6] == 7000 && processed[7] == 8000 &&
+              processed[8] == 9000,
+          "Sky/ground RGB blending should restore fully protected ground");
+    check(processed[3] == 2193 && processed[4] == 2741 &&
+              processed[5] == 3289,
+          "Sky/ground RGB blending should feather the horizon with integer rounding");
 }
 
 void testRgbAutoOptimize() {
@@ -345,6 +383,50 @@ void testRgbAutoOptimize() {
     }
     check(maximumAdjacentJump < 64,
           "Spatial background interpolation should remain continuous at grid edges");
+
+    constexpr int detailWidth = 16;
+    constexpr int detailHeight = 10;
+    std::vector<uint16_t> detailRgb(detailWidth * detailHeight * 3);
+    std::vector<uint8_t> skyMask(detailWidth * detailHeight);
+    for (int y = 0; y < detailHeight; ++y) {
+        for (int x = 0; x < detailWidth; ++x) {
+            const uint16_t value = x < detailWidth / 2 ? 6000 : 14000;
+            const size_t pixel = static_cast<size_t>(y) * detailWidth + x;
+            detailRgb[pixel * 3] = detailRgb[pixel * 3 + 1] =
+                detailRgb[pixel * 3 + 2] = value;
+            skyMask[pixel] = y < detailHeight / 2 ? 255 : 0;
+        }
+    }
+    const std::vector<uint16_t> detailInput = detailRgb;
+    const auto valueAt = [&](const std::vector<uint16_t>& image,
+                             int x, int y) {
+        return image[(static_cast<size_t>(y) * detailWidth + x) * 3];
+    };
+    const int contrastBefore =
+        valueAt(detailRgb, 8, 7) - valueAt(detailRgb, 7, 7);
+    check(AutoOptimizeEngine::enhanceGroundDetail(
+              detailRgb, detailWidth, detailHeight, skyMask, 50),
+          "Ground detail recovery should accept a matching RGB image and mask");
+    const int contrastAfter =
+        valueAt(detailRgb, 8, 7) - valueAt(detailRgb, 7, 7);
+    check(std::equal(detailRgb.begin(),
+                     detailRgb.begin() + detailWidth * (detailHeight / 2) * 3,
+                     detailInput.begin()),
+          "Ground detail recovery should leave the sky region bit-exact");
+    check(contrastAfter > contrastBefore,
+          "Ground detail recovery should increase foreground edge contrast");
+    bool detailStayedNeutral = true;
+    for (size_t base = 0; base < detailRgb.size(); base += 3) {
+        detailStayedNeutral = detailStayedNeutral &&
+            detailRgb[base] == detailRgb[base + 1] &&
+            detailRgb[base + 1] == detailRgb[base + 2];
+    }
+    check(detailStayedNeutral,
+          "Ground luminance sharpening should keep neutral RGB pixels neutral");
+    check(!AutoOptimizeEngine::enhanceGroundDetail(
+              detailRgb, detailWidth, detailHeight,
+              std::vector<uint8_t>(3), 50),
+          "Ground detail recovery should reject a mismatched mask");
 }
 
 void testRgbTransform() {
@@ -783,6 +865,25 @@ void testStarDetectionAndReduction() {
     check(std::all_of(overlapRgb.begin(), overlapRgb.end(),
                       [](uint16_t value) { return value >= 1200; }),
           "Overlapping star masks should not create dark holes");
+
+    std::vector<uint16_t> maskedRgb = rgbInput;
+    const std::vector<uint16_t> maskedInput = maskedRgb;
+    std::vector<uint8_t> skyOnlyMask(width * height, 0);
+    std::fill(skyOnlyMask.begin(),
+              skyOnlyMask.begin() + static_cast<size_t>(width) * height / 2,
+              255);
+    check(StarReducer::reduce(maskedRgb, width, height, 90, nullptr,
+                              &skyOnlyMask),
+          "Mask-aware star reduction should process a matching sky mask");
+    const size_t groundBegin =
+        static_cast<size_t>(width) * (height / 2) * 3;
+    check(std::equal(maskedRgb.begin() + groundBegin, maskedRgb.end(),
+                     maskedInput.begin() + groundBegin),
+          "Mask-aware star reduction should leave all ground pixels bit-exact");
+    const std::vector<uint8_t> wrongSizeMask(3);
+    check(!StarReducer::reduce(maskedRgb, width, height, 90, nullptr,
+                               &wrongSizeMask),
+          "Mask-aware star reduction should reject a mismatched mask");
 }
 
 void testNoiseReduction() {

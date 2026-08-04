@@ -25,6 +25,13 @@ public:
                                         int w, int h,
                                         std::vector<uint16_t>& dst);
 
+    // Restores small-scale luminance contrast only where skyMask approaches
+    // zero. RGB is rebuilt with one luminance ratio so ground color is stable.
+    static bool enhanceGroundDetail(std::vector<uint16_t>& image,
+                                    int w, int h,
+                                    const std::vector<uint8_t>& skyMask,
+                                    int strength);
+
     // 去雾：Dark Channel Prior + Guided Filter
     // 输入/输出：16-bit 单通道图像
     static bool dehaze(const std::vector<uint16_t>& src, int w, int h,

@@ -18,6 +18,12 @@ public:
         Winsorized    // Winsorized Sigma Clipping（MAD 替代标准差，适合 >15 帧）
     };
 
+    enum GroundMethod {
+        GroundReferenceFrame, // 使用参考帧地景，避免微位移和运动平均造成软化
+        GroundMedian,         // 抑制地景中的短暂人物、车灯等变化
+        GroundAverage         // 地景静止时获得最高信噪比
+    };
+
     /**
      * @brief 堆栈多张图像
      *
@@ -56,6 +62,7 @@ public:
      * @param kappa          κ 值
      * @param mask           8-bit 灰度蒙版（255=天空，0=地景）
      * @param result         输出堆栈结果
+     * @param groundMethod   地景合成策略；参考帧模式只要求一张原图
      * @return true 成功
      */
     bool stackWithMask(const std::vector<std::vector<uint16_t>>& images,
@@ -63,7 +70,8 @@ public:
                        int width, int height,
                        Method method, double kappa,
                        const std::vector<uint8_t>& mask,
-                       std::vector<uint16_t>& result);
+                       std::vector<uint16_t>& result,
+                       GroundMethod groundMethod = GroundAverage);
 
     /**
      * @brief 根据帧数推荐最佳堆栈算法

@@ -20,4 +20,11 @@ bool splitRgb(const std::vector<uint16_t>& rgb, int width, int height,
 bool mergeRgb(const RgbChannels& channels, int width, int height,
               std::vector<uint16_t>& rgb);
 
+// Replaces the ground portion of processedSky in place with protectedGround.
+// skyMask uses 255 for sky and 0 for ground; feather values blend continuously.
+bool blendSkyGroundInPlace(std::vector<uint16_t>& processedSky,
+                           const std::vector<uint16_t>& protectedGround,
+                           const std::vector<uint8_t>& skyMask,
+                           int width, int height);
+
 } // namespace ImageBufferUtils

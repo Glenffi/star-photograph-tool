@@ -203,14 +203,16 @@ bool StackingEngine::stackWithMask(
     int width, int height,
     Method method, double kappa,
     const std::vector<uint8_t>& mask,
-    std::vector<uint16_t>& result)
+    std::vector<uint16_t>& result,
+    GroundMethod groundMethod)
 {
     size_t expectedSize = 0;
     if (images.empty() || originalImages.empty() ||
         !imageSize(width, height, expectedSize)) {
         return false;
     }
-    if (images.size() != originalImages.size()) {
+    if (groundMethod != GroundReferenceFrame &&
+        images.size() != originalImages.size()) {
         return false;
     }
     if (mask.size() != expectedSize) {
@@ -235,8 +237,15 @@ bool StackingEngine::stackWithMask(
     }
 
     std::vector<uint16_t> groundResult;
-    if (!stack(originalImages, width, height, Average, kappa, groundResult, false)) {
-        return false;
+    if (groundMethod == GroundReferenceFrame) {
+        groundResult = originalImages.front();
+    } else {
+        const Method groundStackMethod = groundMethod == GroundMedian
+            ? Median : Average;
+        if (!stack(originalImages, width, height, groundStackMethod, kappa,
+                   groundResult, false)) {
+            return false;
+        }
     }
 
     // 3. 融合：result = sky * (mask/255) + ground * (1 - mask/255)

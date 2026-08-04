@@ -45,6 +45,8 @@ public:
     SkyGroundMask::Mode skyGroundMode() const;
     QString userMaskPath() const;
     int featherRadius() const;
+    QString groundStackMethod() const;
+    int groundDetailStrength() const;
     void setMaskPreview(const std::vector<uint8_t>& mask, int w, int h);
     void setDetectMaskEnabled(bool enabled);
 
@@ -118,6 +120,9 @@ private:
     QPushButton* m_importMaskBtn = nullptr;
     QLabel* m_maskPathLabel = nullptr;
     QSlider* m_featherSlider = nullptr;
+    QComboBox* m_groundStackMethod = nullptr;
+    QSlider* m_groundDetailSlider = nullptr;
+    QLabel* m_groundDetailLabel = nullptr;
     QString m_userMaskPath;
 
     // Debounce 定时器

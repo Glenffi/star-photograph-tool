@@ -272,6 +272,71 @@ bool AutoOptimizeEngine::neutralizeBackgroundRgb(
     return true;
 }
 
+bool AutoOptimizeEngine::enhanceGroundDetail(
+    std::vector<uint16_t>& image, int w, int h,
+    const std::vector<uint8_t>& skyMask, int strength) {
+    size_t pixelCount = 0;
+    if (!rgbPixelCount(image, w, h, pixelCount) ||
+        skyMask.size() != pixelCount || strength < 0) {
+        return false;
+    }
+    if (strength == 0) return true;
+    strength = std::min(strength, 100);
+
+    std::vector<uint16_t> luminance(pixelCount);
+    std::vector<uint16_t> horizontal(pixelCount);
+    for (size_t pixel = 0; pixel < pixelCount; ++pixel) {
+        luminance[pixel] = luminanceAt(image, pixel);
+    }
+
+    // Binomial [1 4 6 4 1] is a compact Gaussian approximation. Keeping the
+    // horizontal pass separate avoids large float planes on 40 MP images.
+    constexpr std::array<uint32_t, 5> kernel = {1, 4, 6, 4, 1};
+    for (int y = 0; y < h; ++y) {
+        for (int x = 0; x < w; ++x) {
+            uint32_t sum = 0;
+            for (int k = -2; k <= 2; ++k) {
+                const int sampleX = std::clamp(x + k, 0, w - 1);
+                sum += kernel[static_cast<size_t>(k + 2)] *
+                    luminance[static_cast<size_t>(y) * w + sampleX];
+            }
+            horizontal[static_cast<size_t>(y) * w + x] =
+                static_cast<uint16_t>((sum + 8) / 16);
+        }
+    }
+
+    const double amount = strength / 100.0 * 1.15;
+    for (int y = 0; y < h; ++y) {
+        for (int x = 0; x < w; ++x) {
+            const size_t pixel = static_cast<size_t>(y) * w + x;
+            const double groundWeight = (255.0 - skyMask[pixel]) / 255.0;
+            if (groundWeight <= 0.0) continue;
+            uint32_t sum = 0;
+            for (int k = -2; k <= 2; ++k) {
+                const int sampleY = std::clamp(y + k, 0, h - 1);
+                sum += kernel[static_cast<size_t>(k + 2)] *
+                    horizontal[static_cast<size_t>(sampleY) * w + x];
+            }
+            const double blurred = (sum + 8) / 16.0;
+            const double original = luminance[pixel];
+            const double detail = original - blurred;
+            const double threshold = std::max(24.0, original * 0.0015);
+            const double retained = std::copysign(
+                std::max(0.0, std::abs(detail) - threshold), detail);
+            const double target = std::clamp(
+                original + retained * amount * groundWeight, 0.0, 65535.0);
+            if (original <= 1.0 || target == original) continue;
+            const double ratio = std::clamp(target / original, 0.8, 1.25);
+            const size_t base = pixel * 3;
+            for (size_t channel = 0; channel < 3; ++channel) {
+                image[base + channel] = clampToUint16(
+                    image[base + channel] * ratio);
+            }
+        }
+    }
+    return true;
+}
+
 bool AutoOptimizeEngine::stretchRgb(const std::vector<uint16_t>& src,
                                     int w, int h,
                                     std::vector<uint16_t>& dst) {

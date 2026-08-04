@@ -35,5 +35,6 @@ public:
      * @return true 处理成功；false 参数校验失败或内部错误
      */
     static bool reduce(std::vector<uint16_t>& image, int width, int height,
-                       int strength, StarReductionStats* stats = nullptr);
+                       int strength, StarReductionStats* stats = nullptr,
+                       const std::vector<uint8_t>* processingMask = nullptr);
 };

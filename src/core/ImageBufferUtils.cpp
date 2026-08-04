@@ -76,4 +76,32 @@ bool mergeRgb(const RgbChannels& channels, int width, int height,
     return true;
 }
 
+bool blendSkyGroundInPlace(std::vector<uint16_t>& processedSky,
+                           const std::vector<uint16_t>& protectedGround,
+                           const std::vector<uint8_t>& skyMask,
+                           int width, int height) {
+    size_t pixelCount = 0;
+    if (!checkedPixelCount(width, height, pixelCount) ||
+        processedSky.size() != pixelCount * 3 ||
+        protectedGround.size() != pixelCount * 3 ||
+        skyMask.size() != pixelCount) {
+        return false;
+    }
+
+    for (size_t pixel = 0; pixel < pixelCount; ++pixel) {
+        const uint32_t skyWeight = skyMask[pixel];
+        const uint32_t groundWeight = 255U - skyWeight;
+        const size_t base = pixel * 3;
+        for (size_t channel = 0; channel < 3; ++channel) {
+            processedSky[base + channel] = static_cast<uint16_t>(
+                (static_cast<uint32_t>(processedSky[base + channel]) * skyWeight +
+                 static_cast<uint32_t>(protectedGround[base + channel]) *
+                     groundWeight +
+                 127U) /
+                255U);
+        }
+    }
+    return true;
+}
+
 } // namespace ImageBufferUtils

@@ -160,6 +160,28 @@ bool cropRgb(const std::vector<uint16_t>& source,
     return true;
 }
 
+bool cropMask(const std::vector<uint8_t>& source,
+              int sourceWidth, int sourceHeight,
+              const AlignmentBounds& bounds,
+              std::vector<uint8_t>& destination) {
+    if (sourceWidth <= 0 || sourceHeight <= 0 || bounds.x < 0 || bounds.y < 0 ||
+        bounds.width <= 0 || bounds.height <= 0 ||
+        bounds.x + bounds.width > sourceWidth ||
+        bounds.y + bounds.height > sourceHeight ||
+        source.size() != static_cast<size_t>(sourceWidth) * sourceHeight) {
+        return false;
+    }
+    destination.resize(static_cast<size_t>(bounds.width) * bounds.height);
+    for (int row = 0; row < bounds.height; ++row) {
+        const size_t sourceOffset =
+            static_cast<size_t>(bounds.y + row) * sourceWidth + bounds.x;
+        const size_t destinationOffset = static_cast<size_t>(row) * bounds.width;
+        std::copy_n(source.begin() + sourceOffset, bounds.width,
+                    destination.begin() + destinationOffset);
+    }
+    return true;
+}
+
 class DiskFrameStore {
 public:
     explicit DiskFrameStore(const QString& prefix)
@@ -261,9 +283,14 @@ bool stackRgbWithMask(StackingEngine& stacker,
                       const std::vector<std::vector<uint16_t>>& aligned,
                       const std::vector<std::vector<uint16_t>>& originals,
                       int width, int height, StackingEngine::Method method,
-                      double kappa, const std::vector<uint8_t>& mask,
+                      double kappa, StackingEngine::GroundMethod groundMethod,
+                      const std::vector<uint8_t>& mask,
                       std::vector<uint16_t>& output) {
-    if (aligned.empty() || aligned.size() != originals.size()) return false;
+    if (aligned.empty() || originals.empty() ||
+        (groundMethod != StackingEngine::GroundReferenceFrame &&
+         aligned.size() != originals.size())) {
+        return false;
+    }
 
     std::vector<std::vector<uint16_t>> alignedRed;
     std::vector<std::vector<uint16_t>> alignedGreen;
@@ -280,11 +307,11 @@ bool stackRgbWithMask(StackingEngine& stacker,
     std::vector<uint16_t> greenResult;
     std::vector<uint16_t> blueResult;
     if (!stacker.stackWithMask(alignedRed, originalRed, width, height, method,
-                               kappa, mask, redResult) ||
+                               kappa, mask, redResult, groundMethod) ||
         !stacker.stackWithMask(alignedGreen, originalGreen, width, height, method,
-                               kappa, mask, greenResult) ||
+                               kappa, mask, greenResult, groundMethod) ||
         !stacker.stackWithMask(alignedBlue, originalBlue, width, height, method,
-                               kappa, mask, blueResult)) {
+                               kappa, mask, blueResult, groundMethod)) {
         return false;
     }
     return mergeChannels(std::move(redResult), std::move(greenResult),
@@ -294,6 +321,7 @@ bool stackRgbWithMask(StackingEngine& stacker,
 bool stackCachedRgb(StackingEngine& stacker, const DiskFrameStore& aligned,
                     const DiskFrameStore* originals, int width, int height,
                     StackingEngine::Method method, double kappa,
+                    StackingEngine::GroundMethod groundMethod,
                     const std::vector<uint8_t>* mask,
                     std::vector<uint16_t>& output,
                     const std::function<bool()>& cancelled,
@@ -307,8 +335,12 @@ bool stackCachedRgb(StackingEngine& stacker, const DiskFrameStore& aligned,
     output.resize(static_cast<size_t>(width) * height * 3);
     std::vector<std::vector<uint16_t>> alignedChunk(
         static_cast<size_t>(aligned.frameCount()));
+    const int originalFramesToRead = originals
+        ? (groundMethod == StackingEngine::GroundReferenceFrame
+               ? 1 : originals->frameCount())
+        : 0;
     std::vector<std::vector<uint16_t>> originalChunk(
-        originals ? static_cast<size_t>(originals->frameCount()) : 0);
+        static_cast<size_t>(originalFramesToRead));
     std::vector<uint8_t> maskChunk;
     std::vector<uint16_t> stackedChunk;
     for (int startRow = 0; startRow < height; startRow += kRowsPerChunk) {
@@ -322,7 +354,7 @@ bool stackCachedRgb(StackingEngine& stacker, const DiskFrameStore& aligned,
         }
 
         if (originals) {
-            for (int frame = 0; frame < originals->frameCount(); ++frame) {
+            for (int frame = 0; frame < originalFramesToRead; ++frame) {
                 if (!originals->readRows(frame, width, startRow, rowCount,
                                          originalChunk[static_cast<size_t>(frame)])) {
                     return false;
@@ -332,7 +364,8 @@ bool stackCachedRgb(StackingEngine& stacker, const DiskFrameStore& aligned,
                 mask->begin() + static_cast<size_t>(startRow) * width,
                 mask->begin() + static_cast<size_t>(startRow + rowCount) * width);
             if (!stackRgbWithMask(stacker, alignedChunk, originalChunk, width,
-                                  rowCount, method, kappa, maskChunk, stackedChunk)) {
+                                  rowCount, method, kappa, groundMethod,
+                                  maskChunk, stackedChunk)) {
                 return false;
             }
         } else if (!stacker.stackRgb(alignedChunk, width, rowCount, method,
@@ -353,6 +386,12 @@ StackingEngine::Method stackMethodFromName(const QString& name) {
     if (name == "kappa-sigma") return StackingEngine::KappaSigma;
     if (name == "winsorized") return StackingEngine::Winsorized;
     return StackingEngine::Average;
+}
+
+StackingEngine::GroundMethod groundMethodFromName(const QString& name) {
+    if (name == "reference") return StackingEngine::GroundReferenceFrame;
+    if (name == "median") return StackingEngine::GroundMedian;
+    return StackingEngine::GroundAverage;
 }
 
 } // namespace
@@ -804,6 +843,8 @@ void ProcessingWorker::run() {
     emit stageMessage("堆栈中...");
     StackingEngine stacker;
     const StackingEngine::Method method = stackMethodFromName(m_params.stackMethod);
+    const StackingEngine::GroundMethod groundMethod =
+        groundMethodFromName(m_params.groundStackMethod);
     std::vector<uint16_t> resultRgb;
     std::vector<uint8_t> mask;
     if (m_params.skyGroundSepEnabled) {
@@ -852,6 +893,7 @@ void ProcessingWorker::run() {
         stacker, alignedCache,
         m_params.skyGroundSepEnabled ? &originalCache : nullptr,
         width, height, method, m_params.kappaValue,
+        groundMethod,
         m_params.skyGroundSepEnabled ? &mask : nullptr, resultRgb,
         [this]() { return stopIfCancelled(); },
         [this, height](int rows) {
@@ -912,6 +954,14 @@ void ProcessingWorker::run() {
             return;
         }
         resultRgb = std::move(cropped);
+        if (!mask.empty()) {
+            std::vector<uint8_t> croppedMask;
+            if (!cropMask(mask, width, height, commonBounds, croppedMask)) {
+                m_errorString = "天地蒙版裁切失败";
+                return;
+            }
+            mask = std::move(croppedMask);
+        }
         m_cropOffsetX = commonBounds.x;
         m_cropOffsetY = commonBounds.y;
         width = commonBounds.width;
@@ -928,6 +978,16 @@ void ProcessingWorker::run() {
                 resultRgb, width, height,
                 m_params.noiseReductionStrength, denoised)) {
             m_errorString = "RGB 多尺度降噪失败";
+            return;
+        }
+        // Fixed-tripod ground has already gained noise reduction from averaging
+        // unaligned source frames. Running the spatial denoiser over it again
+        // softens distant ridges and buildings, so retain the pre-denoise ground
+        // while feathering the denoised sky across the horizon mask.
+        if (m_params.skyGroundSepEnabled &&
+            !ImageBufferUtils::blendSkyGroundInPlace(
+                denoised, resultRgb, mask, width, height)) {
+            m_errorString = "天地分离降噪融合失败";
             return;
         }
         resultRgb = std::move(denoised);
@@ -958,11 +1018,24 @@ void ProcessingWorker::run() {
     }
 
     if (stopIfCancelled()) return;
+    if (m_params.skyGroundSepEnabled &&
+        m_params.groundDetailStrength > 0) {
+        emit stageMessage("恢复地景细节...");
+        if (!AutoOptimizeEngine::enhanceGroundDetail(
+                resultRgb, width, height, mask,
+                m_params.groundDetailStrength)) {
+            m_errorString = "地景细节恢复失败";
+            return;
+        }
+    }
+
+    if (stopIfCancelled()) return;
     if (m_params.starReduceEnabled && m_params.starReduceStrength > 0) {
         emit stageMessage("缩星处理...");
         if (!StarReducer::reduce(resultRgb, width, height,
                                  m_params.starReduceStrength,
-                                 &m_starReductionStats)) {
+                                 &m_starReductionStats,
+                                 m_params.skyGroundSepEnabled ? &mask : nullptr)) {
             qWarning() << "缩星处理失败，继续导出未缩星结果";
         } else {
             emit stageMessage(QString(

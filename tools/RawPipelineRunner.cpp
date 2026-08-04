@@ -40,6 +40,10 @@ bool validMethod(const QString& method) {
         method == "kappa-sigma" || method == "winsorized";
 }
 
+bool validGroundMethod(const QString& method) {
+    return method == "reference" || method == "median" || method == "average";
+}
+
 } // namespace
 
 int main(int argc, char* argv[]) {
@@ -86,6 +90,14 @@ int main(int argc, char* argv[]) {
         "sky-ground-feather",
         "Sky/ground mask feather radius in pixels (0-50).",
         "pixels", "20");
+    const QCommandLineOption groundMethodOption(
+        "ground-method",
+        "Ground compositing: reference, median, or average.",
+        "name", "average");
+    const QCommandLineOption groundDetailOption(
+        "ground-detail-strength",
+        "Ground-only luminance detail recovery (0-70).",
+        "value", "35");
     const QCommandLineOption denoiseOption(
         "denoise-strength",
         "Enable linear RGB multiscale denoise at strength 1-70; 0 disables it.",
@@ -106,7 +118,8 @@ int main(int argc, char* argv[]) {
                        noPhotometricNormalizationOption,
                        noQualityRejectionOption,
                        skyGroundOption, skyGroundMaskOption,
-                       skyGroundFeatherOption,
+                       skyGroundFeatherOption, groundMethodOption,
+                       groundDetailOption,
                        denoiseOption, dehazeOption, stretchOption,
                        starReduceOption});
     parser.process(application);
@@ -148,6 +161,10 @@ int main(int argc, char* argv[]) {
     const QString skyGroundMask = parser.value(skyGroundMaskOption);
     const bool skyGroundEnabled =
         parser.isSet(skyGroundOption) || !skyGroundMask.isEmpty();
+    const QString groundMethod = parser.value(groundMethodOption).toLower();
+    bool groundDetailOk = false;
+    const int groundDetailStrength =
+        parser.value(groundDetailOption).toInt(&groundDetailOk);
     const QString method = parser.value(methodOption).toLower();
     if (!limitOk || limit < 0 || !referenceOk || referenceIndex < -1 ||
         !kappaOk || kappa <= 0.0 || !memoryBudgetOk ||
@@ -158,6 +175,9 @@ int main(int argc, char* argv[]) {
         !skyGroundFeatherOk || skyGroundFeather < 0 ||
         skyGroundFeather > 50 ||
         (!skyGroundMask.isEmpty() && !QFileInfo::exists(skyGroundMask)) ||
+        !validGroundMethod(groundMethod) ||
+        !groundDetailOk || groundDetailStrength < 0 ||
+        groundDetailStrength > 70 ||
         memoryBudgetMiB >
             std::numeric_limits<uint64_t>::max() / (1024ULL * 1024ULL) ||
         !validMethod(method)) {
@@ -210,6 +230,8 @@ int main(int argc, char* argv[]) {
     params.skyGroundMode = skyGroundMask.isEmpty()
         ? SkyGroundMask::AutoDetect : SkyGroundMask::UserMask;
     params.userMaskPath = skyGroundMask;
+    params.groundStackMethod = groundMethod;
+    params.groundDetailStrength = skyGroundEnabled ? groundDetailStrength : 0;
     params.featherRadius = skyGroundFeather;
     const QString generatedSkyGroundMask = skyGroundEnabled
         ? QDir(output).filePath("sky-ground-mask.png") : QString();
@@ -264,7 +286,7 @@ int main(int argc, char* argv[]) {
     worker.wait();
 
     QJsonObject report;
-    report["schemaVersion"] = 6;
+    report["schemaVersion"] = 7;
     report["toolVersion"] = QCoreApplication::applicationVersion();
     report["generatedAt"] = QDateTime::currentDateTimeUtc().toString(Qt::ISODate);
     report["input"] = input;
@@ -282,6 +304,8 @@ int main(int argc, char* argv[]) {
     report["skyGroundMask"] = skyGroundMask;
     report["skyGroundMaskOutput"] = generatedSkyGroundMask;
     report["skyGroundFeatherRadius"] = skyGroundFeather;
+    report["groundStackMethod"] = groundMethod;
+    report["groundDetailStrength"] = params.groundDetailStrength;
     report["skyGroundSkyFraction"] = worker.skyGroundSkyFraction();
     report["skyGroundMaskSource"] = worker.skyGroundMaskSource();
     const QStringList rejectedFiles = worker.qualityRejectedFiles();

@@ -11,7 +11,8 @@
 - 轻量预览帧质量评分、自动参考帧选择与严重失焦/拖星/云层帧保守剔除
 - Average / Median / Kappa-Sigma / Winsorized 堆栈
 - 帧间光度匹配：稳健估计共享曝光增益与 RGB 背景偏移，并回到序列中位光度
-- 天空对齐、地景固定的天地分离堆栈；自动蒙版使用连续地平线检测，也支持用户蒙版
+- 天空对齐、地景固定的天地分离堆栈；地景支持平均降噪、参考单帧和中值三种策略
+- 连续地平线自动蒙版或用户蒙版；多尺度降噪、缩星和细节恢复均受天空/地景区域约束
 - 线性 RGB 多尺度降噪，亮度与色度分离处理并保护强结构
 - 亮度引导去雾、低频背景色偏校正与 RGB 联动 Arcsinh 拉伸
 - 局部 RGB 背景重建的 Starless/Stars 分离、星层圆形 Minimum 和弱残留清理
@@ -55,7 +56,7 @@ StarProcessor/
 ├── src/
 │   ├── main.cpp                 # 主入口、MainWindow 与后台处理编排
 │   ├── core/
-│   │   ├── ImageBufferUtils.h/cpp     # RGB 校验、亮度提取与通道转换
+│   │   ├── ImageBufferUtils.h/cpp     # RGB 校验、亮度提取、通道转换与天地融合
 │   │   ├── ProcessingMemoryEstimator.h/cpp # 跨平台物理内存与处理峰值估算
 │   │   ├── PreviewToneMapper.h/cpp    # 16-bit 结果的有界 8-bit 显示映射
 │   │   ├── RawImageLoader.h/cpp       # RAW 文件加载与解码
@@ -69,7 +70,7 @@ StarProcessor/
 │   │   ├── NoiseReductionEngine.h/cpp # 线性 RGB 多尺度亮度/色度降噪
 │   │   ├── StarReducer.h/cpp          # Starless/Stars 分离 + 星层圆形 Minimum
 │   │   ├── ImageExporter.h/cpp        # 16-bit TIFF / PNG 8-bit 导出
-│   │   ├── AutoOptimizeEngine.h/cpp   # 自动优化：Dark Channel Prior 去雾 + Arcsinh 曲线拉伸
+│   │   ├── AutoOptimizeEngine.h/cpp   # 去雾、Arcsinh 拉伸与蒙版地景细节恢复
 │   │   └── PresetManager.h/cpp        # 内置预设与用户预设持久化
 │   ├── ui/
 │   │   ├── ProjectPanel.h/cpp         # 左侧面板：文件列表
@@ -184,10 +185,11 @@ cmake --build . --config Release
   --input ../star-photograph-tool-samples/star-raw \
   --output build/sky-ground-output --limit 15 \
   --method kappa-sigma --sky-ground --sky-ground-feather 20 \
+  --ground-method average --ground-detail-strength 35 \
   --denoise-strength 35 --stretch --star-reduce-strength 90
 ```
 
-工具会生成完整分辨率 TIFF 和 `pipeline-report.json`。报告分别记录全流程耗时、纯堆栈耗时、每帧质量评分、光度模型、自动裁切偏移和画质选项。天地分离模式还会保存本次实际使用的 `sky-ground-mask.png`，并记录蒙版来源与天空占比，便于检查自动检测是否可靠；`--sky-ground-mask /path/to/mask.png` 可改用白色天空、黑色地景的用户蒙版。`--reference-index -1` 默认自动选择参考帧；`--no-quality-rejection` 保留严重质量离群帧，但仍执行自动参考帧选择。帧间光度匹配默认开启；`--no-photometric-normalization` 可关闭它用于 A/B 检查。`--denoise-strength` 接受 `0–70`；`--stretch` 启用背景校正与 RGB 联动拉伸；`--dehaze-strength` 和 `--star-reduce-strength` 接受 `0–100`。处理期间，对齐帧写入系统临时目录并按 32 行分块堆栈；任务正常、失败或取消后都会自动清理。
+工具会生成完整分辨率 TIFF 和 `pipeline-report.json`。报告分别记录全流程耗时、纯堆栈耗时、每帧质量评分、光度模型、自动裁切偏移和画质选项。天地分离模式还会保存本次实际使用的 `sky-ground-mask.png`，并记录蒙版来源与天空占比，便于检查自动检测是否可靠；`--sky-ground-mask /path/to/mask.png` 可改用白色天空、黑色地景的用户蒙版。`--ground-method` 接受 `average`、`reference` 或 `median`，默认 `average`；`--ground-detail-strength` 接受 `0–70`，默认 35。天地模式下，多尺度降噪和缩星只作用于天空，地景由原坐标多帧合成及可选细节恢复处理。`--reference-index -1` 默认自动选择参考帧；`--no-quality-rejection` 保留严重质量离群帧，但仍执行自动参考帧选择。帧间光度匹配默认开启；`--no-photometric-normalization` 可关闭它用于 A/B 检查。`--denoise-strength` 接受 `0–70`；`--stretch` 启用背景校正与 RGB 联动拉伸；`--dehaze-strength` 和 `--star-reduce-strength` 接受 `0–100`。处理期间，对齐帧写入系统临时目录并按 32 行分块堆栈；任务正常、失败或取消后都会自动清理。
 
 `--memory-budget-mib` 可为测试或受控运行设置更低的内存上限。该值只能收紧平台安全预算，不能绕过实时内存门禁；传 `0` 或省略参数时使用自动预算。
 
@@ -199,6 +201,7 @@ cmake --build . --config Release
 - **结果预览**：16-bit 处理结果会映射为最长边不超过 4096 px 的 8-bit 显示缓存；TIFF/PNG 导出始终使用完整分辨率结果
 - **预设**：当前仅提供“银河广角”和“深空天体”，分别默认启用 30/35 强度的线性降噪；单帧降噪与延时序列在专用流程完成前不显示
 - **天地检测**：自动模式在相机内嵌预览上寻找连续地平线，并在比例异常或预览不可用时回退线性图；复杂树冠、建筑孔洞、云层贴地或无明确地平线时仍需人工预览并改用用户蒙版
+- **地景清晰度**：默认地景 Average 已提供多帧降噪，后续空间降噪和缩星不会再处理地景；35 强度细节恢复用于补偿轻微平均软化。风吹草叶、人物移动、单帧失焦、景深不足或明显机位移动仍应改用 Median、参考单帧或重新拍摄
 - **自动优化**：背景校正使用低分辨率鲁棒网格拟合加性光污染与色偏，并与 RGB 联动 Arcsinh 拉伸组合；DCP 去雾只适合明显薄雾，银河暗尘丰富时应关闭
 - **缩星边界**：当前 Starless 是传统 CV 的局部背景近似，不是 AI 去星；强度 40/70/90 分别适合温和、强烈和多数暗弱小星清除。密集星云结节、饱和大星、衍射芒和不同焦段仍应在 100% 比例复核
 - **自动裁切**：天空对齐后自动裁到所有成功帧的共同有效区域，避免零填充边界造成单帧/少帧接缝；长序列或大位移会相应损失少量画幅
