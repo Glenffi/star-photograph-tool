@@ -16,6 +16,7 @@ public:
     void setProjectSummary(const QString& summary);
 
 signals:
+    void sceneSelectorClicked();
     void importFilesClicked();
     void importFolderClicked();
     void clearProjectClicked();
@@ -32,6 +33,7 @@ private:
                                     bool isPrimary = false);
 
     QPushButton* m_importFilesBtn = nullptr;
+    QPushButton* m_sceneBtn = nullptr;
     QPushButton* m_importFolderBtn = nullptr;
     QPushButton* m_clearProjectBtn = nullptr;
     QPushButton* m_startProcessBtn = nullptr;

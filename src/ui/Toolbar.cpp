@@ -65,6 +65,13 @@ void Toolbar::setupUI() {
     layout->addWidget(separator);
     layout->addSpacing(8);
 
+    m_sceneBtn = createActionButton(
+        QIcon(UiAssets::logoMark(18)), QString::fromUtf8("场景"));
+    m_sceneBtn->setToolTip(QString::fromUtf8("选择处理场景"));
+    connect(m_sceneBtn, &QPushButton::clicked, this,
+            &Toolbar::sceneSelectorClicked);
+    layout->addWidget(m_sceneBtn);
+
     // 素材命令保持克制；真正的主操作是右侧“开始处理”。
     m_importFilesBtn = createActionButton(
         UiAssets::icon(UiAssets::Glyph::AddPhotos, QColor("#B7C7C3")),
@@ -225,6 +232,7 @@ void Toolbar::updateButtonStates() {
     if (m_startProcessBtn) m_startProcessBtn->setEnabled(m_canProcess && !m_processing);
     if (m_exportResultBtn) m_exportResultBtn->setEnabled(m_canExport && !m_processing);
     if (m_importFilesBtn) m_importFilesBtn->setEnabled(!m_processing);
+    if (m_sceneBtn) m_sceneBtn->setEnabled(!m_processing);
     if (m_importFolderBtn) m_importFolderBtn->setEnabled(!m_processing);
     if (m_clearProjectBtn) m_clearProjectBtn->setEnabled(!m_processing);
 }

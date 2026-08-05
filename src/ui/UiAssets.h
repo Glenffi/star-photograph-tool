@@ -20,7 +20,12 @@ enum class Glyph {
     Fit,
     ZoomIn,
     ZoomOut,
-    Result
+    Result,
+    SingleFrame,
+    Nightscape,
+    DeepSky,
+    SkyGround,
+    ChevronRight
 };
 
 QIcon icon(Glyph glyph, const QColor& color, int logicalSize = 18);

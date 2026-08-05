@@ -18,6 +18,9 @@ class ProcessingWorker : public QThread {
 
 public:
     struct Params {
+        // Single-frame refinement bypasses quality selection, alignment and
+        // stacking while retaining the same finishing and export stages.
+        bool singleFrameMode = false;
         QString stackMethod = "average";
         double kappaValue = 2.5;
         bool autoRejectLowQualityFrames = true;
@@ -104,6 +107,9 @@ protected:
 
 private:
     bool stopIfCancelled();
+    void runSingleFrame();
+    bool finishResult(std::vector<uint16_t>& resultRgb, int width, int height,
+                      std::vector<uint8_t>& mask);
 
     QStringList m_files;
     QString m_referenceFrame;

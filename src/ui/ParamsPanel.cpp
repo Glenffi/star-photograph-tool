@@ -1,4 +1,5 @@
 #include "ParamsPanel.h"
+#include "SceneLauncher.h"
 #include "UiAssets.h"
 #include "core/PresetManager.h"
 #include <QScrollArea>
@@ -41,9 +42,9 @@ void ParamsPanel::setupUI() {
     titleBar->setStyleSheet("background-color: #171F21; border-bottom: 1px solid #2B393B;");
     auto* titleLayout = new QHBoxLayout(titleBar);
     titleLayout->setContentsMargins(12, 0, 12, 0);
-    auto* titleLabel = new QLabel(QString::fromUtf8("处理参数"), titleBar);
-    titleLabel->setStyleSheet("font-size: 13px; font-weight: 700; color: #F3F7F6; background-color: transparent;");
-    titleLayout->addWidget(titleLabel);
+    m_titleLabel = new QLabel(QString::fromUtf8("处理参数"), titleBar);
+    m_titleLabel->setStyleSheet("font-size: 13px; font-weight: 700; color: #F3F7F6; background-color: transparent;");
+    titleLayout->addWidget(m_titleLabel);
     titleLayout->addStretch();
     layout->addWidget(titleBar);
 
@@ -72,9 +73,9 @@ void ParamsPanel::setupUI() {
     presetRow->addWidget(m_presetCombo, 1);
     layout->addWidget(presetBar);
 
-    auto* tabs = new QTabWidget(this);
-    tabs->setDocumentMode(true);
-    tabs->setStyleSheet(
+    m_tabs = new QTabWidget(this);
+    m_tabs->setDocumentMode(true);
+    m_tabs->setStyleSheet(
         "QTabWidget::pane { border: none; background-color: #111719; }"
         "QTabBar { background-color: #171F21; }"
         "QTabBar::tab { background-color: #171F21; color: #7B8E8A; border: none; "
@@ -83,8 +84,8 @@ void ParamsPanel::setupUI() {
         "QTabBar::tab:selected { color: #F3F7F6; border-bottom-color: #4ED7AE; font-weight: 700; }"
     );
 
-    auto createPage = [tabs](const QString& name) -> QVBoxLayout* {
-        auto* page = new QWidget(tabs);
+    auto createPage = [this](const QString& name) -> QVBoxLayout* {
+        auto* page = new QWidget(m_tabs);
         page->setStyleSheet("background-color: #111719;");
         auto* pageLayout = new QVBoxLayout(page);
         pageLayout->setContentsMargins(0, 0, 0, 0);
@@ -99,14 +100,14 @@ void ParamsPanel::setupUI() {
         contentLayout->setSpacing(8);
         scroll->setWidget(content);
         pageLayout->addWidget(scroll);
-        tabs->addTab(page, name);
+        m_tabs->addTab(page, name);
         return contentLayout;
     };
 
     QVBoxLayout* stackPageLayout = createPage(QString::fromUtf8("堆栈"));
     QVBoxLayout* adjustPageLayout = createPage(QString::fromUtf8("调整"));
     QVBoxLayout* outputPageLayout = createPage(QString::fromUtf8("输出"));
-    layout->addWidget(tabs, 1);
+    layout->addWidget(m_tabs, 1);
 
     // 对齐组（默认展开）
     m_alignGroup = createCollapsibleGroup(QString::fromUtf8("对齐"), true);
@@ -268,7 +269,8 @@ void ParamsPanel::setupUI() {
         markPresetCustom();
         emitParamsChanged();
     });
-    modeRow->addWidget(new QLabel(QString::fromUtf8("模式:")));
+    m_skyGroundModeLabel = new QLabel(QString::fromUtf8("模式:"), m_stackGroup);
+    modeRow->addWidget(m_skyGroundModeLabel);
     modeRow->addWidget(m_skyGroundMode, 1);
     stackLayout->addLayout(modeRow);
 
@@ -327,7 +329,8 @@ void ParamsPanel::setupUI() {
         onSliderValueChanged(value);
     });
     connect(m_featherSlider, &QSlider::sliderReleased, this, &ParamsPanel::onSliderReleased);
-    featherRow->addWidget(new QLabel(QString::fromUtf8("羽化:")));
+    m_featherNameLabel = new QLabel(QString::fromUtf8("羽化:"), m_stackGroup);
+    featherRow->addWidget(m_featherNameLabel);
     featherRow->addWidget(m_featherSlider, 1);
     featherRow->addWidget(m_featherLabel);
     stackLayout->addLayout(featherRow);
@@ -347,7 +350,9 @@ void ParamsPanel::setupUI() {
     connect(m_groundStackMethod,
             QOverload<int>::of(&QComboBox::currentIndexChanged),
             this, &ParamsPanel::onComboChanged);
-    groundMethodRow->addWidget(new QLabel(QString::fromUtf8("地景合成:")));
+    m_groundStackNameLabel = new QLabel(
+        QString::fromUtf8("地景合成:"), m_stackGroup);
+    groundMethodRow->addWidget(m_groundStackNameLabel);
     groundMethodRow->addWidget(m_groundStackMethod, 1);
     stackLayout->addLayout(groundMethodRow);
 
@@ -366,7 +371,9 @@ void ParamsPanel::setupUI() {
             });
     connect(m_groundDetailSlider, &QSlider::sliderReleased,
             this, &ParamsPanel::onSliderReleased);
-    groundDetailRow->addWidget(new QLabel(QString::fromUtf8("地景细节:")));
+    m_groundDetailNameLabel = new QLabel(
+        QString::fromUtf8("地景细节:"), m_stackGroup);
+    groundDetailRow->addWidget(m_groundDetailNameLabel);
     groundDetailRow->addWidget(m_groundDetailSlider, 1);
     groundDetailRow->addWidget(m_groundDetailLabel);
     stackLayout->addLayout(groundDetailRow);
@@ -638,7 +645,9 @@ void ParamsPanel::updateSkyGroundControls() {
     int mode = m_skyGroundMode ? m_skyGroundMode->currentIndex() : 0;
     if (m_skyGroundMode) {
         m_skyGroundMode->setEnabled(enabled);
+        m_skyGroundMode->setVisible(enabled);
     }
+    if (m_skyGroundModeLabel) m_skyGroundModeLabel->setVisible(enabled);
     if (m_detectMaskBtn) {
         m_detectMaskBtn->setEnabled(enabled);
         m_detectMaskBtn->setVisible(enabled && mode == 0);
@@ -652,15 +661,21 @@ void ParamsPanel::updateSkyGroundControls() {
     }
     if (m_featherSlider) {
         m_featherSlider->setEnabled(enabled);
+        m_featherSlider->setVisible(enabled);
     }
-    if (m_featherLabel) m_featherLabel->setEnabled(enabled);
+    if (m_featherLabel) m_featherLabel->setVisible(enabled);
+    if (m_featherNameLabel) m_featherNameLabel->setVisible(enabled);
     if (m_groundStackMethod) {
         m_groundStackMethod->setEnabled(enabled);
+        m_groundStackMethod->setVisible(enabled);
     }
+    if (m_groundStackNameLabel) m_groundStackNameLabel->setVisible(enabled);
     if (m_groundDetailSlider) {
         m_groundDetailSlider->setEnabled(enabled);
+        m_groundDetailSlider->setVisible(enabled);
     }
-    if (m_groundDetailLabel) m_groundDetailLabel->setEnabled(enabled);
+    if (m_groundDetailLabel) m_groundDetailLabel->setVisible(enabled);
+    if (m_groundDetailNameLabel) m_groundDetailNameLabel->setVisible(enabled);
 }
 
 QGroupBox* ParamsPanel::createCollapsibleGroup(const QString& title, bool expanded) {
@@ -1155,6 +1170,67 @@ void ParamsPanel::applyPreset(const Preset& preset) {
     else if (preset.outputFormat == "png8") m_outputFormat->setCurrentIndex(1);
 
     updateStackMethodDescription();
+    emitParamsChanged();
+}
+
+void ParamsPanel::applySceneProfile(ProcessingScene scene) {
+    const QList<Preset> builtins = PresetManager::builtinPresets();
+    Preset preset;
+    int presetIndex = 0;
+    int activeTab = 0;
+    QString title;
+    bool skyGroundEnabled = false;
+
+    switch (scene) {
+    case ProcessingScene::SingleFrame:
+        preset.name = QString::fromUtf8("单张精修");
+        preset.stackMethod = "median";
+        preset.autoRejectLowQualityFrames = false;
+        preset.photometricNormalizationEnabled = false;
+        preset.noiseReductionEnabled = true;
+        preset.noiseReductionStrength = 25;
+        preset.stretchEnabled = true;
+        preset.starReduceEnabled = false;
+        title = QString::fromUtf8("单张精修参数");
+        activeTab = 1;
+        break;
+    case ProcessingScene::Nightscape:
+        if (!builtins.isEmpty()) preset = builtins[0];
+        presetIndex = 1;
+        title = QString::fromUtf8("银河星景参数");
+        break;
+    case ProcessingScene::DeepSky:
+        if (builtins.size() > 1) preset = builtins[1];
+        presetIndex = 2;
+        title = QString::fromUtf8("深空堆栈参数");
+        break;
+    case ProcessingScene::SkyGround:
+        if (!builtins.isEmpty()) preset = builtins[0];
+        presetIndex = 0;
+        skyGroundEnabled = true;
+        title = QString::fromUtf8("天地分离参数");
+        break;
+    }
+
+    m_userChangedStackMethod = false;
+    applyPreset(preset);
+
+    {
+        const QSignalBlocker presetBlocker(m_presetCombo);
+        const QSignalBlocker skyGroundBlocker(m_skyGroundCheck);
+        m_presetCombo->setCurrentIndex(
+            std::clamp(presetIndex, 0, m_presetCombo->count() - 1));
+        m_skyGroundCheck->setChecked(skyGroundEnabled);
+    }
+    updateSkyGroundControls();
+
+    if (m_titleLabel) m_titleLabel->setText(title);
+    if (m_tabs) {
+        // A single frame has no alignment or stack phase, so that page is
+        // removed instead of leaving irrelevant disabled controls in view.
+        m_tabs->setTabVisible(0, scene != ProcessingScene::SingleFrame);
+        m_tabs->setCurrentIndex(activeTab);
+    }
     emitParamsChanged();
 }
 

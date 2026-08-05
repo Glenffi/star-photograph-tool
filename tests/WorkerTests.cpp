@@ -42,6 +42,18 @@ void testRawLoaderFitsWorkerStack() {
     check(!worker.errorString().isEmpty(), "Unreadable RAW input should expose an error");
 }
 
+void testSingleFrameFailureUsesDedicatedPath() {
+    ProcessingWorker::Params params;
+    params.singleFrameMode = true;
+    ProcessingWorker worker({"not-a-real-file.raw"}, {}, params);
+    worker.start();
+    check(worker.wait(3000), "Single-frame metadata failure should finish promptly");
+    check(!worker.errorString().isEmpty(),
+          "Unreadable single-frame input should expose an error");
+    check(worker.stackedFrameCount() == 0,
+          "Failed single-frame processing should not report a completed frame");
+}
+
 } // namespace
 
 int main(int argc, char* argv[]) {
@@ -49,6 +61,7 @@ int main(int argc, char* argv[]) {
     testEmptyInput();
     testCancellationBeforeStart();
     testRawLoaderFitsWorkerStack();
+    testSingleFrameFailureUsesDedicatedPath();
     if (failures == 0) {
         std::cout << "All worker tests passed.\n";
         return 0;

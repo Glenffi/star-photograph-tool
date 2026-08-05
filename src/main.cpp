@@ -28,12 +28,14 @@
 #include <QSet>
 #include <QTimer>
 #include <QSignalBlocker>
+#include <QStackedWidget>
 #include <algorithm>
 #include "ui/ProjectPanel.h"
 #include "ui/PreviewPanel.h"
 #include "ui/ParamsPanel.h"
 #include "ui/Toolbar.h"
 #include "ui/UiAssets.h"
+#include "ui/SceneLauncher.h"
 
 #include "core/RawImageLoader.h"
 #include "core/ImageExporter.h"
@@ -61,6 +63,13 @@ public:
 
     void importFiles(const QStringList& paths) {
         if (m_projectPanel && !paths.isEmpty()) {
+            if (!m_sceneActive) {
+                activateScene(paths.size() == 1
+                                  ? ProcessingScene::SingleFrame
+                                  : ProcessingScene::Nightscape);
+            } else if (m_contentStack->currentWidget() == m_sceneLauncher) {
+                activateScene(m_scene);
+            }
             m_projectPanel->addFiles(paths);
         }
     }
@@ -105,7 +114,7 @@ protected:
         }
 
         if (!filePaths.isEmpty()) {
-            m_projectPanel->addFiles(filePaths);
+            importFiles(filePaths);
             statusBar()->showMessage(
                 QString("拖放导入 %1 个文件").arg(filePaths.size()),
                 5000
@@ -126,8 +135,17 @@ private:
         m_toolbar = new Toolbar(this);
         mainLayout->addWidget(m_toolbar);
 
+        m_contentStack = new QStackedWidget(centralWidget);
+        m_sceneLauncher = new SceneLauncher(m_contentStack);
+        m_contentStack->addWidget(m_sceneLauncher);
+
+        m_workspacePage = new QWidget(m_contentStack);
+        auto* workspaceLayout = new QVBoxLayout(m_workspacePage);
+        workspaceLayout->setContentsMargins(0, 0, 0, 0);
+        workspaceLayout->setSpacing(0);
+
         // 工作流状态只反映真实处理阶段，不作为伪导航使用。
-        m_stepBar = new QWidget(this);
+        m_stepBar = new QWidget(m_workspacePage);
         m_stepBar->setFixedHeight(40);
         m_stepBar->setStyleSheet(
             "QWidget { background-color: #111719; border-bottom: 1px solid #263234; }"
@@ -167,27 +185,27 @@ private:
         m_workflowStatus->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
         m_workflowStatus->setStyleSheet("color: #81938F; border: none; font-size: 10px;");
         stepLayout->addWidget(m_workflowStatus);
-        mainLayout->addWidget(m_stepBar);
+        workspaceLayout->addWidget(m_stepBar);
 
         // 主内容区：素材、预览、参数三栏。
-        auto* contentSplitter = new QSplitter(Qt::Horizontal, this);
+        auto* contentSplitter = new QSplitter(Qt::Horizontal, m_workspacePage);
         contentSplitter->setHandleWidth(2);
         contentSplitter->setStyleSheet(
             "QSplitter::handle { background-color: #263234; }"
         );
 
         // 左侧面板：ProjectPanel（卡片式文件列表）
-        m_projectPanel = new ProjectPanel(this);
+        m_projectPanel = new ProjectPanel(contentSplitter);
         m_projectPanel->setMinimumWidth(250);
         m_projectPanel->setMaximumWidth(430);
         contentSplitter->addWidget(m_projectPanel);
 
         // 中央面板：PreviewPanel（QLabel + QScrollArea）
-        m_previewPanel = new PreviewPanel(this);
+        m_previewPanel = new PreviewPanel(contentSplitter);
         contentSplitter->addWidget(m_previewPanel);
 
         // 右侧面板：ParamsPanel（实际参数面板）
-        m_paramsPanel = new ParamsPanel(this);
+        m_paramsPanel = new ParamsPanel(contentSplitter);
         m_paramsPanel->setMinimumWidth(280);
         m_paramsPanel->setMaximumWidth(460);
         contentSplitter->addWidget(m_paramsPanel);
@@ -195,7 +213,96 @@ private:
         // 设置默认比例：22% / 56% / 22%
         contentSplitter->setSizes({300, 780, 320});
 
-        mainLayout->addWidget(contentSplitter, 1);
+        workspaceLayout->addWidget(contentSplitter, 1);
+        m_contentStack->addWidget(m_workspacePage);
+        m_contentStack->setCurrentWidget(m_sceneLauncher);
+        mainLayout->addWidget(m_contentStack, 1);
+    }
+
+    QString sceneName() const {
+        switch (m_scene) {
+        case ProcessingScene::SingleFrame:
+            return QString::fromUtf8("单张精修");
+        case ProcessingScene::Nightscape:
+            return QString::fromUtf8("银河星景");
+        case ProcessingScene::DeepSky:
+            return QString::fromUtf8("深空天体");
+        case ProcessingScene::SkyGround:
+            return QString::fromUtf8("天地分离");
+        }
+        return QString();
+    }
+
+    int requiredFrameCount() const {
+        return m_scene == ProcessingScene::SingleFrame ? 1 : 2;
+    }
+
+    void activateScene(ProcessingScene scene) {
+        const bool changed = !m_sceneActive || m_scene != scene;
+        m_scene = scene;
+        m_sceneActive = true;
+
+        switch (scene) {
+        case ProcessingScene::SingleFrame:
+            m_sceneStepNames = {QString::fromUtf8("素材"), QString::fromUtf8("调整"),
+                                QString::fromUtf8("预览"), QString::fromUtf8("导出")};
+            break;
+        case ProcessingScene::SkyGround:
+            m_sceneStepNames = {QString::fromUtf8("素材"), QString::fromUtf8("蒙版"),
+                                QString::fromUtf8("双路堆栈"), QString::fromUtf8("结果")};
+            break;
+        case ProcessingScene::Nightscape:
+        case ProcessingScene::DeepSky:
+            m_sceneStepNames = {QString::fromUtf8("素材"), QString::fromUtf8("对齐"),
+                                QString::fromUtf8("堆栈"), QString::fromUtf8("结果")};
+            break;
+        }
+
+        if (changed) {
+            invalidateCachedResult();
+            m_paramsPanel->applySceneProfile(scene);
+        }
+        m_contentStack->setCurrentWidget(m_workspacePage);
+        updateProjectReadiness();
+        statusBar()->showMessage(
+            QString::fromUtf8("已进入%1流程").arg(sceneName()), 3000);
+    }
+
+    void showSceneLauncher() {
+        if (processingActive()) return;
+        m_contentStack->setCurrentWidget(m_sceneLauncher);
+        m_toolbar->enableProcess(false);
+        m_toolbar->enableExport(false);
+        m_toolbar->setProjectSummary(QString::fromUtf8("选择处理场景"));
+        statusBar()->showMessage(QString::fromUtf8("选择与拍摄内容匹配的处理场景"));
+    }
+
+    void updateProjectReadiness() {
+        if (!m_sceneActive) return;
+        const int count = m_projectPanel->includedFilePaths().size();
+        const int required = requiredFrameCount();
+        m_toolbar->enableProcess(count >= required);
+        m_toolbar->setProjectSummary(
+            count > 0
+                ? QString::fromUtf8("%1 · %2 张素材").arg(sceneName()).arg(count)
+                : QString::fromUtf8("%1 · 等待素材").arg(sceneName()));
+        m_paramsPanel->updateRefFrameList(m_projectPanel->includedFilePaths());
+
+        if (count >= required) {
+            if ((m_scene == ProcessingScene::Nightscape ||
+                 m_scene == ProcessingScene::SkyGround) && count >= 2) {
+                m_paramsPanel->recommendStackMethod(count);
+            }
+            QString status = QString::fromUtf8("%1 张照片已就绪").arg(count);
+            if (m_scene == ProcessingScene::DeepSky && count < 6) {
+                status += QString::fromUtf8(" · 建议 6 张以上获得更稳健结果");
+            }
+            setWorkflowStage(1, status);
+        } else {
+            const int remaining = required - count;
+            setWorkflowStage(0,
+                QString::fromUtf8("还需要 %1 张照片").arg(remaining));
+        }
     }
 
     void setupMenuBar() {
@@ -222,8 +329,7 @@ private:
             m_previewPanel->clearImage();
             m_toolbar->enableProcess(false);
             m_toolbar->enableExport(false);
-            m_toolbar->setProjectSummary(QString::fromUtf8("等待导入素材"));
-            setWorkflowStage(0, QString::fromUtf8("添加至少 2 张照片"));
+            updateProjectReadiness();
             statusBar()->showMessage("项目已清空", 3000);
         });
         fileMenu->addAction(clearAction);
@@ -299,7 +405,7 @@ private:
     }
 
     void setupStepBar() {
-        setWorkflowStage(0, QString::fromUtf8("添加至少 2 张照片"));
+        setWorkflowStage(0, QString::fromUtf8("等待选择场景"));
     }
 
     void setWorkflowStage(int stage, const QString& status, bool complete = false) {
@@ -309,22 +415,18 @@ private:
             QLabel* label = m_stepLabels[i];
             if (!label) continue;
             if (i < current || (complete && i <= current)) {
-                label->setText(QString::fromUtf8("✓ ") +
-                               QStringList{QString::fromUtf8("素材"), QString::fromUtf8("对齐"),
-                                           QString::fromUtf8("堆栈"), QString::fromUtf8("结果")}.value(i));
+                label->setText(QString::fromUtf8("✓ ") + m_sceneStepNames.value(i));
                 label->setStyleSheet(
                     "color: #4ED7AE; border: none; font-size: 10px; font-weight: 600; padding: 4px 7px;"
                 );
             } else if (i == current) {
-                label->setText(QStringList{QString::fromUtf8("素材"), QString::fromUtf8("对齐"),
-                                           QString::fromUtf8("堆栈"), QString::fromUtf8("结果")}.value(i));
+                label->setText(m_sceneStepNames.value(i));
                 label->setStyleSheet(
                     "color: #F3F7F6; background-color: #1B2527; border: 1px solid #465B5E; "
                     "border-radius: 5px; font-size: 10px; font-weight: 700; padding: 4px 7px;"
                 );
             } else {
-                label->setText(QStringList{QString::fromUtf8("素材"), QString::fromUtf8("对齐"),
-                                           QString::fromUtf8("堆栈"), QString::fromUtf8("结果")}.value(i));
+                label->setText(m_sceneStepNames.value(i));
                 label->setStyleSheet(
                     "color: #667B77; border: none; font-size: 10px; padding: 4px 7px;"
                 );
@@ -334,7 +436,12 @@ private:
     }
 
     void setupConnections() {
+        connect(m_sceneLauncher, &SceneLauncher::sceneSelected,
+                this, &MainWindow::activateScene);
+
         // Toolbar 信号
+        connect(m_toolbar, &Toolbar::sceneSelectorClicked,
+                this, &MainWindow::showSceneLauncher);
         connect(m_toolbar, &Toolbar::importFilesClicked, this, &MainWindow::onImportClicked);
         connect(m_toolbar, &Toolbar::importFolderClicked, this, &MainWindow::onImportFolderClicked);
         connect(m_toolbar, &Toolbar::clearProjectClicked, this, [this]() {
@@ -343,8 +450,7 @@ private:
             m_previewPanel->clearImage();
             m_toolbar->enableProcess(false);
             m_toolbar->enableExport(false);
-            m_toolbar->setProjectSummary(QString::fromUtf8("等待导入素材"));
-            setWorkflowStage(0, QString::fromUtf8("添加至少 2 张照片"));
+            updateProjectReadiness();
             statusBar()->showMessage("项目已清空", 3000);
         });
         connect(m_toolbar, &Toolbar::startProcessClicked, this, &MainWindow::onProcessClicked);
@@ -423,21 +529,7 @@ private:
         connect(m_projectPanel, &ProjectPanel::filesChanged, this, [this]() {
             const bool wasShowingResult = m_previewPanel->isShowingResult();
             invalidateCachedResult();
-            const int count = m_projectPanel->includedFilePaths().size();
-            m_toolbar->enableProcess(count >= 2);
-            m_toolbar->setProjectSummary(count > 0
-                ? QString::fromUtf8("%1 张可用素材").arg(count)
-                : QString::fromUtf8("等待导入素材"));
-            m_paramsPanel->updateRefFrameList(m_projectPanel->includedFilePaths());
-            if (count >= 2) {
-                m_paramsPanel->recommendStackMethod(count);
-                setWorkflowStage(1,
-                    QString::fromUtf8("%1 张照片已就绪").arg(count));
-            } else {
-                setWorkflowStage(0, count == 1
-                    ? QString::fromUtf8("还需要 1 张照片")
-                    : QString::fromUtf8("添加至少 2 张照片"));
-            }
+            updateProjectReadiness();
             if (wasShowingResult) {
                 const QString currentFile = m_projectPanel->currentFilePath();
                 if (currentFile.isEmpty()) m_previewPanel->clearImage();
@@ -580,7 +672,7 @@ private slots:
         );
 
         if (!fileNames.isEmpty()) {
-            m_projectPanel->addFiles(fileNames);
+            importFiles(fileNames);
             statusBar()->showMessage(
                 QString("已导入 %1 个文件").arg(fileNames.size()),
                 5000
@@ -606,6 +698,11 @@ private slots:
                 fullPaths.append(directory.absoluteFilePath(f));
             }
             if (!fullPaths.isEmpty()) {
+                if (!m_sceneActive) {
+                    activateScene(ProcessingScene::Nightscape);
+                } else if (m_contentStack->currentWidget() == m_sceneLauncher) {
+                    activateScene(m_scene);
+                }
                 m_projectPanel->addFiles(fullPaths);
                 statusBar()->showMessage(
                     QString("从文件夹导入 %1 个文件").arg(fullPaths.size()),
@@ -666,9 +763,18 @@ private slots:
 
         // 1. 收集文件
         auto files = m_projectPanel->includedFilePaths();
-        if (files.size() < 2) {
-            QMessageBox::warning(this, "处理", "需要至少 2 张未排除的图像才能开始处理");
+        if (files.size() < requiredFrameCount()) {
+            QMessageBox::warning(
+                this, "处理",
+                requiredFrameCount() == 1
+                    ? QString::fromUtf8("请先导入 1 张 RAW 图像")
+                    : QString::fromUtf8("需要至少 2 张未排除的图像才能开始处理"));
             return;
+        }
+        if (m_scene == ProcessingScene::SingleFrame) {
+            QString source = m_projectPanel->currentFilePath();
+            if (source.isEmpty() || !files.contains(source)) source = files.first();
+            files = {source};
         }
 
         // 保存当前参数设置
@@ -681,6 +787,7 @@ private slots:
 
         // 2. 构建参数
         ProcessingWorker::Params params;
+        params.singleFrameMode = m_scene == ProcessingScene::SingleFrame;
         params.stackMethod = m_paramsPanel->stackMethod();
         params.kappaValue = m_paramsPanel->kappaValue();
         params.autoRejectLowQualityFrames =
@@ -698,7 +805,8 @@ private slots:
         params.starReduceStrength = m_paramsPanel->starReduceStrength();
         params.outputFormat = m_paramsPanel->outputFormat();
         params.outputPath = m_paramsPanel->outputPath();
-        params.skyGroundSepEnabled = m_paramsPanel->skyGroundSeparationEnabled();
+        params.skyGroundSepEnabled = !params.singleFrameMode &&
+            m_paramsPanel->skyGroundSeparationEnabled();
         params.skyGroundMode = m_paramsPanel->skyGroundMode();
         params.userMaskPath = m_paramsPanel->userMaskPath();
         params.featherRadius = m_paramsPanel->featherRadius();
@@ -746,7 +854,14 @@ private slots:
         connect(worker, &ProcessingWorker::stageMessage, dialog, [this, dialog](const QString& msg) {
             dialog->setLabelText(msg);
             int stage = 1;
-            if (msg.contains(QString::fromUtf8("堆栈")) ||
+            if (m_scene == ProcessingScene::SingleFrame) {
+                if (msg.contains(QString::fromUtf8("导出")) ||
+                    msg.contains(QString::fromUtf8("完成"))) {
+                    stage = 3;
+                } else if (msg.contains(QString::fromUtf8("预览"))) {
+                    stage = 2;
+                }
+            } else if (msg.contains(QString::fromUtf8("堆栈")) ||
                 msg.contains(QString::fromUtf8("蒙版")) ||
                 msg.contains(QString::fromUtf8("裁切"))) {
                 stage = 2;
@@ -816,14 +931,15 @@ private slots:
                         QString::fromUtf8("处理完成，但参数已变化，请重新处理"));
                 }
                 statusBar()->showMessage(
-                    QString("处理完成 — %1×%2 已堆栈 %3 帧 | 参考 %4 | 排除 %5 帧")
-                        .arg(m_cachedWidth)
-                        .arg(m_cachedHeight)
-                        .arg(frameCount)
-                        .arg(referenceName)
-                        .arg(rejectedCount),
-                    5000
-                );
+                    m_scene == ProcessingScene::SingleFrame
+                        ? QString::fromUtf8("单张精修完成 — %1×%2 | %3")
+                              .arg(m_cachedWidth).arg(m_cachedHeight)
+                              .arg(referenceName)
+                        : QString::fromUtf8(
+                              "处理完成 — %1×%2 已堆栈 %3 帧 | 参考 %4 | 排除 %5 帧")
+                              .arg(m_cachedWidth).arg(m_cachedHeight)
+                              .arg(frameCount).arg(referenceName).arg(rejectedCount),
+                    5000);
             } else {
                 QMessageBox::warning(this, "处理失败", worker->errorString());
                 setWorkflowStage(1, QString::fromUtf8("处理失败，请检查素材或参数"));
@@ -872,7 +988,9 @@ private slots:
             ext = ".png";
         }
 
-        QString fileName = QDateTime::currentDateTime().toString("yyyyMMdd_hhmmss") + "_stacked_export" + ext;
+        QString fileName = QDateTime::currentDateTime().toString("yyyyMMdd_hhmmss") +
+            (m_scene == ProcessingScene::SingleFrame
+                ? "_single_export" : "_stacked_export") + ext;
         QString fullPath = outPath + "/" + fileName;
 
         if (ImageExporter::exportRgb16(m_cachedStackedData, m_cachedWidth, m_cachedHeight,
@@ -979,6 +1097,9 @@ private slots:
 
 private:
     Toolbar* m_toolbar = nullptr;
+    SceneLauncher* m_sceneLauncher = nullptr;
+    QStackedWidget* m_contentStack = nullptr;
+    QWidget* m_workspacePage = nullptr;
     ProjectPanel* m_projectPanel = nullptr;
     PreviewPanel* m_previewPanel = nullptr;
     ParamsPanel* m_paramsPanel = nullptr;
@@ -986,6 +1107,11 @@ private:
     QList<QLabel*> m_stepLabels;
     QLabel* m_workflowStatus = nullptr;
     QProgressBar* m_inlineProgress = nullptr;
+    ProcessingScene m_scene = ProcessingScene::Nightscape;
+    bool m_sceneActive = false;
+    QStringList m_sceneStepNames = {
+        QString::fromUtf8("素材"), QString::fromUtf8("对齐"),
+        QString::fromUtf8("堆栈"), QString::fromUtf8("结果")};
     QAction* m_beforeAfterAction = nullptr;
     ProcessingWorker* m_worker = nullptr;
     MaskPreviewWorker* m_maskPreviewWorker = nullptr;

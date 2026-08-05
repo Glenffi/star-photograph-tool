@@ -473,6 +473,11 @@ void ProcessingWorker::run() {
         return;
     }
 
+    if (m_params.singleFrameMode) {
+        runSingleFrame();
+        return;
+    }
+
     emit stageMessage("检查图像与内存预算...");
     RawImageLoader loader;
     std::vector<RawImageLoader::Metadata> metadata;
@@ -978,6 +983,75 @@ void ProcessingWorker::run() {
         m_height = height;
     }
 
+    finishResult(resultRgb, width, height, mask);
+}
+
+void ProcessingWorker::runSingleFrame() {
+    m_params.skyGroundSepEnabled = false;
+    const QString sourcePath = m_files.first();
+    RawImageLoader loader;
+    RawImageLoader::Metadata metadata;
+
+    emit stageMessage("检查单张 RAW 与内存预算...");
+    if (!loader.loadMetadata(sourcePath.toStdString(), metadata)) {
+        m_errorString = QString("无法读取元数据: %1")
+                            .arg(QFileInfo(sourcePath).fileName());
+        return;
+    }
+
+    ProcessingMemoryEstimator::EstimateOptions options;
+    options.frameCount = 1;
+    options.noiseReduction = m_params.noiseReductionEnabled;
+    options.dehaze = m_params.dewarpEnabled;
+    options.stretch = m_params.stretchEnabled;
+    options.starReduction = m_params.starReduceEnabled;
+
+    auto fitsMemoryBudget = [this, &options](int width, int height) {
+        const uint64_t estimated = ProcessingMemoryEstimator::estimatePeakBytes(
+            width, height, options);
+        const ProcessingMemoryEstimator::SystemMemoryInfo memoryInfo =
+            ProcessingMemoryEstimator::systemMemoryInfo();
+        const uint64_t budget =
+            ProcessingMemoryEstimator::calculateEffectiveBudgetBytes(
+                memoryInfo.safeBudgetBytes, m_params.memoryBudgetBytes);
+        if (estimated != 0 && estimated <= budget) return true;
+        m_errorString = QString("单张处理预计需要约 %1 内存，当前安全预算为 %2。"
+                                "请关闭去雾、降噪或缩星后重试。")
+                            .arg(formatMemoryBytes(estimated))
+                            .arg(formatMemoryBytes(budget));
+        return false;
+    };
+
+    if (!fitsMemoryBudget(metadata.width, metadata.height)) return;
+    if (stopIfCancelled()) return;
+
+    emit stageMessage("解码单张 RAW...");
+    RawImageLoader::ImageData image;
+    if (!loader.loadRaw(sourcePath.toStdString(), image)) {
+        m_errorString = QString("无法解码 RAW: %1")
+                            .arg(QFileInfo(sourcePath).fileName());
+        return;
+    }
+    if ((image.width != metadata.width || image.height != metadata.height) &&
+        !fitsMemoryBudget(image.width, image.height)) {
+        return;
+    }
+
+    m_width = image.width;
+    m_height = image.height;
+    m_frameCount = 1;
+    m_selectedReferenceIndex = 0;
+    m_selectedReferenceFrame = sourcePath;
+    emit progress(45);
+
+    std::vector<uint16_t> resultRgb = std::move(image.data);
+    std::vector<uint8_t> noMask;
+    finishResult(resultRgb, m_width, m_height, noMask);
+}
+
+bool ProcessingWorker::finishResult(std::vector<uint16_t>& resultRgb,
+                                    int width, int height,
+                                    std::vector<uint8_t>& mask) {
     const bool hasFinishingStage =
         (m_params.noiseReductionEnabled && m_params.noiseReductionStrength > 0)
         || m_params.dewarpEnabled
@@ -1009,7 +1083,7 @@ void ProcessingWorker::run() {
                 resultRgb, width, height,
                 m_params.noiseReductionStrength, denoised)) {
             m_errorString = "RGB 多尺度降噪失败";
-            return;
+            return false;
         }
         // Fixed-tripod ground has already gained noise reduction from averaging
         // unaligned source frames. Running the spatial denoiser over it again
@@ -1019,7 +1093,7 @@ void ProcessingWorker::run() {
             !ImageBufferUtils::blendSkyGroundInPlace(
                 denoised, resultRgb, mask, width, height)) {
             m_errorString = "天地分离降噪融合失败";
-            return;
+            return false;
         }
         resultRgb = std::move(denoised);
         emit progress(85);
@@ -1032,7 +1106,7 @@ void ProcessingWorker::run() {
             if (!AutoOptimizeEngine::dehazeRgb(
                     resultRgb, width, height, m_params.dewarpStrength, output)) {
                 m_errorString = "RGB 去雾失败";
-                return;
+                return false;
             }
             resultRgb = std::move(output);
         }
@@ -1041,14 +1115,14 @@ void ProcessingWorker::run() {
             if (!AutoOptimizeEngine::stretchRgb(
                     resultRgb, width, height, output)) {
                 m_errorString = "RGB 曲线拉伸失败";
-                return;
+                return false;
             }
             resultRgb = std::move(output);
         }
         emit progress(90);
     }
 
-    if (stopIfCancelled()) return;
+    if (stopIfCancelled()) return false;
     if (m_params.skyGroundSepEnabled &&
         m_params.groundDetailStrength > 0) {
         emit stageMessage("恢复地景细节...");
@@ -1056,11 +1130,11 @@ void ProcessingWorker::run() {
                 resultRgb, width, height, mask,
                 m_params.groundDetailStrength)) {
             m_errorString = "地景细节恢复失败";
-            return;
+            return false;
         }
     }
 
-    if (stopIfCancelled()) return;
+    if (stopIfCancelled()) return false;
     if (m_params.starReduceEnabled && m_params.starReduceStrength > 0) {
         emit stageMessage("缩星处理...");
         if (!StarReducer::reduce(resultRgb, width, height,
@@ -1078,7 +1152,7 @@ void ProcessingWorker::run() {
     }
 
     m_stackedData = std::move(resultRgb);
-    if (stopIfCancelled()) return;
+    if (stopIfCancelled()) return false;
 
     emit stageMessage("导出结果...");
     QString outputPath = m_params.outputPath;
@@ -1087,14 +1161,16 @@ void ProcessingWorker::run() {
     const bool png = m_params.outputFormat == "png8";
     const QString extension = png ? ".png" : ".tiff";
     m_outputFile = outputPath + "/" +
-        QDateTime::currentDateTime().toString("yyyyMMdd_hhmmss") + "_stacked" + extension;
+        QDateTime::currentDateTime().toString("yyyyMMdd_hhmmss") +
+        (m_params.singleFrameMode ? "_single" : "_stacked") + extension;
     if (!ImageExporter::exportRgb16(m_stackedData, width, height,
                                     m_outputFile.toStdString(),
                                     png ? ImageExporter::Png8 : ImageExporter::Tiff16)) {
         m_outputFile.clear();
         m_errorString = "导出失败";
-        return;
+        return false;
     }
     emit progress(100);
     emit stageMessage("处理完成");
+    return true;
 }

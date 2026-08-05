@@ -14,6 +14,8 @@ class QPushButton;
 class QLabel;
 class QTimer;
 class QLineEdit;
+class QTabWidget;
+enum class ProcessingScene;
 
 class ParamsPanel : public QWidget {
     Q_OBJECT
@@ -50,6 +52,7 @@ public:
     QString processingSignature() const;
     void setMaskPreview(const std::vector<uint8_t>& mask, int w, int h);
     void setDetectMaskEnabled(bool enabled);
+    void applySceneProfile(ProcessingScene scene);
 
 signals:
     void paramsChanged();  // 参数发生任何变化时触发
@@ -80,6 +83,8 @@ private:
 
     // 预设
     QComboBox* m_presetCombo = nullptr;
+    QLabel* m_titleLabel = nullptr;
+    QTabWidget* m_tabs = nullptr;
 
     // 对齐组
     QGroupBox* m_alignGroup = nullptr;
@@ -124,14 +129,18 @@ private:
     // 天地分离组
     QCheckBox* m_skyGroundCheck = nullptr;
     QComboBox* m_skyGroundMode = nullptr;
+    QLabel* m_skyGroundModeLabel = nullptr;
     QPushButton* m_detectMaskBtn = nullptr;
     QPushButton* m_importMaskBtn = nullptr;
     QLabel* m_maskPathLabel = nullptr;
     QSlider* m_featherSlider = nullptr;
     QLabel* m_featherLabel = nullptr;
+    QLabel* m_featherNameLabel = nullptr;
     QComboBox* m_groundStackMethod = nullptr;
+    QLabel* m_groundStackNameLabel = nullptr;
     QSlider* m_groundDetailSlider = nullptr;
     QLabel* m_groundDetailLabel = nullptr;
+    QLabel* m_groundDetailNameLabel = nullptr;
     QString m_userMaskPath;
 
     // Debounce 定时器

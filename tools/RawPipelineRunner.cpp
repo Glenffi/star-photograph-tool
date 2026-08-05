@@ -62,6 +62,8 @@ int main(int argc, char* argv[]) {
         "Directory for the TIFF and pipeline-report.json.", "directory");
     const QCommandLineOption limitOption("limit",
         "Use at most this many sorted RAW files.", "count", "0");
+    const QCommandLineOption singleOption(
+        "single", "Refine the first RAW without alignment or stacking.");
     const QCommandLineOption referenceOption("reference-index",
         "Zero-based reference index; -1 selects the best frame automatically.", "index", "-1");
     const QCommandLineOption methodOption("method",
@@ -113,7 +115,8 @@ int main(int argc, char* argv[]) {
         "star-reduce-strength",
         "Enable star reduction at strength 1-100; 0 disables it.",
         "value", "0");
-    parser.addOptions({inputOption, outputOption, limitOption, referenceOption,
+    parser.addOptions({inputOption, outputOption, limitOption, singleOption,
+                       referenceOption,
                        methodOption, kappaOption, memoryBudgetOption,
                        noPhotometricNormalizationOption,
                        noQualityRejectionOption,
@@ -155,6 +158,7 @@ int main(int argc, char* argv[]) {
     const int starReduceStrength =
         parser.value(starReduceOption).toInt(&starReduceOk);
     const bool stretchEnabled = parser.isSet(stretchOption);
+    const bool singleFrameMode = parser.isSet(singleOption);
     bool skyGroundFeatherOk = false;
     const int skyGroundFeather =
         parser.value(skyGroundFeatherOption).toInt(&skyGroundFeatherOk);
@@ -192,8 +196,11 @@ int main(int argc, char* argv[]) {
 
     QStringList files = rawFiles(input);
     if (limit > 0 && files.size() > limit) files = files.mid(0, limit);
-    if (files.size() < 2) {
-        std::cerr << "At least two RAW files are required.\n";
+    if (singleFrameMode && files.size() > 1) files = files.mid(0, 1);
+    if (files.size() < (singleFrameMode ? 1 : 2)) {
+        std::cerr << (singleFrameMode
+            ? "At least one RAW file is required.\n"
+            : "At least two RAW files are required.\n");
         return 2;
     }
     if (referenceIndex >= files.size()) {
@@ -209,7 +216,7 @@ int main(int argc, char* argv[]) {
     }
     ProcessingMemoryEstimator::EstimateOptions estimateOptions;
     estimateOptions.frameCount = files.size();
-    estimateOptions.skyGroundSeparation = skyGroundEnabled;
+    estimateOptions.skyGroundSeparation = skyGroundEnabled && !singleFrameMode;
     estimateOptions.noiseReduction = denoiseStrength > 0;
     estimateOptions.dehaze = dehazeStrength > 0;
     estimateOptions.stretch = stretchEnabled;
@@ -217,28 +224,30 @@ int main(int argc, char* argv[]) {
     const uint64_t estimatedBytes =
         ProcessingMemoryEstimator::estimatePeakBytes(
             metadata.width, metadata.height, estimateOptions);
-    const uint64_t scratchBytes = ProcessingMemoryEstimator::estimateScratchDiskBytes(
-        metadata.width, metadata.height, files.size(), skyGroundEnabled);
+    const uint64_t scratchBytes = singleFrameMode ? 0
+        : ProcessingMemoryEstimator::estimateScratchDiskBytes(
+              metadata.width, metadata.height, files.size(), skyGroundEnabled);
 
     ProcessingWorker::Params params;
+    params.singleFrameMode = singleFrameMode;
     params.stackMethod = method;
     params.kappaValue = kappa;
     params.outputFormat = "tiff16";
     params.outputPath = output;
     params.memoryBudgetBytes = requestedMemoryBudgetBytes;
-    params.skyGroundSepEnabled = skyGroundEnabled;
+    params.skyGroundSepEnabled = skyGroundEnabled && !singleFrameMode;
     params.skyGroundMode = skyGroundMask.isEmpty()
         ? SkyGroundMask::AutoDetect : SkyGroundMask::UserMask;
     params.userMaskPath = skyGroundMask;
     params.groundStackMethod = groundMethod;
     params.groundDetailStrength = skyGroundEnabled ? groundDetailStrength : 0;
     params.featherRadius = skyGroundFeather;
-    const QString generatedSkyGroundMask = skyGroundEnabled
+    const QString generatedSkyGroundMask = params.skyGroundSepEnabled
         ? QDir(output).filePath("sky-ground-mask.png") : QString();
     params.skyGroundMaskOutputPath = generatedSkyGroundMask;
-    params.autoRejectLowQualityFrames =
+    params.autoRejectLowQualityFrames = !singleFrameMode &&
         !parser.isSet(noQualityRejectionOption);
-    params.photometricNormalizationEnabled =
+    params.photometricNormalizationEnabled = !singleFrameMode &&
         !parser.isSet(noPhotometricNormalizationOption);
     params.noiseReductionEnabled = denoiseStrength > 0;
     params.noiseReductionStrength = denoiseStrength;
@@ -291,14 +300,15 @@ int main(int argc, char* argv[]) {
     report["generatedAt"] = QDateTime::currentDateTimeUtc().toString(Qt::ISODate);
     report["input"] = input;
     report["selectedFrames"] = files.size();
+    report["singleFrameMode"] = singleFrameMode;
     report["requestedReferenceIndex"] = referenceIndex;
     report["referenceIndex"] = worker.selectedReferenceIndex();
     report["referenceFile"] =
         QFileInfo(worker.selectedReferenceFrame()).fileName();
     report["autoQualityRejectionEnabled"] =
         params.autoRejectLowQualityFrames;
-    report["skyGroundSeparationEnabled"] = skyGroundEnabled;
-    report["skyGroundMode"] = skyGroundEnabled
+    report["skyGroundSeparationEnabled"] = params.skyGroundSepEnabled;
+    report["skyGroundMode"] = params.skyGroundSepEnabled
         ? (skyGroundMask.isEmpty() ? "automatic" : "user-mask")
         : "disabled";
     report["skyGroundMask"] = skyGroundMask;

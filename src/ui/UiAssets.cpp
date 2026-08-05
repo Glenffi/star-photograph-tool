@@ -122,6 +122,50 @@ void paintGlyph(QPainter& painter, UiAssets::Glyph glyph,
             painter.drawRoundedRect(QRectF(3.5, 5.5, 15.0, 13.0), 2.0, 2.0);
             drawSpark(painter, QPointF(18.0, 7.0), 4.5, 1.3, color);
             break;
+        case UiAssets::Glyph::SingleFrame:
+            painter.drawRoundedRect(QRectF(3.5, 4.5, 17.0, 15.0), 2.5, 2.5);
+            painter.drawEllipse(QPointF(9.0, 10.0), 2.2, 2.2);
+            painter.drawLine(QPointF(5.5, 17.0), QPointF(10.0, 13.0));
+            painter.drawLine(QPointF(10.0, 13.0), QPointF(13.0, 15.5));
+            painter.drawLine(QPointF(13.0, 15.5), QPointF(17.0, 12.0));
+            painter.drawLine(QPointF(17.0, 12.0), QPointF(20.0, 15.0));
+            break;
+        case UiAssets::Glyph::Nightscape: {
+            QPainterPath ridge;
+            ridge.moveTo(3.0, 18.5);
+            ridge.lineTo(7.0, 14.0);
+            ridge.lineTo(10.0, 16.5);
+            ridge.lineTo(14.0, 11.5);
+            ridge.lineTo(21.0, 18.5);
+            painter.drawPath(ridge);
+            painter.drawLine(QPointF(3.0, 19.5), QPointF(21.0, 19.5));
+            drawSpark(painter, QPointF(7.0, 7.0), 3.2, 0.9, color);
+            painter.drawEllipse(QPointF(16.5, 6.5), 1.0, 1.0);
+            break;
+        }
+        case UiAssets::Glyph::DeepSky:
+            painter.drawEllipse(QPointF(12.0, 12.0), 3.0, 3.0);
+            painter.save();
+            painter.translate(12.0, 12.0);
+            painter.rotate(-28.0);
+            painter.drawEllipse(QPointF(0.0, 0.0), 9.0, 4.8);
+            painter.restore();
+            drawSpark(painter, QPointF(18.5, 5.5), 3.0, 0.8, color);
+            painter.drawEllipse(QPointF(5.0, 17.5), 1.0, 1.0);
+            break;
+        case UiAssets::Glyph::SkyGround:
+            painter.drawLine(QPointF(3.0, 12.0), QPointF(21.0, 12.0));
+            painter.drawLine(QPointF(3.0, 18.5), QPointF(8.0, 15.0));
+            painter.drawLine(QPointF(8.0, 15.0), QPointF(11.5, 17.0));
+            painter.drawLine(QPointF(11.5, 17.0), QPointF(16.0, 13.5));
+            painter.drawLine(QPointF(16.0, 13.5), QPointF(21.0, 18.5));
+            drawSpark(painter, QPointF(8.0, 6.5), 3.0, 0.9, color);
+            painter.drawEllipse(QPointF(17.0, 6.0), 1.0, 1.0);
+            break;
+        case UiAssets::Glyph::ChevronRight:
+            painter.drawLine(QPointF(8.0, 5.0), QPointF(15.0, 12.0));
+            painter.drawLine(QPointF(15.0, 12.0), QPointF(8.0, 19.0));
+            break;
     }
 }
 
