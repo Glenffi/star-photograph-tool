@@ -64,6 +64,16 @@ int main(int argc, char* argv[]) {
         "Use at most this many sorted RAW files.", "count", "0");
     const QCommandLineOption singleOption(
         "single", "Refine the first RAW without alignment or stacking.");
+    const QCommandLineOption timelapseOption(
+        "timelapse", "Denoise every RAW with an aligned temporal window.");
+    const QCommandLineOption timelapseWindowOption(
+        "timelapse-window", "Temporal window size: 3 or 5.", "count", "5");
+    const QCommandLineOption timelapseStrengthOption(
+        "timelapse-strength", "Temporal denoise strength from 0 to 100.",
+        "value", "80");
+    const QCommandLineOption timelapseNoGroundOption(
+        "timelapse-no-ground",
+        "Treat the complete timelapse frame as sky; do not protect fixed ground.");
     const QCommandLineOption referenceOption("reference-index",
         "Zero-based reference index; -1 selects the best frame automatically.", "index", "-1");
     const QCommandLineOption methodOption("method",
@@ -116,6 +126,8 @@ int main(int argc, char* argv[]) {
         "Enable star reduction at strength 1-100; 0 disables it.",
         "value", "0");
     parser.addOptions({inputOption, outputOption, limitOption, singleOption,
+                       timelapseOption, timelapseWindowOption,
+                       timelapseStrengthOption, timelapseNoGroundOption,
                        referenceOption,
                        methodOption, kappaOption, memoryBudgetOption,
                        noPhotometricNormalizationOption,
@@ -159,6 +171,15 @@ int main(int argc, char* argv[]) {
         parser.value(starReduceOption).toInt(&starReduceOk);
     const bool stretchEnabled = parser.isSet(stretchOption);
     const bool singleFrameMode = parser.isSet(singleOption);
+    const bool timelapseMode = parser.isSet(timelapseOption);
+    const bool timelapseProtectGround =
+        !parser.isSet(timelapseNoGroundOption);
+    bool timelapseWindowOk = false;
+    const int timelapseWindow =
+        parser.value(timelapseWindowOption).toInt(&timelapseWindowOk);
+    bool timelapseStrengthOk = false;
+    const int timelapseStrength =
+        parser.value(timelapseStrengthOption).toInt(&timelapseStrengthOk);
     bool skyGroundFeatherOk = false;
     const int skyGroundFeather =
         parser.value(skyGroundFeatherOption).toInt(&skyGroundFeatherOk);
@@ -184,8 +205,15 @@ int main(int argc, char* argv[]) {
         groundDetailStrength > 70 ||
         memoryBudgetMiB >
             std::numeric_limits<uint64_t>::max() / (1024ULL * 1024ULL) ||
-        !validMethod(method)) {
-        std::cerr << "Invalid --limit, --reference-index, --method, --kappa, "
+        !validMethod(method) ||
+        (singleFrameMode && timelapseMode) ||
+        (timelapseMode && skyGroundEnabled) ||
+        !timelapseWindowOk ||
+        (timelapseWindow != 3 && timelapseWindow != 5) ||
+        !timelapseStrengthOk || timelapseStrength < 0 ||
+        timelapseStrength > 100) {
+        std::cerr << "Invalid or incompatible --limit, --reference-index, "
+                     "--method, --kappa, "
                      "--memory-budget-mib, --denoise-strength, "
                      "--dehaze-strength, or "
                      "--star-reduce-strength/sky-ground options.\n";
@@ -197,10 +225,13 @@ int main(int argc, char* argv[]) {
     QStringList files = rawFiles(input);
     if (limit > 0 && files.size() > limit) files = files.mid(0, limit);
     if (singleFrameMode && files.size() > 1) files = files.mid(0, 1);
-    if (files.size() < (singleFrameMode ? 1 : 2)) {
+    const int minimumFrames = singleFrameMode ? 1 : (timelapseMode ? 3 : 2);
+    if (files.size() < minimumFrames) {
         std::cerr << (singleFrameMode
             ? "At least one RAW file is required.\n"
-            : "At least two RAW files are required.\n");
+            : timelapseMode
+                ? "At least three RAW files are required for timelapse.\n"
+                : "At least two RAW files are required.\n");
         return 2;
     }
     if (referenceIndex >= files.size()) {
@@ -216,36 +247,48 @@ int main(int argc, char* argv[]) {
     }
     ProcessingMemoryEstimator::EstimateOptions estimateOptions;
     estimateOptions.frameCount = files.size();
-    estimateOptions.skyGroundSeparation = skyGroundEnabled && !singleFrameMode;
+    estimateOptions.skyGroundSeparation =
+        skyGroundEnabled && !singleFrameMode && !timelapseMode;
     estimateOptions.noiseReduction = denoiseStrength > 0;
     estimateOptions.dehaze = dehazeStrength > 0;
     estimateOptions.stretch = stretchEnabled;
     estimateOptions.starReduction = starReduceStrength > 0;
-    const uint64_t estimatedBytes =
-        ProcessingMemoryEstimator::estimatePeakBytes(
-            metadata.width, metadata.height, estimateOptions);
+    const uint64_t estimatedBytes = timelapseMode
+        ? ProcessingMemoryEstimator::estimateTimelapsePeakBytes(
+              metadata.width, metadata.height, timelapseWindow,
+              timelapseProtectGround)
+        : ProcessingMemoryEstimator::estimatePeakBytes(
+              metadata.width, metadata.height, estimateOptions);
     const uint64_t scratchBytes = singleFrameMode ? 0
         : ProcessingMemoryEstimator::estimateScratchDiskBytes(
-              metadata.width, metadata.height, files.size(), skyGroundEnabled);
+              metadata.width, metadata.height, files.size(),
+              skyGroundEnabled && !timelapseMode);
 
     ProcessingWorker::Params params;
     params.singleFrameMode = singleFrameMode;
+    params.timelapseMode = timelapseMode;
+    params.timelapseWindowSize = timelapseWindow;
+    params.timelapseStrength = timelapseStrength;
+    params.timelapseProtectGround = timelapseProtectGround;
     params.stackMethod = method;
     params.kappaValue = kappa;
     params.outputFormat = "tiff16";
     params.outputPath = output;
     params.memoryBudgetBytes = requestedMemoryBudgetBytes;
-    params.skyGroundSepEnabled = skyGroundEnabled && !singleFrameMode;
+    params.skyGroundSepEnabled =
+        skyGroundEnabled && !singleFrameMode && !timelapseMode;
     params.skyGroundMode = skyGroundMask.isEmpty()
         ? SkyGroundMask::AutoDetect : SkyGroundMask::UserMask;
     params.userMaskPath = skyGroundMask;
     params.groundStackMethod = groundMethod;
     params.groundDetailStrength = skyGroundEnabled ? groundDetailStrength : 0;
     params.featherRadius = skyGroundFeather;
-    const QString generatedSkyGroundMask = params.skyGroundSepEnabled
+    const QString generatedSkyGroundMask =
+        (params.skyGroundSepEnabled ||
+         (params.timelapseMode && params.timelapseProtectGround))
         ? QDir(output).filePath("sky-ground-mask.png") : QString();
     params.skyGroundMaskOutputPath = generatedSkyGroundMask;
-    params.autoRejectLowQualityFrames = !singleFrameMode &&
+    params.autoRejectLowQualityFrames = !singleFrameMode && !timelapseMode &&
         !parser.isSet(noQualityRejectionOption);
     params.photometricNormalizationEnabled = !singleFrameMode &&
         !parser.isSet(noPhotometricNormalizationOption);
@@ -279,12 +322,14 @@ int main(int argc, char* argv[]) {
     const uint64_t effectiveMemoryBudget =
         ProcessingMemoryEstimator::calculateEffectiveBudgetBytes(
             memoryInfo.safeBudgetBytes, requestedMemoryBudgetBytes);
+    const QString effectiveMethod = timelapseMode
+        ? QStringLiteral("temporal-mad-weighted-mean") : method;
     std::cout << "Frames: " << files.size()
               << ", reference: "
               << (referenceIndex >= 0
                       ? QFileInfo(files[referenceIndex]).fileName().toStdString()
                       : std::string("automatic"))
-              << ", method: " << method.toStdString()
+              << ", method: " << effectiveMethod.toStdString()
               << ", estimated peak: " << estimatedBytes / kGiB << " GiB"
               << ", available memory: " << memoryInfo.availableBytes / kGiB << " GiB"
               << ", budget: " << effectiveMemoryBudget / kGiB << " GiB"
@@ -295,22 +340,29 @@ int main(int argc, char* argv[]) {
     worker.wait();
 
     QJsonObject report;
-    report["schemaVersion"] = 7;
+    report["schemaVersion"] = 8;
     report["toolVersion"] = QCoreApplication::applicationVersion();
     report["generatedAt"] = QDateTime::currentDateTimeUtc().toString(Qt::ISODate);
     report["input"] = input;
     report["selectedFrames"] = files.size();
     report["singleFrameMode"] = singleFrameMode;
+    report["timelapseMode"] = timelapseMode;
+    report["timelapseWindow"] = timelapseWindow;
+    report["timelapseStrength"] = timelapseStrength;
+    report["timelapseProtectGround"] = params.timelapseProtectGround;
     report["requestedReferenceIndex"] = referenceIndex;
     report["referenceIndex"] = worker.selectedReferenceIndex();
     report["referenceFile"] =
         QFileInfo(worker.selectedReferenceFrame()).fileName();
     report["autoQualityRejectionEnabled"] =
         params.autoRejectLowQualityFrames;
-    report["skyGroundSeparationEnabled"] = params.skyGroundSepEnabled;
+    const bool timelapseGroundApplied = timelapseMode &&
+        !worker.skyGroundMaskSource().isEmpty();
+    report["skyGroundSeparationEnabled"] =
+        params.skyGroundSepEnabled || timelapseGroundApplied;
     report["skyGroundMode"] = params.skyGroundSepEnabled
         ? (skyGroundMask.isEmpty() ? "automatic" : "user-mask")
-        : "disabled";
+        : timelapseGroundApplied ? "automatic" : "disabled";
     report["skyGroundMask"] = skyGroundMask;
     report["skyGroundMaskOutput"] = generatedSkyGroundMask;
     report["skyGroundFeatherRadius"] = skyGroundFeather;
@@ -348,7 +400,7 @@ int main(int argc, char* argv[]) {
         qualityFrames.append(quality);
     }
     report["frameQuality"] = qualityFrames;
-    report["method"] = method;
+    report["method"] = effectiveMethod;
     report["kappa"] = kappa;
     report["photometricNormalizationEnabled"] =
         params.photometricNormalizationEnabled;
@@ -402,6 +454,8 @@ int main(int argc, char* argv[]) {
         worker.affineFrameCount() + worker.homographyFrameCount();
     report["affineAlignedFrames"] = worker.affineFrameCount();
     report["homographyAlignedFrames"] = worker.homographyFrameCount();
+    report["timelapseAlignedPairs"] = timelapseMode
+        ? worker.affineFrameCount() + worker.homographyFrameCount() : 0;
     report["averageAlignmentRms"] = worker.averageAlignmentRms();
     report["worstAlignmentP95"] = worker.worstAlignmentP95();
     report["minimumAlignmentGridCoverage"] =
@@ -429,7 +483,7 @@ int main(int argc, char* argv[]) {
         std::cerr << "Pipeline failed: " << worker.errorString().toStdString() << '\n';
         return 5;
     }
-    std::cout << "TIFF: " << worker.outputFile().toStdString() << '\n'
+    std::cout << "Output: " << worker.outputFile().toStdString() << '\n'
               << "Report: " << reportPath.toStdString() << '\n'
               << "Elapsed: " << timer.elapsed() / 1000.0 << " s\n";
     return 0;

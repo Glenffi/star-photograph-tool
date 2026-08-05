@@ -13,6 +13,7 @@
 #include "core/StackingEngine.h"
 #include "core/StarDetector.h"
 #include "core/StarReducer.h"
+#include "core/TimelapseEngine.h"
 
 #include <QByteArray>
 #include <QColor>
@@ -228,6 +229,47 @@ void testStacking() {
             }
         }
     }
+}
+
+void testTimelapseDenoise() {
+    const std::vector<uint16_t> previous = {900, 900, 900};
+    const std::vector<uint16_t> target = {1000, 1000, 1000};
+    const std::vector<uint16_t> next = {1100, 1100, 1100};
+    const std::vector<TimelapseEngine::FrameView> frames = {
+        {previous.data(), previous.size(), -1.0},
+        {target.data(), target.size(), 0.0},
+        {next.data(), next.size(), 1.0}
+    };
+    TimelapseEngine::Options options;
+    options.windowSize = 3;
+    options.temporalSigma = 1.5;
+    options.strength = 100.0;
+    const TimelapseEngine::Result balanced =
+        TimelapseEngine::denoise(frames, 1, 1, 1, options);
+    check(balanced && balanced.rgb == target,
+          "Symmetric timelapse samples should preserve the target brightness");
+
+    const std::vector<uint16_t> padded = {0, 0, 0};
+    const std::vector<TimelapseEngine::FrameView> paddedFrames = {
+        {padded.data(), padded.size(), -1.0},
+        {target.data(), target.size(), 0.0},
+        {next.data(), next.size(), 1.0}
+    };
+    const TimelapseEngine::Result ignoredPadding =
+        TimelapseEngine::denoise(paddedFrames, 1, 1, 1, options);
+    check(ignoredPadding && ignoredPadding.rgb.front() > target.front(),
+          "RGB zero padding should not darken temporal output borders");
+
+    options.strength = 0.0;
+    const TimelapseEngine::Result disabled =
+        TimelapseEngine::denoise(frames, 1, 1, 1, options);
+    check(disabled && disabled.rgb == target,
+          "Zero temporal strength should return the target frame exactly");
+
+    options.windowSize = 4;
+    check(TimelapseEngine::denoise(frames, 1, 1, 1, options).error ==
+              TimelapseEngine::Error::InvalidWindowSize,
+          "Even timelapse windows should be rejected");
 }
 
 void testImageBufferUtils() {
@@ -469,6 +511,15 @@ void testMemoryEstimator() {
     check(ProcessingMemoryEstimator::estimateScratchDiskBytes(6000, 4000, 20, true) ==
               frameBytes * 40,
           "Sky/ground stacking should reserve aligned and original caches");
+    check(ProcessingMemoryEstimator::estimateTimelapsePeakBytes(
+              6000, 4000, 5, true) == frameBytes * 14,
+          "Protected five-frame timelapse should budget both coordinate paths");
+    check(ProcessingMemoryEstimator::estimateTimelapsePeakBytes(
+              6000, 4000, 3, false) == frameBytes * 7,
+          "Sky-only timelapse should budget one temporal window");
+    check(ProcessingMemoryEstimator::estimateTimelapsePeakBytes(
+              6000, 4000, 4, true) == 0,
+          "Timelapse estimate should reject even windows");
     check(ProcessingMemoryEstimator::estimatePeakBytes(0, 4000, 20, false) == 0,
           "Memory estimator should reject invalid dimensions");
     constexpr uint64_t gib = 1024ULL * 1024ULL * 1024ULL;
@@ -1399,6 +1450,7 @@ void testSkyGroundHorizonDetection() {
 int main(int argc, char* argv[]) {
     QCoreApplication application(argc, argv);
     testStacking();
+    testTimelapseDenoise();
     testImageBufferUtils();
     testRgbAutoOptimize();
     testRgbTransform();

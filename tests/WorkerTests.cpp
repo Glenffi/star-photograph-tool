@@ -54,6 +54,22 @@ void testSingleFrameFailureUsesDedicatedPath() {
           "Failed single-frame processing should not report a completed frame");
 }
 
+void testTimelapseRejectsTooFewFrames() {
+    ProcessingWorker::Params params;
+    params.timelapseMode = true;
+    ProcessingWorker worker(
+        {"first.raw", "second.raw"}, "first.raw", params);
+    worker.start();
+    check(worker.wait(3000),
+          "Short timelapse input should finish promptly");
+    check(!worker.wasCancelled(),
+          "Short timelapse input is an error, not cancellation");
+    check(worker.errorString().contains("3"),
+          "Timelapse input error should explain the three-frame minimum");
+    check(worker.stackedFrameCount() == 0,
+          "Rejected timelapse input should not report output frames");
+}
+
 } // namespace
 
 int main(int argc, char* argv[]) {
@@ -62,6 +78,7 @@ int main(int argc, char* argv[]) {
     testCancellationBeforeStart();
     testRawLoaderFitsWorkerStack();
     testSingleFrameFailureUsesDedicatedPath();
+    testTimelapseRejectsTooFewFrames();
     if (failures == 0) {
         std::cout << "All worker tests passed.\n";
         return 0;

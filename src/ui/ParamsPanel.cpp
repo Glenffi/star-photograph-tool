@@ -48,16 +48,16 @@ void ParamsPanel::setupUI() {
     titleLayout->addStretch();
     layout->addWidget(titleBar);
 
-    auto* presetBar = new QWidget(this);
-    presetBar->setFixedHeight(50);
-    presetBar->setStyleSheet("background-color: #151C1E; border-bottom: 1px solid #263234;");
-    auto* presetRow = new QHBoxLayout(presetBar);
+    m_presetBar = new QWidget(this);
+    m_presetBar->setFixedHeight(50);
+    m_presetBar->setStyleSheet("background-color: #151C1E; border-bottom: 1px solid #263234;");
+    auto* presetRow = new QHBoxLayout(m_presetBar);
     presetRow->setContentsMargins(12, 8, 12, 8);
     presetRow->setSpacing(8);
-    auto* presetLabel = new QLabel(QString::fromUtf8("预设"), presetBar);
+    auto* presetLabel = new QLabel(QString::fromUtf8("预设"), m_presetBar);
     presetLabel->setStyleSheet("font-size: 11px; color: #91A39F; background-color: transparent;");
     presetRow->addWidget(presetLabel);
-    m_presetCombo = new QComboBox(presetBar);
+    m_presetCombo = new QComboBox(m_presetBar);
     m_presetCombo->addItem(QString::fromUtf8("自定义"));
     for (const Preset& preset : PresetManager::builtinPresets()) {
         m_presetCombo->addItem(preset.name);
@@ -71,7 +71,7 @@ void ParamsPanel::setupUI() {
     );
     connect(m_presetCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &ParamsPanel::onPresetChanged);
     presetRow->addWidget(m_presetCombo, 1);
-    layout->addWidget(presetBar);
+    layout->addWidget(m_presetBar);
 
     m_tabs = new QTabWidget(this);
     m_tabs->setDocumentMode(true);
@@ -379,6 +379,69 @@ void ParamsPanel::setupUI() {
     stackLayout->addLayout(groundDetailRow);
 
     stackPageLayout->addWidget(m_stackGroup);
+
+    m_timelapseGroup = createCollapsibleGroup(
+        QString::fromUtf8("滑动窗口降噪"), true);
+    m_timelapseGroup->setVisible(false);
+    auto* timelapseLayout = new QVBoxLayout(m_timelapseGroup);
+    timelapseLayout->setSpacing(10);
+
+    auto* windowRow = new QHBoxLayout();
+    auto* windowLabel = new QLabel(
+        QString::fromUtf8("邻近窗口:"), m_timelapseGroup);
+    m_timelapseWindow = new QComboBox(m_timelapseGroup);
+    m_timelapseWindow->addItem(QString::fromUtf8("3 帧（更快）"), 3);
+    m_timelapseWindow->addItem(QString::fromUtf8("5 帧（更干净）"), 5);
+    m_timelapseWindow->setCurrentIndex(1);
+    m_timelapseWindow->setStyleSheet(m_alignMethod->styleSheet());
+    m_timelapseWindow->setToolTip(QString::fromUtf8(
+        "每张输出以自身为中心，使用前后邻近 RAW 对齐降噪；序列两端自动缩短窗口"));
+    connect(m_timelapseWindow,
+            QOverload<int>::of(&QComboBox::currentIndexChanged),
+            this, &ParamsPanel::onComboChanged);
+    windowRow->addWidget(windowLabel);
+    windowRow->addWidget(m_timelapseWindow, 1);
+    timelapseLayout->addLayout(windowRow);
+
+    auto* temporalStrengthRow = new QHBoxLayout();
+    temporalStrengthRow->addWidget(
+        new QLabel(QString::fromUtf8("时域强度:"), m_timelapseGroup));
+    m_timelapseStrengthSlider = createSlider(0, 100, 80);
+    m_timelapseStrengthSlider->setToolTip(QString::fromUtf8(
+        "控制邻近帧对当前帧的贡献；值越高降噪越强，动态云层应适当降低"));
+    m_timelapseStrengthLabel = new QLabel("80%", m_timelapseGroup);
+    m_timelapseStrengthLabel->setMinimumWidth(32);
+    connect(m_timelapseStrengthSlider, &QSlider::valueChanged, this,
+            [this](int value) {
+                m_timelapseStrengthLabel->setText(QString::number(value) + "%");
+                onSliderValueChanged(value);
+            });
+    connect(m_timelapseStrengthSlider, &QSlider::sliderReleased,
+            this, &ParamsPanel::onSliderReleased);
+    temporalStrengthRow->addWidget(m_timelapseStrengthSlider, 1);
+    temporalStrengthRow->addWidget(m_timelapseStrengthLabel);
+    timelapseLayout->addLayout(temporalStrengthRow);
+
+    m_timelapseProtectGroundCheck = new QCheckBox(
+        QString::fromUtf8("固定地景保持原位"), m_timelapseGroup);
+    m_timelapseProtectGroundCheck->setChecked(true);
+    m_timelapseProtectGroundCheck->setToolTip(QString::fromUtf8(
+        "天空按星点对齐，山体和建筑在相机坐标中降噪，再沿地平线融合"));
+    m_timelapseProtectGroundCheck->setStyleSheet(
+        m_autoRejectQualityCheck->styleSheet());
+    connect(m_timelapseProtectGroundCheck, &QCheckBox::toggled,
+            this, &ParamsPanel::onCheckChanged);
+    timelapseLayout->addWidget(m_timelapseProtectGroundCheck);
+
+    auto* outputNote = new QLabel(
+        QString::fromUtf8("每张输入 RAW 对应一张带原文件名的输出图片。"),
+        m_timelapseGroup);
+    outputNote->setWordWrap(true);
+    outputNote->setStyleSheet(
+        "color: #91A39F; background-color: #152522; border-left: 3px solid #59C9E8; "
+        "border-radius: 4px; padding: 7px 9px; font-size: 11px;");
+    timelapseLayout->addWidget(outputNote);
+    stackPageLayout->addWidget(m_timelapseGroup);
     stackPageLayout->addStretch();
 
     // 自动优化组（默认展开）
@@ -817,6 +880,9 @@ void ParamsPanel::onRestoreDefaults() {
     m_featherSlider->setValue(20);
     m_groundStackMethod->setCurrentIndex(0);
     m_groundDetailSlider->setValue(40);
+    m_timelapseWindow->setCurrentIndex(1);
+    m_timelapseStrengthSlider->setValue(80);
+    m_timelapseProtectGroundCheck->setChecked(true);
     m_userMaskPath.clear();
     m_maskPathLabel->clear();
     m_maskPathLabel->setVisible(false);
@@ -913,6 +979,9 @@ void ParamsPanel::saveCurrentSettings() {
     settings.setValue("featherRadius", m_featherSlider->value());
     settings.setValue("groundStackMethod", m_groundStackMethod->currentIndex());
     settings.setValue("groundDetailStrength", m_groundDetailSlider->value());
+    settings.setValue("timelapseWindow", timelapseWindowSize());
+    settings.setValue("timelapseStrength", timelapseStrength());
+    settings.setValue("timelapseProtectGround", timelapseProtectGround());
 }
 
 void ParamsPanel::loadCustomPresets() {
@@ -960,6 +1029,10 @@ void ParamsPanel::loadPreset() {
     int featherRadius = settings.value("featherRadius", 20).toInt();
     int groundStackMethod = settings.value("groundStackMethod", 0).toInt();
     int groundDetailStrength = settings.value("groundDetailStrength", 40).toInt();
+    int timelapseWindow = settings.value("timelapseWindow", 5).toInt();
+    int timelapseStrength = settings.value("timelapseStrength", 80).toInt();
+    bool timelapseProtectGround =
+        settings.value("timelapseProtectGround", true).toBool();
 
     // 使用信号阻塞避免触发 paramsChanged
     QSignalBlocker blocker1(m_alignMethod);
@@ -981,6 +1054,9 @@ void ParamsPanel::loadPreset() {
     QSignalBlocker blocker17(m_autoRejectQualityCheck);
     QSignalBlocker blocker18(m_groundStackMethod);
     QSignalBlocker blocker19(m_groundDetailSlider);
+    QSignalBlocker blocker20(m_timelapseWindow);
+    QSignalBlocker blocker21(m_timelapseStrengthSlider);
+    QSignalBlocker blocker22(m_timelapseProtectGroundCheck);
 
     Q_UNUSED(alignIndex)
     m_alignMethod->setCurrentIndex(0);
@@ -1022,6 +1098,12 @@ void ParamsPanel::loadPreset() {
     m_groundDetailSlider->setValue(std::clamp(groundDetailStrength, 0, 70));
     m_groundDetailLabel->setText(
         QString::number(m_groundDetailSlider->value()) + "%");
+    m_timelapseWindow->setCurrentIndex(timelapseWindow == 3 ? 0 : 1);
+    m_timelapseStrengthSlider->setValue(
+        std::clamp(timelapseStrength, 0, 100));
+    m_timelapseStrengthLabel->setText(
+        QString::number(m_timelapseStrengthSlider->value()) + "%");
+    m_timelapseProtectGroundCheck->setChecked(timelapseProtectGround);
     updateSkyGroundControls();
     updateStackMethodDescription();
 
@@ -1210,6 +1292,18 @@ void ParamsPanel::applySceneProfile(ProcessingScene scene) {
         skyGroundEnabled = true;
         title = QString::fromUtf8("天地分离参数");
         break;
+    case ProcessingScene::Timelapse:
+        preset.name = QString::fromUtf8("延时序列");
+        preset.stackMethod = "average";
+        preset.autoRejectLowQualityFrames = false;
+        preset.photometricNormalizationEnabled = true;
+        preset.noiseReductionEnabled = false;
+        preset.dewarpEnabled = false;
+        preset.stretchEnabled = false;
+        preset.starReduceEnabled = false;
+        presetIndex = 0;
+        title = QString::fromUtf8("延时序列参数");
+        break;
     }
 
     m_userChangedStackMethod = false;
@@ -1225,10 +1319,19 @@ void ParamsPanel::applySceneProfile(ProcessingScene scene) {
     updateSkyGroundControls();
 
     if (m_titleLabel) m_titleLabel->setText(title);
+    const bool timelapse = scene == ProcessingScene::Timelapse;
+    if (m_alignGroup) m_alignGroup->setVisible(!timelapse);
+    if (m_stackGroup) m_stackGroup->setVisible(!timelapse);
+    if (m_timelapseGroup) m_timelapseGroup->setVisible(timelapse);
+    // General stack presets change controls that do not participate in the
+    // temporal pipeline, so keep this task-specific workspace focused.
+    if (m_presetBar) m_presetBar->setVisible(!timelapse);
+    if (m_savePresetBtn) m_savePresetBtn->setVisible(!timelapse);
     if (m_tabs) {
         // A single frame has no alignment or stack phase, so that page is
         // removed instead of leaving irrelevant disabled controls in view.
         m_tabs->setTabVisible(0, scene != ProcessingScene::SingleFrame);
+        m_tabs->setTabVisible(1, !timelapse);
         m_tabs->setCurrentIndex(activeTab);
     }
     emitParamsChanged();
@@ -1405,6 +1508,21 @@ int ParamsPanel::groundDetailStrength() const {
     return m_groundDetailSlider ? m_groundDetailSlider->value() : 40;
 }
 
+int ParamsPanel::timelapseWindowSize() const {
+    return m_timelapseWindow
+        ? m_timelapseWindow->currentData().toInt() : 3;
+}
+
+int ParamsPanel::timelapseStrength() const {
+    return m_timelapseStrengthSlider
+        ? m_timelapseStrengthSlider->value() : 80;
+}
+
+bool ParamsPanel::timelapseProtectGround() const {
+    return m_timelapseProtectGroundCheck &&
+        m_timelapseProtectGroundCheck->isChecked();
+}
+
 QString ParamsPanel::processingSignature() const {
     // Output path/format are intentionally excluded: changing only where or
     // how a cached result is written does not make its pixels stale.
@@ -1421,7 +1539,10 @@ QString ParamsPanel::processingSignature() const {
         QString::number(skyGroundSeparationEnabled()),
         QString::number(static_cast<int>(skyGroundMode())), userMaskPath(),
         QString::number(featherRadius()), groundStackMethod(),
-        QString::number(groundDetailStrength())
+        QString::number(groundDetailStrength()),
+        QString::number(timelapseWindowSize()),
+        QString::number(timelapseStrength()),
+        QString::number(timelapseProtectGround())
     }.join('|');
 }
 

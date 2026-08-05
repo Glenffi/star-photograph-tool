@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(StarProcessor VERSION 0.4.0 LANGUAGES CXX)
+project(StarProcessor VERSION 0.5.0 LANGUAGES CXX)
 
 include(CTest)
 option(BUILD_SAMPLE_TOOLS "Build local RAW sample regression tools" ON)
@@ -102,6 +102,7 @@ set(CORE_SOURCES
     src/core/FrameQualityEvaluator.cpp
     src/core/PresetManager.cpp
     src/core/StarReducer.cpp
+    src/core/TimelapseEngine.cpp
 )
 
 set(APP_SOURCES
@@ -131,6 +132,7 @@ set(CORE_HEADERS
     src/core/FrameQualityEvaluator.h
     src/core/PresetManager.h
     src/core/StarReducer.h
+    src/core/TimelapseEngine.h
 )
 
 set(APP_HEADERS
@@ -179,6 +181,8 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
     StarProcessorWorkers
     Qt6::Widgets
 )
+target_compile_definitions(${PROJECT_NAME} PRIVATE
+    STARPROCESSOR_VERSION="${PROJECT_VERSION}")
 
 if(BUILD_TESTING)
     add_executable(StarProcessorCoreTests tests/CoreTests.cpp)

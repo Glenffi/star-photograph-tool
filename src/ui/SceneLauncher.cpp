@@ -20,14 +20,15 @@ public:
     SceneCard(UiAssets::Glyph glyph, const QColor& accent,
               const QString& requirement, const QString& title,
               const QString& summary, const QString& steps,
-              std::function<void()> activate, QWidget* parent = nullptr)
+              std::function<void()> activate, int cardHeight,
+              QWidget* parent = nullptr)
         : QFrame(parent)
         , m_accent(accent.name())
         , m_activate(std::move(activate)) {
         setObjectName("sceneCard");
         setAttribute(Qt::WA_StyledBackground, true);
         setCursor(Qt::PointingHandCursor);
-        setFixedHeight(190);
+        setFixedHeight(cardHeight);
         setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
         setAccessibleName(title);
 
@@ -169,11 +170,13 @@ SceneLauncher::SceneLauncher(QWidget* parent)
                                         const QString& requirement,
                                         const QString& titleText,
                                         const QString& summary,
-                                        const QString& steps) {
+                                        const QString& steps,
+                                        int columnSpan = 1,
+                                        int cardHeight = 166) {
         auto* card = new SceneCard(
             glyph, accent, requirement, titleText, summary, steps,
-            [this, scene]() { emit sceneSelected(scene); }, content);
-        grid->addWidget(card, row, column);
+            [this, scene]() { emit sceneSelected(scene); }, cardHeight, content);
+        grid->addWidget(card, row, column, 1, columnSpan);
     };
 
     addCard(0, 0, ProcessingScene::SingleFrame,
@@ -196,6 +199,12 @@ SceneLauncher::SceneLauncher(QWidget* parent)
             QString::fromUtf8("固定机位"), QString::fromUtf8("天地分离合成"),
             QString::fromUtf8("天空跟随星点对齐，地景保持原坐标，避免山体和建筑拖影。"),
             QString::fromUtf8("检测地平线  →  双路堆栈  →  融合"));
+    addCard(2, 0, ProcessingScene::Timelapse,
+            UiAssets::Glyph::Timelapse, QColor("#59C9E8"),
+            QString::fromUtf8("3 张以上"), QString::fromUtf8("星空延时序列降噪"),
+            QString::fromUtf8("以每张 RAW 为中心对齐邻近帧，逐张输出降噪 TIFF；固定地景保持原位。"),
+            QString::fromUtf8("预分析  →  滑动窗口  →  时域降噪  →  图片序列"),
+            2, 150);
 
     contentLayout->addLayout(grid);
     outer->addStretch();

@@ -49,6 +49,9 @@ public:
     int featherRadius() const;
     QString groundStackMethod() const;
     int groundDetailStrength() const;
+    int timelapseWindowSize() const;
+    int timelapseStrength() const;
+    bool timelapseProtectGround() const;
     QString processingSignature() const;
     void setMaskPreview(const std::vector<uint8_t>& mask, int w, int h);
     void setDetectMaskEnabled(bool enabled);
@@ -82,6 +85,7 @@ private:
     void markPresetCustom();
 
     // 预设
+    QWidget* m_presetBar = nullptr;
     QComboBox* m_presetCombo = nullptr;
     QLabel* m_titleLabel = nullptr;
     QTabWidget* m_tabs = nullptr;
@@ -100,6 +104,13 @@ private:
     QLabel* m_kappaLabel = nullptr;
     QCheckBox* m_autoRejectQualityCheck = nullptr;
     QCheckBox* m_photometricCheck = nullptr;
+
+    // 延时序列组
+    QGroupBox* m_timelapseGroup = nullptr;
+    QComboBox* m_timelapseWindow = nullptr;
+    QSlider* m_timelapseStrengthSlider = nullptr;
+    QLabel* m_timelapseStrengthLabel = nullptr;
+    QCheckBox* m_timelapseProtectGroundCheck = nullptr;
 
     // 自动优化组
     QGroupBox* m_optimizeGroup = nullptr;

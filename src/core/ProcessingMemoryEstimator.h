@@ -27,6 +27,12 @@ public:
     static uint64_t estimatePeakBytes(int width, int height,
                                       const EstimateOptions& options);
 
+    // A temporal target owns the decoded target, aligned sky samples and,
+    // when requested, independent unaligned ground samples for one window.
+    static uint64_t estimateTimelapsePeakBytes(int width, int height,
+                                               int windowSize,
+                                               bool protectGround);
+
     // Disk-backed alignment stores one RGB16 frame per accepted input, or two
     // when sky/ground separation also preserves the unaligned originals.
     static uint64_t estimateScratchDiskBytes(int width, int height, int frameCount,

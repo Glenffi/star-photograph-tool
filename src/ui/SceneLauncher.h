@@ -7,7 +7,8 @@ enum class ProcessingScene {
     SingleFrame,
     Nightscape,
     DeepSky,
-    SkyGround
+    SkyGround,
+    Timelapse
 };
 
 class SceneLauncher : public QWidget {

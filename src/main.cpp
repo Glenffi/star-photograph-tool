@@ -74,6 +74,10 @@ public:
         }
     }
 
+    void selectStartupScene(ProcessingScene scene) {
+        activateScene(scene);
+    }
+
     ~MainWindow() {
         // 等待 ProcessingWorker 真正结束（无超时，避免销毁运行中的线程）
         if (m_worker && m_worker->isRunning()) {
@@ -229,12 +233,16 @@ private:
             return QString::fromUtf8("深空天体");
         case ProcessingScene::SkyGround:
             return QString::fromUtf8("天地分离");
+        case ProcessingScene::Timelapse:
+            return QString::fromUtf8("延时序列");
         }
         return QString();
     }
 
     int requiredFrameCount() const {
-        return m_scene == ProcessingScene::SingleFrame ? 1 : 2;
+        if (m_scene == ProcessingScene::SingleFrame) return 1;
+        if (m_scene == ProcessingScene::Timelapse) return 3;
+        return 2;
     }
 
     void activateScene(ProcessingScene scene) {
@@ -255,6 +263,10 @@ private:
         case ProcessingScene::DeepSky:
             m_sceneStepNames = {QString::fromUtf8("素材"), QString::fromUtf8("对齐"),
                                 QString::fromUtf8("堆栈"), QString::fromUtf8("结果")};
+            break;
+        case ProcessingScene::Timelapse:
+            m_sceneStepNames = {QString::fromUtf8("素材"), QString::fromUtf8("预分析"),
+                                QString::fromUtf8("逐帧降噪"), QString::fromUtf8("输出序列")};
             break;
         }
 
@@ -746,8 +758,8 @@ private slots:
             "关于 StarProcessor",
             "<h2>StarProcessor</h2>"
             "<p>为星空摄影师打造的跨平台 RAW 处理工具</p>"
-            "<p><b>版本：</b>0.4.0</p>"
-            "<p><b>能力：</b>RAW 堆栈、天地分离、降噪、缩星与自动优化</p>"
+            "<p><b>版本：</b>" STARPROCESSOR_VERSION "</p>"
+            "<p><b>能力：</b>RAW 堆栈、天地分离、延时序列降噪、缩星与自动优化</p>"
             "<p><b>技术栈：</b>C++17 + Qt6 + CMake + LibRaw</p>"
             "<p><b>目标平台：</b>Windows + macOS</p>"
             "<hr>"
@@ -768,7 +780,9 @@ private slots:
                 this, "处理",
                 requiredFrameCount() == 1
                     ? QString::fromUtf8("请先导入 1 张 RAW 图像")
-                    : QString::fromUtf8("需要至少 2 张未排除的图像才能开始处理"));
+                    : requiredFrameCount() == 3
+                        ? QString::fromUtf8("延时降噪需要至少 3 张未排除的 RAW 图像")
+                        : QString::fromUtf8("需要至少 2 张未排除的图像才能开始处理"));
             return;
         }
         if (m_scene == ProcessingScene::SingleFrame) {
@@ -788,6 +802,11 @@ private slots:
         // 2. 构建参数
         ProcessingWorker::Params params;
         params.singleFrameMode = m_scene == ProcessingScene::SingleFrame;
+        params.timelapseMode = m_scene == ProcessingScene::Timelapse;
+        params.timelapseWindowSize = m_paramsPanel->timelapseWindowSize();
+        params.timelapseStrength = m_paramsPanel->timelapseStrength();
+        params.timelapseProtectGround =
+            m_paramsPanel->timelapseProtectGround();
         params.stackMethod = m_paramsPanel->stackMethod();
         params.kappaValue = m_paramsPanel->kappaValue();
         params.autoRejectLowQualityFrames =
@@ -806,6 +825,7 @@ private slots:
         params.outputFormat = m_paramsPanel->outputFormat();
         params.outputPath = m_paramsPanel->outputPath();
         params.skyGroundSepEnabled = !params.singleFrameMode &&
+            !params.timelapseMode &&
             m_paramsPanel->skyGroundSeparationEnabled();
         params.skyGroundMode = m_paramsPanel->skyGroundMode();
         params.userMaskPath = m_paramsPanel->userMaskPath();
@@ -854,7 +874,15 @@ private slots:
         connect(worker, &ProcessingWorker::stageMessage, dialog, [this, dialog](const QString& msg) {
             dialog->setLabelText(msg);
             int stage = 1;
-            if (m_scene == ProcessingScene::SingleFrame) {
+            if (m_scene == ProcessingScene::Timelapse) {
+                if (msg.contains(QString::fromUtf8("逐帧")) ||
+                    msg.contains(QString::fromUtf8("滑动窗口"))) {
+                    stage = 2;
+                } else if (msg.contains(QString::fromUtf8("输出")) ||
+                           msg.contains(QString::fromUtf8("完成"))) {
+                    stage = 3;
+                }
+            } else if (m_scene == ProcessingScene::SingleFrame) {
                 if (msg.contains(QString::fromUtf8("导出")) ||
                     msg.contains(QString::fromUtf8("完成"))) {
                     stage = 3;
@@ -916,7 +944,8 @@ private slots:
                         m_cachedStackedData, m_cachedWidth, m_cachedHeight);
                 }
                 m_previewPanel->setResultAvailable(true, true);
-                m_toolbar->enableExport(true);
+                m_toolbar->enableExport(
+                    m_scene != ProcessingScene::Timelapse);
                 int frameCount = m_cachedFrameCount;
                 const QString referenceName = QFileInfo(
                     worker->selectedReferenceFrame()).fileName();
@@ -935,7 +964,12 @@ private slots:
                         ? QString::fromUtf8("单张精修完成 — %1×%2 | %3")
                               .arg(m_cachedWidth).arg(m_cachedHeight)
                               .arg(referenceName)
-                        : QString::fromUtf8(
+                        : m_scene == ProcessingScene::Timelapse
+                            ? QString::fromUtf8(
+                                  "延时降噪完成 — 已输出 %1 张 · %2×%3 | %4")
+                                  .arg(frameCount).arg(m_cachedWidth).arg(m_cachedHeight)
+                                  .arg(worker->outputFile())
+                            : QString::fromUtf8(
                               "处理完成 — %1×%2 已堆栈 %3 帧 | 参考 %4 | 排除 %5 帧")
                               .arg(m_cachedWidth).arg(m_cachedHeight)
                               .arg(frameCount).arg(referenceName).arg(rejectedCount),
@@ -964,6 +998,12 @@ private slots:
     void onExportClicked() {
         if (processingActive()) {
             statusBar()->showMessage(QString::fromUtf8("处理完成后再导出"), 3000);
+            return;
+        }
+        if (m_scene == ProcessingScene::Timelapse) {
+            QMessageBox::information(
+                this, QString::fromUtf8("延时图片序列"),
+                QString::fromUtf8("处理完成时已经逐张输出整个序列，无需再次导出。"));
             return;
         }
         if (m_cachedStackedData.empty()) {
@@ -1136,7 +1176,7 @@ int main(int argc, char* argv[]) {
 
     QApplication app(argc, argv);
     app.setApplicationName("StarProcessor");
-    app.setApplicationVersion("0.4.0");
+    app.setApplicationVersion(STARPROCESSOR_VERSION);
     app.setOrganizationName("StarProcessor");
     app.setWindowIcon(UiAssets::appIcon());
 
@@ -1162,6 +1202,20 @@ int main(int argc, char* argv[]) {
 
     MainWindow window;
     window.show();
+
+    for (const QString& argument : app.arguments()) {
+        if (argument == "--scene=single") {
+            window.selectStartupScene(ProcessingScene::SingleFrame);
+        } else if (argument == "--scene=nightscape") {
+            window.selectStartupScene(ProcessingScene::Nightscape);
+        } else if (argument == "--scene=deep-sky") {
+            window.selectStartupScene(ProcessingScene::DeepSky);
+        } else if (argument == "--scene=sky-ground") {
+            window.selectStartupScene(ProcessingScene::SkyGround);
+        } else if (argument == "--scene=timelapse") {
+            window.selectStartupScene(ProcessingScene::Timelapse);
+        }
+    }
 
     const QSet<QString> rawExtensions = {
         "nef", "cr2", "arw", "dng", "raw", "orf", "raf", "pef", "cr3"

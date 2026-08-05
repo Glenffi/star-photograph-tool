@@ -13,6 +13,7 @@
 #include "core/StackingEngine.h"
 #include "core/StarDetector.h"
 #include "core/StarReducer.h"
+#include "core/TimelapseEngine.h"
 
 #include <QDateTime>
 #include <QDebug>
@@ -208,6 +209,22 @@ public:
         }
         m_files.push_back(path);
         return true;
+    }
+
+    bool readFrame(int frameIndex, size_t valueCount,
+                   std::vector<uint16_t>& output) const {
+        if (frameIndex < 0 || frameIndex >= m_files.size() || valueCount == 0 ||
+            valueCount > static_cast<size_t>(std::numeric_limits<qint64>::max()) /
+                             sizeof(uint16_t)) {
+            return false;
+        }
+        const qint64 bytes = static_cast<qint64>(valueCount * sizeof(uint16_t));
+        QFile file(m_files[frameIndex]);
+        output.resize(valueCount);
+        if (!file.open(QIODevice::ReadOnly)) return false;
+        disableFileCache(file);
+        return file.size() == bytes &&
+            file.read(reinterpret_cast<char*>(output.data()), bytes) == bytes;
     }
 
     bool readRows(int frameIndex, int width, int startRow, int rowCount,
@@ -470,6 +487,11 @@ void ProcessingWorker::run() {
 
     if (m_files.isEmpty()) {
         m_errorString = "没有可处理的图像";
+        return;
+    }
+
+    if (m_params.timelapseMode) {
+        runTimelapse();
         return;
     }
 
@@ -984,6 +1006,449 @@ void ProcessingWorker::run() {
     }
 
     finishResult(resultRgb, width, height, mask);
+}
+
+void ProcessingWorker::runTimelapse() {
+    if (m_files.size() < 3) {
+        m_errorString = "延时序列降噪至少需要 3 张 RAW";
+        return;
+    }
+    const int windowSize = m_params.timelapseWindowSize == 3 ? 3 : 5;
+    const int temporalStrength = std::clamp(m_params.timelapseStrength, 0, 100);
+    bool protectGround = m_params.timelapseProtectGround;
+
+    emit stageMessage("预分析延时序列...");
+    RawImageLoader loader;
+    std::vector<RawImageLoader::Metadata> metadata;
+    metadata.reserve(static_cast<size_t>(m_files.size()));
+    for (int index = 0; index < m_files.size(); ++index) {
+        if (stopIfCancelled()) return;
+        RawImageLoader::Metadata item;
+        if (!loader.loadMetadata(m_files[index].toStdString(), item)) {
+            m_errorString = QString("无法读取元数据: %1")
+                                .arg(QFileInfo(m_files[index]).fileName());
+            return;
+        }
+        if (!metadata.empty() &&
+            (item.width != metadata.front().width ||
+             item.height != metadata.front().height)) {
+            m_errorString = QString("延时序列尺寸不一致: %1")
+                                .arg(QFileInfo(m_files[index]).fileName());
+            return;
+        }
+        metadata.push_back(std::move(item));
+    }
+
+    const int metadataWidth = metadata.front().width;
+    const int metadataHeight = metadata.front().height;
+    if (metadataWidth <= 0 || metadataHeight <= 0 ||
+        static_cast<size_t>(metadataWidth) >
+            std::numeric_limits<size_t>::max() /
+                static_cast<size_t>(metadataHeight) / 3) {
+        m_errorString = "延时序列图像尺寸无效";
+        return;
+    }
+    const uint64_t estimatedBytes =
+        ProcessingMemoryEstimator::estimateTimelapsePeakBytes(
+            metadataWidth, metadataHeight, windowSize, protectGround);
+    const ProcessingMemoryEstimator::SystemMemoryInfo memoryInfo =
+        ProcessingMemoryEstimator::systemMemoryInfo();
+    const uint64_t budgetBytes =
+        ProcessingMemoryEstimator::calculateEffectiveBudgetBytes(
+            memoryInfo.safeBudgetBytes, m_params.memoryBudgetBytes);
+    if (estimatedBytes == 0 || estimatedBytes > budgetBytes) {
+        m_errorString = QString("延时 %1 帧窗口预计需要约 %2 内存，当前安全预算为 %3。"
+                                "请改用 3 帧窗口或关闭固定地景保护。")
+                            .arg(windowSize)
+                            .arg(formatMemoryBytes(estimatedBytes))
+                            .arg(formatMemoryBytes(budgetBytes));
+        return;
+    }
+
+    const uint64_t scratchBytes =
+        ProcessingMemoryEstimator::estimateScratchDiskBytes(
+            metadataWidth, metadataHeight, m_files.size(), false);
+    const QStorageInfo temporaryStorage(QDir::tempPath());
+    const uint64_t scratchHeadroom = scratchBytes / 10 +
+        (scratchBytes % 10 == 0 ? 0 : 1);
+    if (scratchBytes == 0 || !temporaryStorage.isValid() ||
+        temporaryStorage.bytesAvailable() <= 0 ||
+        scratchBytes > std::numeric_limits<uint64_t>::max() - scratchHeadroom ||
+        static_cast<uint64_t>(temporaryStorage.bytesAvailable()) <
+            scratchBytes + scratchHeadroom) {
+        m_errorString = QString("临时磁盘空间不足：延时 RAW 缓存约需 %1。")
+                            .arg(formatMemoryBytes(scratchBytes));
+        return;
+    }
+
+    DiskFrameStore decodedCache("starprocessor-timelapse");
+    if (!decodedCache.isValid()) {
+        m_errorString = "无法创建延时处理临时目录";
+        return;
+    }
+
+    emit stageMessage("预解码 RAW 并检测星点...");
+    StarDetector detector;
+    DetectionOptions detectionOptions;
+    detectionOptions.spatiallyBalanced = true;
+    detectionOptions.maxCandidates = 60;
+    detectionOptions.maxStars = 30;
+    detectionOptions.gridCols = 6;
+    detectionOptions.gridRows = 4;
+    std::vector<std::vector<StarPoint>> detectedStars(
+        static_cast<size_t>(m_files.size()));
+    int width = 0;
+    int height = 0;
+    size_t rgbValueCount = 0;
+    for (int index = 0; index < m_files.size(); ++index) {
+        if (stopIfCancelled()) return;
+        RawImageLoader::ImageData image;
+        if (!loader.loadRaw(m_files[index].toStdString(), image)) {
+            m_errorString = QString("无法解码 RAW: %1")
+                                .arg(QFileInfo(m_files[index]).fileName());
+            return;
+        }
+        if (index == 0) {
+            width = image.width;
+            height = image.height;
+            if (width <= 0 || height <= 0 ||
+                static_cast<size_t>(width) >
+                    std::numeric_limits<size_t>::max() /
+                        static_cast<size_t>(height) / 3) {
+                m_errorString = "延时 RAW 实际解码尺寸无效";
+                return;
+            }
+            rgbValueCount = static_cast<size_t>(width) * height * 3;
+        } else if (image.width != width || image.height != height) {
+            m_errorString = QString("RAW 实际解码尺寸不一致: %1")
+                                .arg(QFileInfo(m_files[index]).fileName());
+            return;
+        }
+
+        std::vector<uint16_t> luminance;
+        if (ImageBufferUtils::extractLuminance(
+                image.data, width, height, luminance)) {
+            detector.detect(luminance, width, height,
+                            detectedStars[static_cast<size_t>(index)],
+                            detectionOptions);
+        }
+        if (!decodedCache.append(image.data)) {
+            m_errorString = "延时 RAW 临时缓存写入失败";
+            return;
+        }
+        emit progress(5 + static_cast<int>(
+            (index + 1) * 20.0 / m_files.size()));
+    }
+    m_width = width;
+    m_height = height;
+
+    struct NeighborTransform {
+        int sourceIndex = -1;
+        AlignmentTransform transform;
+    };
+    std::vector<std::vector<NeighborTransform>> transforms(
+        static_cast<size_t>(m_files.size()));
+    ImageAligner aligner;
+    int alignedPairCount = 0;
+    const int radius = windowSize / 2;
+    emit stageMessage("预分析邻近帧对齐...");
+    for (int targetIndex = 0; targetIndex < m_files.size(); ++targetIndex) {
+        const int start = std::max(0, targetIndex - radius);
+        const int end = std::min(
+            static_cast<int>(m_files.size()) - 1, targetIndex + radius);
+        for (int sourceIndex = start; sourceIndex <= end; ++sourceIndex) {
+            if (sourceIndex == targetIndex) continue;
+            if (detectedStars[static_cast<size_t>(targetIndex)].size() < 3 ||
+                detectedStars[static_cast<size_t>(sourceIndex)].size() < 3) {
+                continue;
+            }
+            AlignmentTransform transform;
+            AlignmentQuality quality;
+            AlignmentOptions options;
+            options.imageWidth = width;
+            options.imageHeight = height;
+            if (aligner.align(
+                    detectedStars[static_cast<size_t>(targetIndex)],
+                    detectedStars[static_cast<size_t>(sourceIndex)],
+                    transform, &quality, options)) {
+                transforms[static_cast<size_t>(targetIndex)].push_back(
+                    {sourceIndex, transform});
+                ++alignedPairCount;
+                if (transform.model == AlignmentModel::Homography) {
+                    ++m_homographyFrameCount;
+                } else {
+                    ++m_affineFrameCount;
+                }
+                m_alignmentRmsSum += quality.rmsError;
+                m_worstAlignmentP95 = std::max(
+                    m_worstAlignmentP95, quality.p95Error);
+                if (alignedPairCount == 1) {
+                    m_minimumGridCoverage = quality.gridCoverage;
+                } else {
+                    m_minimumGridCoverage = std::min(
+                        m_minimumGridCoverage, quality.gridCoverage);
+                }
+            }
+        }
+    }
+    if (alignedPairCount == 0 && !protectGround) {
+        m_errorString = "延时序列的邻近帧均无法完成星点对齐";
+        return;
+    }
+
+    std::vector<uint8_t> skyMask;
+    if (protectGround) {
+        const int maskFrameIndex = m_files.size() / 2;
+        QImage preview;
+        bool usedEmbeddedPreview =
+            loadMaskPreview(m_files[maskFrameIndex], preview);
+        bool maskReady = usedEmbeddedPreview &&
+            SkyGroundMask::autoDetectPreview(
+                preview, width, height, skyMask, m_params.featherRadius);
+        if (!maskReady) {
+            usedEmbeddedPreview = false;
+            std::vector<uint16_t> maskFrame;
+            std::vector<uint16_t> maskLuminance;
+            maskReady = decodedCache.readFrame(
+                            maskFrameIndex, rgbValueCount, maskFrame) &&
+                ImageBufferUtils::extractLuminance(
+                    maskFrame, width, height, maskLuminance) &&
+                SkyGroundMask::autoDetect(
+                    maskLuminance, width, height, skyMask,
+                    m_params.featherRadius);
+        }
+        if (!maskReady) {
+            qWarning() << "延时地平线检测失败，本次按纯天空序列处理";
+            protectGround = false;
+            skyMask.clear();
+        } else {
+            const uint64_t skySum = std::accumulate(
+                skyMask.begin(), skyMask.end(), uint64_t{0});
+            m_skyGroundSkyFraction = skyMask.empty() ? 0.0
+                : static_cast<double>(skySum) /
+                    (255.0 * static_cast<double>(skyMask.size()));
+            m_skyGroundMaskSource = usedEmbeddedPreview
+                ? "timelapse-auto-preview"
+                : "timelapse-auto-linear";
+            if (!m_params.skyGroundMaskOutputPath.isEmpty()) {
+                const QImage borrowedMask(
+                    skyMask.data(), width, height, width,
+                    QImage::Format_Grayscale8);
+                if (!borrowedMask.copy().save(
+                        m_params.skyGroundMaskOutputPath)) {
+                    m_errorString = "无法保存延时天地蒙版诊断图";
+                    return;
+                }
+            }
+        }
+    }
+
+    QString rootOutput = m_params.outputPath;
+    if (rootOutput.isEmpty()) {
+        rootOutput = QDir::homePath() + "/StarProcessor/Output";
+    }
+    const QString outputDirectory = QDir(rootOutput).filePath(
+        QDateTime::currentDateTime().toString("yyyyMMdd_hhmmss_zzz") +
+        "_timelapse");
+    if (!QDir().mkpath(outputDirectory)) {
+        m_errorString = "无法创建延时序列输出目录";
+        return;
+    }
+    m_outputFile = outputDirectory;
+    m_selectedReferenceIndex = m_files.size() / 2;
+    m_selectedReferenceFrame = m_files[m_selectedReferenceIndex];
+
+    TimelapseEngine::Options temporalOptions;
+    temporalOptions.windowSize = static_cast<size_t>(windowSize);
+    temporalOptions.temporalSigma = windowSize == 3 ? 1.0 : 1.5;
+    temporalOptions.madThreshold = 3.0;
+    temporalOptions.minimumDeviation = 16.0;
+    temporalOptions.strength = temporalStrength;
+
+    emit stageMessage("逐帧滑动窗口降噪...");
+    int writtenFrames = 0;
+    for (int targetIndex = 0; targetIndex < m_files.size(); ++targetIndex) {
+        if (stopIfCancelled()) return;
+        const int start = std::max(0, targetIndex - radius);
+        const int end = std::min(
+            static_cast<int>(m_files.size()) - 1, targetIndex + radius);
+
+        std::vector<uint16_t> targetRgb;
+        if (!decodedCache.readFrame(
+                targetIndex, rgbValueCount, targetRgb)) {
+            m_errorString = "延时目标帧缓存读取失败";
+            return;
+        }
+        PhotometricReferenceProfile targetProfile;
+        const bool targetProfileReady =
+            m_params.photometricNormalizationEnabled &&
+            PhotometricNormalizer::buildReferenceProfile(
+                targetRgb, width, height, targetProfile);
+        auto normalizeToTarget = [&](std::vector<uint16_t>& rgb) {
+            if (!m_params.photometricNormalizationEnabled) return;
+            if (!targetProfileReady) {
+                ++m_photometricSkippedFrameCount;
+                return;
+            }
+            PhotometricModel model;
+            if (!PhotometricNormalizer::estimate(
+                    targetProfile, rgb, model)) {
+                ++m_photometricSkippedFrameCount;
+                return;
+            }
+            PhotometricNormalizer::applyInPlace(
+                rgb, width, height, model);
+            ++m_photometricNormalizedFrameCount;
+            m_photometricGainSum += model.gain;
+            if (m_photometricNormalizedFrameCount == 1) {
+                m_photometricMinGain = model.gain;
+                m_photometricMaxGain = model.gain;
+            } else {
+                m_photometricMinGain = std::min(
+                    m_photometricMinGain, model.gain);
+                m_photometricMaxGain = std::max(
+                    m_photometricMaxGain, model.gain);
+            }
+            for (double offset : model.offsets) {
+                m_photometricMaxAbsOffset = std::max(
+                    m_photometricMaxAbsOffset, std::abs(offset));
+            }
+        };
+
+        std::vector<std::vector<uint16_t>> skyFrames;
+        std::vector<double> skyDistances;
+        std::vector<std::vector<uint16_t>> groundFrames;
+        std::vector<double> groundDistances;
+        skyFrames.reserve(static_cast<size_t>(windowSize));
+        skyDistances.reserve(static_cast<size_t>(windowSize));
+        if (protectGround) {
+            groundFrames.reserve(static_cast<size_t>(windowSize));
+            groundDistances.reserve(static_cast<size_t>(windowSize));
+        }
+        size_t skyTargetIndex = 0;
+        size_t groundTargetIndex = 0;
+
+        for (int sourceIndex = start; sourceIndex <= end; ++sourceIndex) {
+            std::vector<uint16_t> sourceRgb;
+            if (!decodedCache.readFrame(
+                    sourceIndex, rgbValueCount, sourceRgb)) {
+                m_errorString = "延时邻近帧缓存读取失败";
+                return;
+            }
+            const double distance = sourceIndex - targetIndex;
+
+            if (sourceIndex == targetIndex) {
+                skyTargetIndex = skyFrames.size();
+                skyFrames.push_back(sourceRgb);
+                skyDistances.push_back(0.0);
+                if (protectGround) {
+                    groundTargetIndex = groundFrames.size();
+                    groundFrames.push_back(std::move(sourceRgb));
+                    groundDistances.push_back(0.0);
+                }
+                continue;
+            }
+
+            if (protectGround) {
+                // Sky and ground need different coordinate systems. Keep an
+                // independent source copy so photometric matching for the
+                // fixed ground cannot be applied a second time to aligned sky.
+                std::vector<uint16_t> groundRgb = sourceRgb;
+                normalizeToTarget(groundRgb);
+                groundFrames.push_back(std::move(groundRgb));
+                groundDistances.push_back(distance);
+            }
+
+            const auto& targetTransforms =
+                transforms[static_cast<size_t>(targetIndex)];
+            const auto transformIt = std::find_if(
+                targetTransforms.begin(), targetTransforms.end(),
+                [sourceIndex](const NeighborTransform& item) {
+                    return item.sourceIndex == sourceIndex;
+                });
+            if (transformIt == targetTransforms.end()) continue;
+
+            std::vector<uint16_t> aligned;
+            if (!aligner.applyTransformRgb(
+                    sourceRgb, width, height,
+                    transformIt->transform, aligned)) {
+                continue;
+            }
+            normalizeToTarget(aligned);
+            skyFrames.push_back(std::move(aligned));
+            skyDistances.push_back(distance);
+        }
+
+        auto makeViews = [](const std::vector<std::vector<uint16_t>>& frames,
+                            const std::vector<double>& distances) {
+            std::vector<TimelapseEngine::FrameView> views;
+            views.reserve(frames.size());
+            for (size_t index = 0; index < frames.size(); ++index) {
+                views.push_back({frames[index].data(), frames[index].size(),
+                                 distances[index]});
+            }
+            return views;
+        };
+        const auto skyViews = makeViews(skyFrames, skyDistances);
+        TimelapseEngine::Result skyResult = TimelapseEngine::denoise(
+            skyViews, width, height, skyTargetIndex, temporalOptions);
+        if (!skyResult) {
+            m_errorString = QString("延时天空降噪失败: %1")
+                .arg(TimelapseEngine::errorMessage(skyResult.error));
+            return;
+        }
+        std::vector<uint16_t> resultRgb = std::move(skyResult.rgb);
+
+        if (protectGround) {
+            const auto groundViews = makeViews(groundFrames, groundDistances);
+            TimelapseEngine::Result groundResult = TimelapseEngine::denoise(
+                groundViews, width, height, groundTargetIndex, temporalOptions);
+            if (!groundResult || !ImageBufferUtils::blendSkyGroundInPlace(
+                    resultRgb, groundResult.rgb, skyMask, width, height)) {
+                m_errorString = "延时天地分离融合失败";
+                return;
+            }
+        }
+
+        if (targetIndex == m_selectedReferenceIndex) {
+            const PreviewImage8 previewBefore =
+                PreviewToneMapper::mapRgb16WithRange(
+                    targetRgb, width, height, 0, 65535, 2400);
+            if (!previewBefore.rgb.empty()) {
+                const QImage borrowed(
+                    previewBefore.rgb.data(), previewBefore.width,
+                    previewBefore.height, previewBefore.width * 3,
+                    QImage::Format_RGB888);
+                m_beforePreview = borrowed.copy();
+                m_beforePreviewBlackPoint = previewBefore.blackPoint;
+                m_beforePreviewWhitePoint = previewBefore.whitePoint;
+            }
+            m_stackedData = resultRgb;
+        }
+
+        const bool png = m_params.outputFormat == "png8";
+        const QString extension = png ? ".png" : ".tiff";
+        const QString baseName = QFileInfo(m_files[targetIndex]).completeBaseName();
+        const QString outputName = QString("%1_%2_denoised%3")
+            .arg(targetIndex + 1, 4, 10, QLatin1Char('0'))
+            .arg(baseName, extension);
+        const QString outputPath = QDir(outputDirectory).filePath(outputName);
+        emit stageMessage(QString("输出第 %1/%2 张...")
+                              .arg(targetIndex + 1).arg(m_files.size()));
+        if (!ImageExporter::exportRgb16(
+                resultRgb, width, height, outputPath.toStdString(),
+                png ? ImageExporter::Png8 : ImageExporter::Tiff16)) {
+            m_errorString = QString("延时序列导出失败: %1").arg(outputName);
+            return;
+        }
+        ++writtenFrames;
+        emit progress(30 + static_cast<int>(
+            writtenFrames * 70.0 / m_files.size()));
+    }
+
+    m_frameCount = writtenFrames;
+    emit progress(100);
+    emit stageMessage(QString("延时序列处理完成：已输出 %1 张").arg(writtenFrames));
 }
 
 void ProcessingWorker::runSingleFrame() {

@@ -123,6 +123,27 @@ uint64_t ProcessingMemoryEstimator::estimatePeakBytes(
     return std::max({alignmentPeak, stackingPeak, postProcessPeak});
 }
 
+uint64_t ProcessingMemoryEstimator::estimateTimelapsePeakBytes(
+    int width, int height, int windowSize, bool protectGround) {
+    if (width <= 0 || height <= 0 || windowSize < 3 ||
+        windowSize % 2 == 0) {
+        return 0;
+    }
+    uint64_t pixels = 0;
+    uint64_t frameBytes = 0;
+    if (!checkedMultiply(static_cast<uint64_t>(width),
+                         static_cast<uint64_t>(height), pixels) ||
+        !checkedMultiply(pixels, 3ULL * sizeof(uint16_t), frameBytes)) {
+        return 0;
+    }
+    const uint64_t residentFrames = protectGround
+        ? static_cast<uint64_t>(windowSize) * 2ULL + 4ULL
+        : static_cast<uint64_t>(windowSize) + 4ULL;
+    uint64_t peakBytes = 0;
+    return checkedMultiply(frameBytes, residentFrames, peakBytes)
+        ? peakBytes : 0;
+}
+
 uint64_t ProcessingMemoryEstimator::estimateScratchDiskBytes(
     int width, int height, int frameCount, bool skyGroundSeparation) {
     if (width <= 0 || height <= 0 || frameCount <= 0) return 0;

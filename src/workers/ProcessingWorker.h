@@ -21,6 +21,10 @@ public:
         // Single-frame refinement bypasses quality selection, alignment and
         // stacking while retaining the same finishing and export stages.
         bool singleFrameMode = false;
+        bool timelapseMode = false;
+        int timelapseWindowSize = 5;
+        int timelapseStrength = 80;
+        bool timelapseProtectGround = true;
         QString stackMethod = "average";
         double kappaValue = 2.5;
         bool autoRejectLowQualityFrames = true;
@@ -108,6 +112,7 @@ protected:
 private:
     bool stopIfCancelled();
     void runSingleFrame();
+    void runTimelapse();
     bool finishResult(std::vector<uint16_t>& resultRgb, int width, int height,
                       std::vector<uint8_t>& mask);
 
