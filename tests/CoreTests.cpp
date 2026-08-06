@@ -560,6 +560,68 @@ void testRgbAutoOptimize() {
               stretched[3 * 3 + 1] > stretched[3 * 3 + 2],
           "Linked RGB stretch should preserve strong star color ordering");
 
+    constexpr int modifiedWidth = 32;
+    constexpr int modifiedHeight = 32;
+    std::vector<uint16_t> modified(
+        modifiedWidth * modifiedHeight * 3);
+    for (int y = 0; y < modifiedHeight; ++y) {
+        for (int x = 0; x < modifiedWidth; ++x) {
+            const size_t base =
+                (static_cast<size_t>(y) * modifiedWidth + x) * 3;
+            modified[base] = 6000;
+            modified[base + 1] = 2200;
+            modified[base + 2] = 1200;
+            if (std::hypot(x - 16.0, y - 12.0) <= 4.0) {
+                modified[base] += 5000; // Localized H-alpha emission.
+            }
+        }
+    }
+    std::vector<uint16_t> restored;
+    ModifiedCameraColorStats colorStats;
+    check(AutoOptimizeEngine::restoreModifiedCameraColorRgb(
+              modified, modifiedWidth, modifiedHeight,
+              restored, &colorStats),
+          "Modified-camera color restoration should process linear RGB");
+    const size_t background =
+        (static_cast<size_t>(2) * modifiedWidth + 2) * 3;
+    const int restoredMaximum = std::max({
+        static_cast<int>(restored[background]),
+        static_cast<int>(restored[background + 1]),
+        static_cast<int>(restored[background + 2])});
+    const int restoredMinimum = std::min({
+        static_cast<int>(restored[background]),
+        static_cast<int>(restored[background + 1]),
+        static_cast<int>(restored[background + 2])});
+    check(restoredMaximum - restoredMinimum <= 2 &&
+              colorStats.gains[0] < 0.6 &&
+              colorStats.gains[2] > 2.0,
+          "BCF restoration should neutralize a strong red response");
+    const size_t nebula =
+        (static_cast<size_t>(12) * modifiedWidth + 16) * 3;
+    check(static_cast<int>(restored[nebula]) - restored[nebula + 1] >= 2000,
+          "BCF restoration should retain localized H-alpha contrast");
+
+    std::vector<uint16_t> neutralInput(
+        modifiedWidth * modifiedHeight * 3, 4000);
+    check(AutoOptimizeEngine::restoreModifiedCameraColorRgb(
+              neutralInput, modifiedWidth, modifiedHeight,
+              restored, &colorStats) && restored == neutralInput &&
+              std::all_of(colorStats.gains.begin(), colorStats.gains.end(),
+                          [](double gain) {
+                              return std::abs(gain - 1.0) < 1e-9;
+                          }),
+          "Modified-camera restoration should leave neutral input unchanged");
+
+    const std::vector<uint8_t> invalidSkyMask(
+        modifiedWidth * modifiedHeight - 1, 255);
+    check(!AutoOptimizeEngine::restoreModifiedCameraColorRgb(
+              neutralInput, modifiedWidth, modifiedHeight,
+              restored, &colorStats, &invalidSkyMask) &&
+              !AutoOptimizeEngine::restoreModifiedCameraColorRgb(
+                  neutralInput, modifiedWidth + 1, modifiedHeight,
+                  restored, &colorStats),
+          "Modified-camera restoration should reject invalid buffer shapes");
+
     std::vector<uint16_t> gray(width * height * 3);
     for (int i = 0; i < width * height; ++i) {
         const uint16_t value = static_cast<uint16_t>(500 + i * 500);

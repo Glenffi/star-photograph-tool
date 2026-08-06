@@ -32,6 +32,7 @@ public:
     int dewarpStrength() const;
     bool noiseReductionEnabled() const;
     int noiseReductionStrength() const;
+    bool modifiedCameraColorEnabled() const;
     bool stretchEnabled() const;
     bool starReduceEnabled() const;
     int starReduceStrength() const;
@@ -146,6 +147,7 @@ private:
     QCheckBox* m_noiseReductionCheck = nullptr;
     QSlider* m_noiseReductionSlider = nullptr;
     QLabel* m_noiseReductionLabel = nullptr;
+    QCheckBox* m_modifiedCameraColorCheck = nullptr;
     QCheckBox* m_stretchCheck = nullptr;
 
     // 缩星组

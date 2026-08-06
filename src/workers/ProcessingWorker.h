@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/AutoOptimizeEngine.h"
 #include "core/FrameQualityEvaluator.h"
 #include "core/RawCalibrationEngine.h"
 #include "core/SkyGroundMask.h"
@@ -37,6 +38,7 @@ public:
         bool photometricNormalizationEnabled = true;
         bool noiseReductionEnabled = false;
         int noiseReductionStrength = 30;
+        bool modifiedCameraColorEnabled = false;
         bool dewarpEnabled = false;
         int dewarpStrength = 30;
         bool stretchEnabled = false;
@@ -102,6 +104,9 @@ public:
     bool wasCancelled() const { return m_wasCancelled; }
     const StarReductionStats& starReductionStats() const {
         return m_starReductionStats;
+    }
+    const ModifiedCameraColorStats& modifiedCameraColorStats() const {
+        return m_modifiedCameraColorStats;
     }
     double skyGroundSkyFraction() const { return m_skyGroundSkyFraction; }
     QString skyGroundMaskSource() const { return m_skyGroundMaskSource; }
@@ -192,6 +197,7 @@ private:
     std::atomic<bool> m_cancelRequested{false};
     bool m_wasCancelled = false;
     StarReductionStats m_starReductionStats;
+    ModifiedCameraColorStats m_modifiedCameraColorStats;
     double m_skyGroundSkyFraction = 0.0;
     QString m_skyGroundMaskSource;
     uint64_t m_timelapseMotionProtectedPixelEvaluations = 0;

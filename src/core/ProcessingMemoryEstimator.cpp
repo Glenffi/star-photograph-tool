@@ -99,8 +99,8 @@ uint64_t ProcessingMemoryEstimator::estimatePeakBytes(
     uint64_t postProcessPeak = 0;
     if (!checkedMultiply(frameBytes, 2, postProcessPeak)) return 0;
     const bool createsComparisonPreview = options.skyGroundSeparation ||
-        options.noiseReduction || options.dehaze || options.stretch ||
-        options.starReduction;
+        options.noiseReduction || options.modifiedCameraColor ||
+        options.dehaze || options.stretch || options.starReduction;
     if (createsComparisonPreview) {
         if (frameBytes > std::numeric_limits<uint64_t>::max() -
                              kComparisonPreviewWorkingBytes) {
@@ -121,6 +121,7 @@ uint64_t ProcessingMemoryEstimator::estimatePeakBytes(
     // Guided-filter dehaze owns many full-resolution float planes. The
     // equivalent counts include caller RGB/channel buffers and library margin.
     if (!includeFrameEquivalents(options.noiseReduction, 6ULL) ||
+        !includeFrameEquivalents(options.modifiedCameraColor, 2ULL) ||
         !includeFrameEquivalents(options.dehaze, 15ULL) ||
         !includeFrameEquivalents(options.stretch, 4ULL) ||
         // Starless RGB, signed RGB star layer and its eroded working buffer

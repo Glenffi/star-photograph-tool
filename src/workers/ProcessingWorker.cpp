@@ -693,6 +693,7 @@ void ProcessingWorker::run() {
     m_photometricOutputAnchorGain = 1.0;
     m_photometricOutputAnchorMaxAbsOffset = 0.0;
     m_starReductionStats = {};
+    m_modifiedCameraColorStats = {};
     m_skyGroundSkyFraction = 0.0;
     m_skyGroundMaskSource.clear();
     m_timelapseMotionProtectedPixelEvaluations = 0;
@@ -829,6 +830,8 @@ void ProcessingWorker::run() {
     estimateOptions.frameCount = activeInputFrameCount;
     estimateOptions.skyGroundSeparation = m_params.skyGroundSepEnabled;
     estimateOptions.noiseReduction = m_params.noiseReductionEnabled;
+    estimateOptions.modifiedCameraColor =
+        m_params.modifiedCameraColorEnabled;
     estimateOptions.dehaze = m_params.dewarpEnabled;
     estimateOptions.stretch = m_params.stretchEnabled;
     estimateOptions.starReduction = m_params.starReduceEnabled;
@@ -1818,6 +1821,7 @@ void ProcessingWorker::runSingleFrame() {
     ProcessingMemoryEstimator::EstimateOptions options;
     options.frameCount = 1;
     options.noiseReduction = m_params.noiseReductionEnabled;
+    options.modifiedCameraColor = m_params.modifiedCameraColorEnabled;
     options.dehaze = m_params.dewarpEnabled;
     options.stretch = m_params.stretchEnabled;
     options.starReduction = m_params.starReduceEnabled;
@@ -1870,6 +1874,7 @@ bool ProcessingWorker::finishResult(std::vector<uint16_t>& resultRgb,
                                     std::vector<uint8_t>& mask) {
     const bool hasFinishingStage =
         (m_params.noiseReductionEnabled && m_params.noiseReductionStrength > 0)
+        || m_params.modifiedCameraColorEnabled
         || m_params.dewarpEnabled
         || m_params.stretchEnabled
         || (m_params.skyGroundSepEnabled && m_params.groundDetailStrength > 0)
@@ -1889,6 +1894,26 @@ bool ProcessingWorker::finishResult(std::vector<uint16_t>& resultRgb,
             m_beforePreviewBlackPoint = preview.blackPoint;
             m_beforePreviewWhitePoint = preview.whitePoint;
         }
+    }
+
+    if (m_params.modifiedCameraColorEnabled) {
+        emit stageMessage("改机色彩还原...");
+        std::vector<uint16_t> restored;
+        const std::vector<uint8_t>* samplingMask =
+            m_params.skyGroundSepEnabled ? &mask : nullptr;
+        if (!AutoOptimizeEngine::restoreModifiedCameraColorRgb(
+                resultRgb, width, height, restored,
+                &m_modifiedCameraColorStats, samplingMask)) {
+            m_errorString = "无法从当前图像估计改机色彩校正";
+            return false;
+        }
+        resultRgb = std::move(restored);
+        emit stageMessage(QString(
+            "改机色彩已还原：RGB 增益 %1 / %2 / %3")
+            .arg(m_modifiedCameraColorStats.gains[0], 0, 'f', 3)
+            .arg(m_modifiedCameraColorStats.gains[1], 0, 'f', 3)
+            .arg(m_modifiedCameraColorStats.gains[2], 0, 'f', 3));
+        emit progress(82);
     }
 
     if (m_params.noiseReductionEnabled &&

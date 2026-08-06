@@ -1,7 +1,17 @@
 #pragma once
 
-#include <vector>
+#include <array>
+#include <cstddef>
 #include <cstdint>
+#include <vector>
+
+struct ModifiedCameraColorStats {
+    std::array<uint16_t, 3> neutralSample = {};
+    std::array<double, 3> gains = {1.0, 1.0, 1.0};
+    size_t sampleCount = 0;
+    size_t clippedChannelValues = 0;
+    bool applied = false;
+};
 
 /**
  * @brief 自动优化引擎
@@ -24,6 +34,16 @@ public:
     static bool neutralizeBackgroundRgb(const std::vector<uint16_t>& src,
                                         int w, int h,
                                         std::vector<uint16_t>& dst);
+
+    // Restores a conventional color balance for BCF/astronomy-modified
+    // cameras. A robust neutral sky sample is measured on linear RGB before
+    // stretch; bounded per-channel gains approximate a Camera Raw gray-point
+    // correction while leaving local H-alpha contrast present.
+    static bool restoreModifiedCameraColorRgb(
+        const std::vector<uint16_t>& src, int w, int h,
+        std::vector<uint16_t>& dst,
+        ModifiedCameraColorStats* stats = nullptr,
+        const std::vector<uint8_t>* skyMask = nullptr);
 
     // Restores fine texture and medium-scale clarity only where skyMask
     // approaches zero. The clarity layer favors distant ground near the

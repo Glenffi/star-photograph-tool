@@ -14,6 +14,7 @@ struct Preset {
     int dewarpStrength = 30;
     bool noiseReductionEnabled = false;
     int noiseReductionStrength = 30;
+    bool modifiedCameraColorEnabled = false;
     bool stretchEnabled = false;
     bool starReduceEnabled = false;
     int starReduceStrength = 70;

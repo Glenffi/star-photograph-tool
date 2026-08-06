@@ -15,6 +15,7 @@ public:
         int chunkRows = 32;
         bool skyGroundSeparation = false;
         bool noiseReduction = false;
+        bool modifiedCameraColor = false;
         bool dehaze = false;
         bool stretch = false;
         bool starReduction = false;

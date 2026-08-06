@@ -131,6 +131,9 @@ int main(int argc, char* argv[]) {
         "dehaze-strength",
         "Enable RGB-linked dehaze at strength 1-100; 0 disables it.",
         "value", "0");
+    const QCommandLineOption modifiedCameraColorOption(
+        "restore-modified-camera-color",
+        "Restore a neutral color response for BCF/astronomy-modified cameras.");
     const QCommandLineOption stretchOption(
         "stretch",
         "Apply background neutralization and linked RGB Arcsinh stretch.");
@@ -152,7 +155,8 @@ int main(int argc, char* argv[]) {
                        skyGroundOption, skyGroundMaskOption,
                        skyGroundFeatherOption, groundMethodOption,
                        groundDetailOption,
-                       denoiseOption, dehazeOption, stretchOption,
+                       denoiseOption, dehazeOption,
+                       modifiedCameraColorOption, stretchOption,
                        starReduceOption});
     parser.process(application);
 
@@ -187,6 +191,8 @@ int main(int argc, char* argv[]) {
     const int starReduceStrength =
         parser.value(starReduceOption).toInt(&starReduceOk);
     const bool stretchEnabled = parser.isSet(stretchOption);
+    const bool modifiedCameraColorEnabled =
+        parser.isSet(modifiedCameraColorOption);
     const bool singleFrameMode = parser.isSet(singleOption);
     const bool timelapseMode = parser.isSet(timelapseOption);
     const QString darkDirectory = parser.value(darkDirectoryOption);
@@ -234,6 +240,11 @@ int main(int argc, char* argv[]) {
         (singleFrameMode || timelapseMode || skyGroundEnabled)) {
         std::cerr << "Deep-sky calibration cannot be combined with --single, "
                      "--timelapse, or sky/ground separation.\n";
+        return 2;
+    }
+    if (timelapseMode && modifiedCameraColorEnabled) {
+        std::cerr << "Modified-camera color restoration is not yet available "
+                     "for timelapse sequence output.\n";
         return 2;
     }
     if (!limitOk || limit < 0 || !referenceOk || referenceIndex < -1 ||
@@ -310,6 +321,7 @@ int main(int argc, char* argv[]) {
     estimateOptions.skyGroundSeparation =
         skyGroundEnabled && !singleFrameMode && !timelapseMode;
     estimateOptions.noiseReduction = denoiseStrength > 0;
+    estimateOptions.modifiedCameraColor = modifiedCameraColorEnabled;
     estimateOptions.dehaze = dehazeStrength > 0;
     estimateOptions.stretch = stretchEnabled;
     estimateOptions.starReduction = starReduceStrength > 0;
@@ -360,6 +372,7 @@ int main(int argc, char* argv[]) {
         !parser.isSet(noPhotometricNormalizationOption);
     params.noiseReductionEnabled = denoiseStrength > 0;
     params.noiseReductionStrength = denoiseStrength;
+    params.modifiedCameraColorEnabled = modifiedCameraColorEnabled;
     params.dewarpEnabled = dehazeStrength > 0;
     params.dewarpStrength = dehazeStrength;
     params.stretchEnabled = stretchEnabled;
@@ -406,7 +419,7 @@ int main(int argc, char* argv[]) {
     worker.wait();
 
     QJsonObject report;
-    report["schemaVersion"] = 10;
+    report["schemaVersion"] = 11;
     report["toolVersion"] = QCoreApplication::applicationVersion();
     report["generatedAt"] = QDateTime::currentDateTimeUtc().toString(Qt::ISODate);
     report["input"] = input;
@@ -504,6 +517,22 @@ int main(int argc, char* argv[]) {
     report["photometricOutputAnchorMaximumAbsoluteOffset"] =
         worker.photometricOutputAnchorOffset();
     report["denoiseStrength"] = denoiseStrength;
+    report["modifiedCameraColorEnabled"] = modifiedCameraColorEnabled;
+    const ModifiedCameraColorStats& colorStats =
+        worker.modifiedCameraColorStats();
+    report["modifiedCameraColorApplied"] = colorStats.applied;
+    report["modifiedCameraColorSampleCount"] = QString::number(
+        colorStats.sampleCount);
+    QJsonArray neutralSample;
+    QJsonArray colorGains;
+    for (size_t channel = 0; channel < 3; ++channel) {
+        neutralSample.append(colorStats.neutralSample[channel]);
+        colorGains.append(colorStats.gains[channel]);
+    }
+    report["modifiedCameraColorNeutralSample"] = neutralSample;
+    report["modifiedCameraColorGains"] = colorGains;
+    report["modifiedCameraColorClippedChannelValues"] = QString::number(
+        colorStats.clippedChannelValues);
     report["dehazeStrength"] = dehazeStrength;
     report["stretchEnabled"] = stretchEnabled;
     report["starReduceStrength"] = starReduceStrength;

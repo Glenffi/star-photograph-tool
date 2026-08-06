@@ -272,6 +272,100 @@ bool AutoOptimizeEngine::neutralizeBackgroundRgb(
     return true;
 }
 
+bool AutoOptimizeEngine::restoreModifiedCameraColorRgb(
+    const std::vector<uint16_t>& src, int w, int h,
+    std::vector<uint16_t>& dst, ModifiedCameraColorStats* outputStats,
+    const std::vector<uint8_t>* skyMask) {
+    ModifiedCameraColorStats stats;
+    size_t pixelCount = 0;
+    if (!rgbPixelCount(src, w, h, pixelCount) ||
+        (skyMask && skyMask->size() != pixelCount)) {
+        return false;
+    }
+
+    constexpr size_t kMaximumSamples = 262144;
+    const size_t step = std::max<size_t>(
+        1, (pixelCount - 1) / kMaximumSamples + 1);
+    std::vector<size_t> candidateIndices;
+    std::vector<uint16_t> candidateLuminance;
+    candidateIndices.reserve(std::min(pixelCount, kMaximumSamples + 1));
+    candidateLuminance.reserve(candidateIndices.capacity());
+
+    // Without a sky mask, omit the lowest quarter of a conventional
+    // nightscape. Mountains, buildings and vegetation are poor gray-card
+    // substitutes and otherwise dominate a wide-angle frame.
+    const int samplingHeight = skyMask ? h : std::max(1, h * 3 / 4);
+    for (int y = 0; y < samplingHeight; ++y) {
+        for (int x = 0; x < w; ++x) {
+            const size_t pixel = static_cast<size_t>(y) * w + x;
+            if (pixel % step != 0 ||
+                (skyMask && (*skyMask)[pixel] < 160)) {
+                continue;
+            }
+            candidateIndices.push_back(pixel);
+            candidateLuminance.push_back(luminanceAt(src, pixel));
+        }
+    }
+    if (candidateIndices.size() < 64) return false;
+
+    const uint16_t low = percentileValue(candidateLuminance, 12, 100);
+    const uint16_t high = percentileValue(candidateLuminance, 58, 100);
+    std::array<std::vector<uint16_t>, 3> neutralChannels;
+    for (auto& channel : neutralChannels) {
+        channel.reserve(candidateIndices.size() / 2);
+    }
+    for (size_t sample = 0; sample < candidateIndices.size(); ++sample) {
+        const uint16_t luminance = candidateLuminance[sample];
+        if (luminance < low || luminance > high || luminance < 16) continue;
+        const size_t base = candidateIndices[sample] * 3;
+        // Exclude clipped stars and artificial lights even when a dense field
+        // pushes them below the global luminance cutoff.
+        if (std::max({src[base], src[base + 1], src[base + 2]}) >= 64500) {
+            continue;
+        }
+        for (size_t channel = 0; channel < 3; ++channel) {
+            neutralChannels[channel].push_back(src[base + channel]);
+        }
+    }
+    if (neutralChannels[0].size() < 64) return false;
+
+    stats.sampleCount = neutralChannels[0].size();
+    for (size_t channel = 0; channel < 3; ++channel) {
+        stats.neutralSample[channel] =
+            medianValue(std::move(neutralChannels[channel]));
+        if (stats.neutralSample[channel] < 16) return false;
+    }
+
+    const double neutralLuminance =
+        (13933.0 * stats.neutralSample[0] +
+         46871.0 * stats.neutralSample[1] +
+         4732.0 * stats.neutralSample[2]) / 65536.0;
+    if (!std::isfinite(neutralLuminance) || neutralLuminance <= 0.0) {
+        return false;
+    }
+    constexpr double kMinimumGain = 0.35;
+    constexpr double kMaximumGain = 2.80;
+    for (size_t channel = 0; channel < 3; ++channel) {
+        stats.gains[channel] = std::clamp(
+            neutralLuminance / stats.neutralSample[channel],
+            kMinimumGain, kMaximumGain);
+    }
+
+    std::vector<uint16_t> output(src.size());
+    for (size_t pixel = 0; pixel < pixelCount; ++pixel) {
+        const size_t base = pixel * 3;
+        for (size_t channel = 0; channel < 3; ++channel) {
+            const double corrected = src[base + channel] * stats.gains[channel];
+            if (corrected > 65535.0) ++stats.clippedChannelValues;
+            output[base + channel] = clampToUint16(corrected);
+        }
+    }
+    stats.applied = true;
+    dst = std::move(output);
+    if (outputStats) *outputStats = stats;
+    return true;
+}
+
 bool AutoOptimizeEngine::enhanceGroundDetail(
     std::vector<uint16_t>& image, int w, int h,
     const std::vector<uint8_t>& skyMask, int strength) {

@@ -879,6 +879,8 @@ private slots:
             m_paramsPanel->noiseReductionEnabled();
         params.noiseReductionStrength =
             m_paramsPanel->noiseReductionStrength();
+        params.modifiedCameraColorEnabled =
+            m_paramsPanel->modifiedCameraColorEnabled();
         params.dewarpEnabled = m_paramsPanel->dewarpEnabled();
         params.dewarpStrength = m_paramsPanel->dewarpStrength();
         params.stretchEnabled = m_paramsPanel->stretchEnabled();
@@ -966,6 +968,7 @@ private slots:
                     stage = 2;
                 } else if (msg.contains(QString::fromUtf8("优化")) ||
                            msg.contains(QString::fromUtf8("降噪")) ||
+                           msg.contains(QString::fromUtf8("色彩")) ||
                            msg.contains(QString::fromUtf8("缩星")) ||
                            msg.contains(QString::fromUtf8("导出")) ||
                            msg.contains(QString::fromUtf8("完成"))) {
@@ -977,6 +980,7 @@ private slots:
                 stage = 2;
             } else if (msg.contains(QString::fromUtf8("优化")) ||
                        msg.contains(QString::fromUtf8("降噪")) ||
+                       msg.contains(QString::fromUtf8("色彩")) ||
                        msg.contains(QString::fromUtf8("地景细节")) ||
                        msg.contains(QString::fromUtf8("缩星")) ||
                        msg.contains(QString::fromUtf8("导出")) ||

@@ -611,6 +611,18 @@ void ParamsPanel::setupUI() {
     noiseReductionRow->addWidget(m_noiseReductionLabel);
     optimizeLayout->addLayout(noiseReductionRow);
 
+    m_modifiedCameraColorCheck = new QCheckBox(
+        QString::fromUtf8("BCF 改机色彩还原"), m_optimizeGroup);
+    m_modifiedCameraColorCheck->setToolTip(QString::fromUtf8(
+        "适用于 BCF 或天文改机造成的整体红偏\n"
+        "自动采样中性天空并校正通道响应；普通相机请关闭"));
+    m_modifiedCameraColorCheck->setStyleSheet(
+        "QCheckBox { font-size: 12px; color: #D2DDDA; background-color: transparent; }"
+        "QCheckBox::indicator { width: 14px; height: 14px; }");
+    connect(m_modifiedCameraColorCheck, &QCheckBox::toggled,
+            this, &ParamsPanel::onCheckChanged);
+    optimizeLayout->addWidget(m_modifiedCameraColorCheck);
+
     auto* dewarpRow = new QHBoxLayout();
     m_dewarpCheck = new QCheckBox(QString::fromUtf8("去雾"), m_optimizeGroup);
     m_dewarpCheck->setEnabled(true);
@@ -1004,6 +1016,7 @@ void ParamsPanel::onRestoreDefaults() {
     m_dewarpSlider->setValue(30);
     m_noiseReductionCheck->setChecked(false);
     m_noiseReductionSlider->setValue(30);
+    m_modifiedCameraColorCheck->setChecked(false);
     m_stretchCheck->setChecked(false);
     m_starReduceCheck->setChecked(false);
     m_starReduceSlider->setValue(70);
@@ -1057,6 +1070,8 @@ void ParamsPanel::onSavePreset() {
     settings.setValue("dewarpStrength", m_dewarpSlider->value());
     settings.setValue("noiseReductionEnabled", m_noiseReductionCheck->isChecked());
     settings.setValue("noiseReductionStrength", m_noiseReductionSlider->value());
+    settings.setValue("modifiedCameraColorEnabled",
+                      m_modifiedCameraColorCheck->isChecked());
     settings.setValue("stretchEnabled", m_stretchCheck->isChecked());
     settings.setValue("starReduceEnabled", m_starReduceCheck->isChecked());
     settings.setValue("starReduceStrength", m_starReduceSlider->value());
@@ -1109,6 +1124,8 @@ void ParamsPanel::saveCurrentSettings() {
     settings.setValue("dewarpStrength", m_dewarpSlider->value());
     settings.setValue("noiseReductionEnabled", m_noiseReductionCheck->isChecked());
     settings.setValue("noiseReductionStrength", m_noiseReductionSlider->value());
+    settings.setValue("modifiedCameraColorEnabled",
+                      m_modifiedCameraColorCheck->isChecked());
     settings.setValue("stretchEnabled", m_stretchCheck->isChecked());
     settings.setValue("starReduceEnabled", m_starReduceCheck->isChecked());
     settings.setValue("starReduceStrength", m_starReduceSlider->value());
@@ -1159,6 +1176,8 @@ void ParamsPanel::loadPreset() {
     int dewarpStrength = settings.value("dewarpStrength", 30).toInt();
     bool noiseReduction = settings.value("noiseReductionEnabled", false).toBool();
     int noiseReductionStrength = settings.value("noiseReductionStrength", 30).toInt();
+    bool modifiedCameraColor =
+        settings.value("modifiedCameraColorEnabled", false).toBool();
     bool stretch = settings.value("stretchEnabled", false).toBool();
     bool starReduce = settings.value("starReduceEnabled", false).toBool();
     int starReduceStrength = settings.value("starReduceStrength", 70).toInt();
@@ -1188,22 +1207,23 @@ void ParamsPanel::loadPreset() {
     QSignalBlocker blocker5(m_dewarpSlider);
     QSignalBlocker blocker6(m_noiseReductionCheck);
     QSignalBlocker blocker7(m_noiseReductionSlider);
-    QSignalBlocker blocker8(m_stretchCheck);
-    QSignalBlocker blocker9(m_starReduceCheck);
-    QSignalBlocker blocker10(m_starReduceSlider);
-    QSignalBlocker blocker11(m_outputFormat);
-    QSignalBlocker blocker12(m_presetCombo);
-    QSignalBlocker blocker13(m_skyGroundCheck);
-    QSignalBlocker blocker14(m_skyGroundMode);
-    QSignalBlocker blocker15(m_featherSlider);
-    QSignalBlocker blocker16(m_photometricCheck);
-    QSignalBlocker blocker17(m_autoRejectQualityCheck);
-    QSignalBlocker blocker18(m_groundStackMethod);
-    QSignalBlocker blocker19(m_groundDetailSlider);
-    QSignalBlocker blocker20(m_timelapseWindow);
-    QSignalBlocker blocker21(m_timelapseStrengthSlider);
-    QSignalBlocker blocker22(m_timelapseMotionProtectionSlider);
-    QSignalBlocker blocker23(m_timelapseProtectGroundCheck);
+    QSignalBlocker blocker8(m_modifiedCameraColorCheck);
+    QSignalBlocker blocker9(m_stretchCheck);
+    QSignalBlocker blocker10(m_starReduceCheck);
+    QSignalBlocker blocker11(m_starReduceSlider);
+    QSignalBlocker blocker12(m_outputFormat);
+    QSignalBlocker blocker13(m_presetCombo);
+    QSignalBlocker blocker14(m_skyGroundCheck);
+    QSignalBlocker blocker15(m_skyGroundMode);
+    QSignalBlocker blocker16(m_featherSlider);
+    QSignalBlocker blocker17(m_photometricCheck);
+    QSignalBlocker blocker18(m_autoRejectQualityCheck);
+    QSignalBlocker blocker19(m_groundStackMethod);
+    QSignalBlocker blocker20(m_groundDetailSlider);
+    QSignalBlocker blocker21(m_timelapseWindow);
+    QSignalBlocker blocker22(m_timelapseStrengthSlider);
+    QSignalBlocker blocker23(m_timelapseMotionProtectionSlider);
+    QSignalBlocker blocker24(m_timelapseProtectGroundCheck);
 
     Q_UNUSED(alignIndex)
     m_alignMethod->setCurrentIndex(0);
@@ -1222,6 +1242,7 @@ void ParamsPanel::loadPreset() {
     m_noiseReductionSlider->setEnabled(noiseReduction);
     m_noiseReductionLabel->setText(QString("%1%").arg(noiseReductionStrength));
     m_noiseReductionLabel->setEnabled(noiseReduction);
+    m_modifiedCameraColorCheck->setChecked(modifiedCameraColor);
     m_stretchCheck->setChecked(stretch);
     m_starReduceCheck->setChecked(starReduce);
     m_starReduceSlider->setValue(starReduceStrength);
@@ -1295,6 +1316,8 @@ void ParamsPanel::onPresetChanged(int index) {
             preset.dewarpStrength = settings.value("dewarpStrength", 30).toInt();
             preset.noiseReductionEnabled = settings.value("noiseReductionEnabled", false).toBool();
             preset.noiseReductionStrength = settings.value("noiseReductionStrength", 30).toInt();
+            preset.modifiedCameraColorEnabled =
+                settings.value("modifiedCameraColorEnabled", false).toBool();
             preset.stretchEnabled = settings.value("stretchEnabled", false).toBool();
             preset.starReduceEnabled = settings.value("starReduceEnabled", false).toBool();
             preset.starReduceStrength = settings.value("starReduceStrength", 70).toInt();
@@ -1346,12 +1369,13 @@ void ParamsPanel::applyPreset(const Preset& preset) {
     QSignalBlocker blocker5(m_dewarpSlider);
     QSignalBlocker blocker6(m_noiseReductionCheck);
     QSignalBlocker blocker7(m_noiseReductionSlider);
-    QSignalBlocker blocker8(m_stretchCheck);
-    QSignalBlocker blocker9(m_starReduceCheck);
-    QSignalBlocker blocker10(m_starReduceSlider);
-    QSignalBlocker blocker11(m_outputFormat);
-    QSignalBlocker blocker12(m_photometricCheck);
-    QSignalBlocker blocker13(m_autoRejectQualityCheck);
+    QSignalBlocker blocker8(m_modifiedCameraColorCheck);
+    QSignalBlocker blocker9(m_stretchCheck);
+    QSignalBlocker blocker10(m_starReduceCheck);
+    QSignalBlocker blocker11(m_starReduceSlider);
+    QSignalBlocker blocker12(m_outputFormat);
+    QSignalBlocker blocker13(m_photometricCheck);
+    QSignalBlocker blocker14(m_autoRejectQualityCheck);
 
     // Align method
     // 当前产品只提供已经实现并验证过的星点对齐。
@@ -1386,6 +1410,9 @@ void ParamsPanel::applyPreset(const Preset& preset) {
     m_noiseReductionLabel->setText(
         QString("%1%").arg(preset.noiseReductionStrength));
     m_noiseReductionLabel->setEnabled(preset.noiseReductionEnabled);
+
+    m_modifiedCameraColorCheck->setChecked(
+        preset.modifiedCameraColorEnabled);
 
     // Stretch
     m_stretchCheck->setChecked(preset.stretchEnabled);
@@ -1580,6 +1607,11 @@ int ParamsPanel::dewarpStrength() const {
 
 bool ParamsPanel::noiseReductionEnabled() const {
     return m_noiseReductionCheck ? m_noiseReductionCheck->isChecked() : false;
+}
+
+bool ParamsPanel::modifiedCameraColorEnabled() const {
+    return m_modifiedCameraColorCheck &&
+        m_modifiedCameraColorCheck->isChecked();
 }
 
 int ParamsPanel::noiseReductionStrength() const {
@@ -1781,6 +1813,7 @@ QString ParamsPanel::processingSignature() const {
         QString::number(photometricNormalizationEnabled()),
         QString::number(noiseReductionEnabled()),
         QString::number(noiseReductionStrength()),
+        QString::number(modifiedCameraColorEnabled()),
         QString::number(dewarpEnabled()), QString::number(dewarpStrength()),
         QString::number(stretchEnabled()), QString::number(starReduceEnabled()),
         QString::number(starReduceStrength()),
