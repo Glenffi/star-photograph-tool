@@ -805,6 +805,8 @@ private slots:
         params.timelapseMode = m_scene == ProcessingScene::Timelapse;
         params.timelapseWindowSize = m_paramsPanel->timelapseWindowSize();
         params.timelapseStrength = m_paramsPanel->timelapseStrength();
+        params.timelapseMotionProtection =
+            m_paramsPanel->timelapseMotionProtection();
         params.timelapseProtectGround =
             m_paramsPanel->timelapseProtectGround();
         params.stackMethod = m_paramsPanel->stackMethod();

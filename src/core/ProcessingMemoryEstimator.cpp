@@ -124,7 +124,8 @@ uint64_t ProcessingMemoryEstimator::estimatePeakBytes(
 }
 
 uint64_t ProcessingMemoryEstimator::estimateTimelapsePeakBytes(
-    int width, int height, int windowSize, bool protectGround) {
+    int width, int height, int windowSize, bool protectGround,
+    bool motionProtection) {
     if (width <= 0 || height <= 0 || windowSize < 3 ||
         windowSize % 2 == 0) {
         return 0;
@@ -136,9 +137,13 @@ uint64_t ProcessingMemoryEstimator::estimateTimelapsePeakBytes(
         !checkedMultiply(pixels, 3ULL * sizeof(uint16_t), frameBytes)) {
         return 0;
     }
-    const uint64_t residentFrames = protectGround
+    uint64_t residentFrames = protectGround
         ? static_cast<uint64_t>(windowSize) * 2ULL + 4ULL
         : static_cast<uint64_t>(windowSize) + 4ULL;
+    // The half-resolution uint16 motion guides for one active window consume
+    // less than one RGB16 frame; reserve a full equivalent for allocator and
+    // edge-window overhead.
+    if (motionProtection) ++residentFrames;
     uint64_t peakBytes = 0;
     return checkedMultiply(frameBytes, residentFrames, peakBytes)
         ? peakBytes : 0;

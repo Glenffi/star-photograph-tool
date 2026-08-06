@@ -31,7 +31,8 @@ public:
     // when requested, independent unaligned ground samples for one window.
     static uint64_t estimateTimelapsePeakBytes(int width, int height,
                                                int windowSize,
-                                               bool protectGround);
+                                               bool protectGround,
+                                               bool motionProtection = true);
 
     // Disk-backed alignment stores one RGB16 frame per accepted input, or two
     // when sky/ground separation also preserves the unaligned originals.

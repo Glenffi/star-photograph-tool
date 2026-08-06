@@ -135,9 +135,12 @@ bool fitRobustInitial(const std::vector<const SamplePair*>& pairs,
 
 bool PhotometricNormalizer::buildReferenceProfile(
     const std::vector<uint16_t>& reference, int width, int height,
-    PhotometricReferenceProfile& profile, size_t maxSamples) {
+    PhotometricReferenceProfile& profile, size_t maxSamples,
+    const std::vector<uint8_t>* inclusionMask,
+    uint8_t minimumMaskValue) {
     size_t pixelCount = 0;
-    if (!validRgb(reference, width, height, pixelCount) || maxSamples < 256) {
+    if (!validRgb(reference, width, height, pixelCount) || maxSamples < 256 ||
+        (inclusionMask != nullptr && inclusionMask->size() != pixelCount)) {
         return false;
     }
 
@@ -152,6 +155,10 @@ bool PhotometricNormalizer::buildReferenceProfile(
     for (int y = step / 2; y < height; y += step) {
         for (int x = step / 2; x < width; x += step) {
             const size_t pixel = static_cast<size_t>(y) * width + x;
+            if (inclusionMask != nullptr &&
+                (*inclusionMask)[pixel] < minimumMaskValue) {
+                continue;
+            }
             PhotometricReferenceSample sample;
             sample.pixelIndex = pixel;
             for (int channel = 0; channel < 3; ++channel) {

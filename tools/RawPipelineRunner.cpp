@@ -71,6 +71,10 @@ int main(int argc, char* argv[]) {
     const QCommandLineOption timelapseStrengthOption(
         "timelapse-strength", "Temporal denoise strength from 0 to 100.",
         "value", "80");
+    const QCommandLineOption timelapseMotionProtectionOption(
+        "timelapse-motion-protection",
+        "Protect clouds, foliage, and lights from temporal ghosting (0-100).",
+        "value", "75");
     const QCommandLineOption timelapseNoGroundOption(
         "timelapse-no-ground",
         "Treat the complete timelapse frame as sky; do not protect fixed ground.");
@@ -127,7 +131,9 @@ int main(int argc, char* argv[]) {
         "value", "0");
     parser.addOptions({inputOption, outputOption, limitOption, singleOption,
                        timelapseOption, timelapseWindowOption,
-                       timelapseStrengthOption, timelapseNoGroundOption,
+                       timelapseStrengthOption,
+                       timelapseMotionProtectionOption,
+                       timelapseNoGroundOption,
                        referenceOption,
                        methodOption, kappaOption, memoryBudgetOption,
                        noPhotometricNormalizationOption,
@@ -180,6 +186,10 @@ int main(int argc, char* argv[]) {
     bool timelapseStrengthOk = false;
     const int timelapseStrength =
         parser.value(timelapseStrengthOption).toInt(&timelapseStrengthOk);
+    bool timelapseMotionProtectionOk = false;
+    const int timelapseMotionProtection =
+        parser.value(timelapseMotionProtectionOption).toInt(
+            &timelapseMotionProtectionOk);
     bool skyGroundFeatherOk = false;
     const int skyGroundFeather =
         parser.value(skyGroundFeatherOption).toInt(&skyGroundFeatherOk);
@@ -211,12 +221,14 @@ int main(int argc, char* argv[]) {
         !timelapseWindowOk ||
         (timelapseWindow != 3 && timelapseWindow != 5) ||
         !timelapseStrengthOk || timelapseStrength < 0 ||
-        timelapseStrength > 100) {
+        timelapseStrength > 100 ||
+        !timelapseMotionProtectionOk || timelapseMotionProtection < 0 ||
+        timelapseMotionProtection > 100) {
         std::cerr << "Invalid or incompatible --limit, --reference-index, "
                      "--method, --kappa, "
                      "--memory-budget-mib, --denoise-strength, "
                      "--dehaze-strength, or "
-                     "--star-reduce-strength/sky-ground options.\n";
+                     "--star-reduce-strength/timelapse/sky-ground options.\n";
         return 2;
     }
     const uint64_t requestedMemoryBudgetBytes =
@@ -256,7 +268,7 @@ int main(int argc, char* argv[]) {
     const uint64_t estimatedBytes = timelapseMode
         ? ProcessingMemoryEstimator::estimateTimelapsePeakBytes(
               metadata.width, metadata.height, timelapseWindow,
-              timelapseProtectGround)
+              timelapseProtectGround, timelapseMotionProtection > 0)
         : ProcessingMemoryEstimator::estimatePeakBytes(
               metadata.width, metadata.height, estimateOptions);
     const uint64_t scratchBytes = singleFrameMode ? 0
@@ -269,6 +281,7 @@ int main(int argc, char* argv[]) {
     params.timelapseMode = timelapseMode;
     params.timelapseWindowSize = timelapseWindow;
     params.timelapseStrength = timelapseStrength;
+    params.timelapseMotionProtection = timelapseMotionProtection;
     params.timelapseProtectGround = timelapseProtectGround;
     params.stackMethod = method;
     params.kappaValue = kappa;
@@ -340,7 +353,7 @@ int main(int argc, char* argv[]) {
     worker.wait();
 
     QJsonObject report;
-    report["schemaVersion"] = 8;
+    report["schemaVersion"] = 9;
     report["toolVersion"] = QCoreApplication::applicationVersion();
     report["generatedAt"] = QDateTime::currentDateTimeUtc().toString(Qt::ISODate);
     report["input"] = input;
@@ -349,7 +362,16 @@ int main(int argc, char* argv[]) {
     report["timelapseMode"] = timelapseMode;
     report["timelapseWindow"] = timelapseWindow;
     report["timelapseStrength"] = timelapseStrength;
+    report["timelapseMotionProtection"] = timelapseMotionProtection;
     report["timelapseProtectGround"] = params.timelapseProtectGround;
+    report["timelapseMotionProtectedPixelEvaluations"] = QString::number(
+        worker.timelapseMotionProtectedPixelEvaluations());
+    report["timelapseFlickerCorrectedFrames"] =
+        worker.timelapseFlickerCorrectedFrames();
+    report["timelapseMaximumFlickerGainChange"] =
+        worker.timelapseMaximumFlickerGainChange();
+    report["timelapseMaximumFlickerOffset"] =
+        worker.timelapseMaximumFlickerOffset();
     report["requestedReferenceIndex"] = referenceIndex;
     report["referenceIndex"] = worker.selectedReferenceIndex();
     report["referenceFile"] =

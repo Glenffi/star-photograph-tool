@@ -38,7 +38,9 @@ class PhotometricNormalizer {
 public:
     static bool buildReferenceProfile(
         const std::vector<uint16_t>& reference, int width, int height,
-        PhotometricReferenceProfile& profile, size_t maxSamples = 65536);
+        PhotometricReferenceProfile& profile, size_t maxSamples = 65536,
+        const std::vector<uint8_t>* inclusionMask = nullptr,
+        uint8_t minimumMaskValue = 128);
 
     static bool estimate(const PhotometricReferenceProfile& reference,
                          const std::vector<uint16_t>& source,

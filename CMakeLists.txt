@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(StarProcessor VERSION 0.5.0 LANGUAGES CXX)
+project(StarProcessor VERSION 0.5.1 LANGUAGES CXX)
 
 include(CTest)
 option(BUILD_SAMPLE_TOOLS "Build local RAW sample regression tools" ON)
@@ -103,6 +103,7 @@ set(CORE_SOURCES
     src/core/PresetManager.cpp
     src/core/StarReducer.cpp
     src/core/TimelapseEngine.cpp
+    src/core/TemporalPhotometricSmoother.cpp
 )
 
 set(APP_SOURCES
@@ -133,6 +134,7 @@ set(CORE_HEADERS
     src/core/PresetManager.h
     src/core/StarReducer.h
     src/core/TimelapseEngine.h
+    src/core/TemporalPhotometricSmoother.h
 )
 
 set(APP_HEADERS

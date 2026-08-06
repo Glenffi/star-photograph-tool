@@ -422,6 +422,35 @@ void ParamsPanel::setupUI() {
     temporalStrengthRow->addWidget(m_timelapseStrengthLabel);
     timelapseLayout->addLayout(temporalStrengthRow);
 
+    auto* motionProtectionRow = new QHBoxLayout();
+    motionProtectionRow->addWidget(
+        new QLabel(QString::fromUtf8("动态内容保护:"), m_timelapseGroup));
+    m_timelapseMotionProtectionSlider = createSlider(0, 100, 75);
+    m_timelapseMotionProtectionSlider->setToolTip(QString::fromUtf8(
+        "在云层、草木、灯光等变化区域降低邻帧贡献，并偏向保留目标帧；值越高保护越强"));
+    m_timelapseMotionProtectionLabel = new QLabel("75%", m_timelapseGroup);
+    m_timelapseMotionProtectionLabel->setMinimumWidth(32);
+    connect(m_timelapseMotionProtectionSlider, &QSlider::valueChanged, this,
+            [this](int value) {
+                m_timelapseMotionProtectionLabel->setText(
+                    QString::number(value) + "%");
+                onSliderValueChanged(value);
+            });
+    connect(m_timelapseMotionProtectionSlider, &QSlider::sliderReleased,
+            this, &ParamsPanel::onSliderReleased);
+    motionProtectionRow->addWidget(m_timelapseMotionProtectionSlider, 1);
+    motionProtectionRow->addWidget(m_timelapseMotionProtectionLabel);
+    timelapseLayout->addLayout(motionProtectionRow);
+
+    auto* motionProtectionNote = new QLabel(
+        QString::fromUtf8(
+            "变化区域会自动减少邻帧混合，优先保留当前目标帧。"),
+        m_timelapseGroup);
+    motionProtectionNote->setWordWrap(true);
+    motionProtectionNote->setStyleSheet(
+        "color: #91A39F; font-size: 11px; font-weight: 400;");
+    timelapseLayout->addWidget(motionProtectionNote);
+
     m_timelapseProtectGroundCheck = new QCheckBox(
         QString::fromUtf8("固定地景保持原位"), m_timelapseGroup);
     m_timelapseProtectGroundCheck->setChecked(true);
@@ -882,6 +911,7 @@ void ParamsPanel::onRestoreDefaults() {
     m_groundDetailSlider->setValue(40);
     m_timelapseWindow->setCurrentIndex(1);
     m_timelapseStrengthSlider->setValue(80);
+    m_timelapseMotionProtectionSlider->setValue(75);
     m_timelapseProtectGroundCheck->setChecked(true);
     m_userMaskPath.clear();
     m_maskPathLabel->clear();
@@ -981,6 +1011,7 @@ void ParamsPanel::saveCurrentSettings() {
     settings.setValue("groundDetailStrength", m_groundDetailSlider->value());
     settings.setValue("timelapseWindow", timelapseWindowSize());
     settings.setValue("timelapseStrength", timelapseStrength());
+    settings.setValue("timelapseMotionProtection", timelapseMotionProtection());
     settings.setValue("timelapseProtectGround", timelapseProtectGround());
 }
 
@@ -1031,6 +1062,8 @@ void ParamsPanel::loadPreset() {
     int groundDetailStrength = settings.value("groundDetailStrength", 40).toInt();
     int timelapseWindow = settings.value("timelapseWindow", 5).toInt();
     int timelapseStrength = settings.value("timelapseStrength", 80).toInt();
+    int timelapseMotionProtection =
+        settings.value("timelapseMotionProtection", 75).toInt();
     bool timelapseProtectGround =
         settings.value("timelapseProtectGround", true).toBool();
 
@@ -1056,7 +1089,8 @@ void ParamsPanel::loadPreset() {
     QSignalBlocker blocker19(m_groundDetailSlider);
     QSignalBlocker blocker20(m_timelapseWindow);
     QSignalBlocker blocker21(m_timelapseStrengthSlider);
-    QSignalBlocker blocker22(m_timelapseProtectGroundCheck);
+    QSignalBlocker blocker22(m_timelapseMotionProtectionSlider);
+    QSignalBlocker blocker23(m_timelapseProtectGroundCheck);
 
     Q_UNUSED(alignIndex)
     m_alignMethod->setCurrentIndex(0);
@@ -1103,6 +1137,10 @@ void ParamsPanel::loadPreset() {
         std::clamp(timelapseStrength, 0, 100));
     m_timelapseStrengthLabel->setText(
         QString::number(m_timelapseStrengthSlider->value()) + "%");
+    m_timelapseMotionProtectionSlider->setValue(
+        std::clamp(timelapseMotionProtection, 0, 100));
+    m_timelapseMotionProtectionLabel->setText(
+        QString::number(m_timelapseMotionProtectionSlider->value()) + "%");
     m_timelapseProtectGroundCheck->setChecked(timelapseProtectGround);
     updateSkyGroundControls();
     updateStackMethodDescription();
@@ -1518,6 +1556,11 @@ int ParamsPanel::timelapseStrength() const {
         ? m_timelapseStrengthSlider->value() : 80;
 }
 
+int ParamsPanel::timelapseMotionProtection() const {
+    return m_timelapseMotionProtectionSlider
+        ? m_timelapseMotionProtectionSlider->value() : 75;
+}
+
 bool ParamsPanel::timelapseProtectGround() const {
     return m_timelapseProtectGroundCheck &&
         m_timelapseProtectGroundCheck->isChecked();
@@ -1542,6 +1585,7 @@ QString ParamsPanel::processingSignature() const {
         QString::number(groundDetailStrength()),
         QString::number(timelapseWindowSize()),
         QString::number(timelapseStrength()),
+        QString::number(timelapseMotionProtection()),
         QString::number(timelapseProtectGround())
     }.join('|');
 }

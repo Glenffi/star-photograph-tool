@@ -13,6 +13,7 @@
 #include "core/StackingEngine.h"
 #include "core/StarDetector.h"
 #include "core/StarReducer.h"
+#include "core/TemporalPhotometricSmoother.h"
 #include "core/TimelapseEngine.h"
 
 #include <QByteArray>
@@ -270,6 +271,116 @@ void testTimelapseDenoise() {
     check(TimelapseEngine::denoise(frames, 1, 1, 1, options).error ==
               TimelapseEngine::Error::InvalidWindowSize,
           "Even timelapse windows should be rejected");
+
+    constexpr int motionWidth = 5;
+    constexpr int motionHeight = 5;
+    const size_t motionValueCount =
+        static_cast<size_t>(motionWidth) * motionHeight * 3;
+    std::vector<uint16_t> motionPrevious(motionValueCount, 1000);
+    std::vector<uint16_t> motionTarget(motionValueCount, 1000);
+    std::vector<uint16_t> motionNext(motionValueCount, 1000);
+    for (int y = 1; y <= 3; ++y) {
+        for (int x = 1; x <= 3; ++x) {
+            const size_t base =
+                (static_cast<size_t>(y) * motionWidth + x) * 3;
+            motionTarget[base] = 5000;
+            motionTarget[base + 1] = 3000;
+            motionTarget[base + 2] = 2000;
+        }
+    }
+    const std::vector<TimelapseEngine::FrameView> motionFrames = {
+        {motionPrevious.data(), motionPrevious.size(), -1.0},
+        {motionTarget.data(), motionTarget.size(), 0.0},
+        {motionNext.data(), motionNext.size(), 1.0}
+    };
+    TimelapseEngine::Options motionOptions;
+    motionOptions.windowSize = 3;
+    motionOptions.temporalSigma = 1.0;
+    motionOptions.strength = 100.0;
+    motionOptions.motionProtection = 0.0;
+    const size_t motionCenter =
+        (static_cast<size_t>(2) * motionWidth + 2) * 3;
+    const TimelapseEngine::Result unprotectedMotion =
+        TimelapseEngine::denoise(
+            motionFrames, motionWidth, motionHeight, 1, motionOptions);
+    check(unprotectedMotion &&
+              unprotectedMotion.rgb[motionCenter] == 1000,
+          "Unprotected temporal filtering should remove a target-only patch");
+
+    motionOptions.motionProtection = 100.0;
+    const TimelapseEngine::Result protectedMotion =
+        TimelapseEngine::denoise(
+            motionFrames, motionWidth, motionHeight, 1, motionOptions);
+    check(protectedMotion &&
+              protectedMotion.rgb[motionCenter] == 5000 &&
+              protectedMotion.rgb[motionCenter + 1] == 3000 &&
+              protectedMotion.rgb[motionCenter + 2] == 2000 &&
+              protectedMotion.motionProtectedPixels > 0,
+          "Motion protection should retain a spatially supported RGB change");
+
+    std::vector<uint16_t> hotPixelTarget(motionValueCount, 1000);
+    hotPixelTarget[motionCenter] = 65535;
+    hotPixelTarget[motionCenter + 1] = 65535;
+    hotPixelTarget[motionCenter + 2] = 65535;
+    const std::vector<TimelapseEngine::FrameView> hotPixelFrames = {
+        {motionPrevious.data(), motionPrevious.size(), -1.0},
+        {hotPixelTarget.data(), hotPixelTarget.size(), 0.0},
+        {motionNext.data(), motionNext.size(), 1.0}
+    };
+    const TimelapseEngine::Result rejectedHotPixel =
+        TimelapseEngine::denoise(
+            hotPixelFrames, motionWidth, motionHeight, 1, motionOptions);
+    check(rejectedHotPixel &&
+              rejectedHotPixel.rgb[motionCenter] == 1000,
+          "Median motion guidance should not preserve an isolated hot pixel");
+
+    motionOptions.motionProtection = 101.0;
+    check(TimelapseEngine::denoise(
+              motionFrames, motionWidth, motionHeight, 1, motionOptions).error ==
+              TimelapseEngine::Error::InvalidOptions,
+          "Motion protection should reject values above 100");
+}
+
+void testTemporalPhotometricSmoothing() {
+    auto sample = [](double gain, std::array<double, 3> offsets = {}) {
+        TemporalPhotometricSmoother::Sample result;
+        result.valid = true;
+        result.model.gain = gain;
+        result.model.offsets = offsets;
+        return result;
+    };
+
+    const std::vector<TemporalPhotometricSmoother::Sample> monotonic = {
+        sample(0.96), sample(0.98), sample(1.00),
+        sample(1.02), sample(1.04)
+    };
+    TemporalPhotometricSmoother::Options options;
+    PhotometricModel correction;
+    check(TemporalPhotometricSmoother::correctionForFrame(
+              monotonic, 2, options, correction) &&
+              std::abs(correction.gain - 1.0) < 1e-9,
+          "Temporal smoothing should preserve a monotonic exposure trend");
+    check(TemporalPhotometricSmoother::correctionForFrame(
+              monotonic, 0, options, correction) &&
+              std::abs(correction.gain - 1.0) < 1e-9,
+          "Clamped temporal smoothing should preserve sequence edges");
+
+    std::vector<TemporalPhotometricSmoother::Sample> spike(
+        7, sample(1.0));
+    spike[3] = sample(0.8, {1000.0, -500.0, 200.0});
+    check(TemporalPhotometricSmoother::correctionForFrame(
+              spike, 3, options, correction) &&
+              std::abs(correction.gain - 0.97) < 1e-9 &&
+              std::abs(correction.offsets[0] - 650.0) < 1e-9 &&
+              std::abs(correction.offsets[1] + 325.0) < 1e-9,
+          "Temporal smoothing should limit an isolated exposure/color jump");
+
+    options.strength = 0.0;
+    check(TemporalPhotometricSmoother::correctionForFrame(
+              spike, 3, options, correction) &&
+              std::abs(correction.gain - 1.0) < 1e-9 &&
+              std::abs(correction.offsets[0]) < 1e-9,
+          "Zero flicker strength should produce an identity correction");
 }
 
 void testImageBufferUtils() {
@@ -512,11 +623,14 @@ void testMemoryEstimator() {
               frameBytes * 40,
           "Sky/ground stacking should reserve aligned and original caches");
     check(ProcessingMemoryEstimator::estimateTimelapsePeakBytes(
-              6000, 4000, 5, true) == frameBytes * 14,
+              6000, 4000, 5, true) == frameBytes * 15,
           "Protected five-frame timelapse should budget both coordinate paths");
     check(ProcessingMemoryEstimator::estimateTimelapsePeakBytes(
-              6000, 4000, 3, false) == frameBytes * 7,
+              6000, 4000, 3, false) == frameBytes * 8,
           "Sky-only timelapse should budget one temporal window");
+    check(ProcessingMemoryEstimator::estimateTimelapsePeakBytes(
+              6000, 4000, 3, false, false) == frameBytes * 7,
+          "Disabled motion protection should not reserve guide buffers");
     check(ProcessingMemoryEstimator::estimateTimelapsePeakBytes(
               6000, 4000, 4, true) == 0,
           "Timelapse estimate should reject even windows");
@@ -1148,6 +1262,21 @@ void testPhotometricNormalization() {
     check(PhotometricNormalizer::buildReferenceProfile(
               reference, width, height, profile, 4096),
           "Photometric reference profile should build from valid RGB data");
+    std::vector<uint8_t> skyMask(pixelCount, 0);
+    std::fill(skyMask.begin(),
+              skyMask.begin() + static_cast<size_t>(width) * (height / 2),
+              255);
+    PhotometricReferenceProfile maskedProfile;
+    check(PhotometricNormalizer::buildReferenceProfile(
+              reference, width, height, maskedProfile, 4096,
+              &skyMask, 160) &&
+              std::all_of(maskedProfile.samples.begin(),
+                          maskedProfile.samples.end(),
+                          [width](const auto& sample) {
+                              return sample.pixelIndex <
+                                  static_cast<size_t>(width) * (height / 2);
+                          }),
+          "Photometric profiles should honor a sky-only inclusion mask");
     PhotometricModel model;
     check(PhotometricNormalizer::estimate(profile, source, model),
           "Photometric model should tolerate a large local outlier region");
@@ -1451,6 +1580,7 @@ int main(int argc, char* argv[]) {
     QCoreApplication application(argc, argv);
     testStacking();
     testTimelapseDenoise();
+    testTemporalPhotometricSmoothing();
     testImageBufferUtils();
     testRgbAutoOptimize();
     testRgbTransform();

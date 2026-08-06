@@ -1,6 +1,7 @@
 #include "TimelapseEngine.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <limits>
 
@@ -11,7 +12,56 @@ constexpr double kTargetTimeTolerance = 1e-12;
 struct WeightedSample {
     uint16_t rgb[3];
     double weight;
+    bool target = false;
 };
+
+uint16_t luminanceOf(const uint16_t* rgb) {
+    return static_cast<uint16_t>(
+        (static_cast<uint32_t>(rgb[0]) * 13933U +
+         static_cast<uint32_t>(rgb[1]) * 46871U +
+         static_cast<uint32_t>(rgb[2]) * 4732U) /
+        65536U);
+}
+
+struct MotionGuide {
+    int width = 0;
+    std::vector<uint16_t> luminance;
+};
+
+MotionGuide buildMotionGuide(const uint16_t* rgb, int width, int height) {
+    MotionGuide guide;
+    guide.width = (width + 1) / 2;
+    const int guideHeight = (height + 1) / 2;
+    guide.luminance.resize(
+        static_cast<size_t>(guide.width) * guideHeight);
+    for (int guideY = 0; guideY < guideHeight; ++guideY) {
+        for (int guideX = 0; guideX < guide.width; ++guideX) {
+            std::array<uint16_t, 4> values = {};
+            size_t count = 0;
+            for (int dy = 0; dy < 2; ++dy) {
+                const int y = guideY * 2 + dy;
+                if (y >= height) continue;
+                for (int dx = 0; dx < 2; ++dx) {
+                    const int x = guideX * 2 + dx;
+                    if (x >= width) continue;
+                    const size_t pixel =
+                        static_cast<size_t>(y) * width + x;
+                    values[count++] = luminanceOf(rgb + pixel * 3);
+                }
+            }
+            std::sort(values.begin(), values.begin() + count);
+            const size_t middle = count / 2;
+            const uint32_t value = count % 2 != 0
+                ? values[middle]
+                : (static_cast<uint32_t>(values[middle - 1]) +
+                   values[middle]) / 2U;
+            guide.luminance[
+                static_cast<size_t>(guideY) * guide.width + guideX] =
+                static_cast<uint16_t>(value);
+        }
+    }
+    return guide;
+}
 
 bool checkedRgbSize(int width, int height, size_t& valueCount) {
     if (width <= 0 || height <= 0) return false;
@@ -41,13 +91,22 @@ double robustEstimate(const std::vector<WeightedSample>& samples,
                       uint16_t fallback,
                       std::vector<double>& values,
                       std::vector<double>& deviations) {
+    if (samples.empty()) return fallback;
+
     values.clear();
+    double targetWeight = 0.0;
+    double neighborWeight = 0.0;
     for (const WeightedSample& sample : samples) {
         values.push_back(sample.rgb[channel]);
+        if (sample.target) targetWeight += sample.weight;
+        else neighborWeight += sample.weight;
     }
-    if (values.empty()) return fallback;
-
-    const double center = median(values);
+    // Small temporal windows use an ordinary median so a hot target pixel is
+    // still rejected. Only when motion confidence has almost removed every
+    // neighbor do we center rejection on the target's real local structure.
+    const double center = targetWeight > 0.0 &&
+                          neighborWeight < targetWeight * 0.4
+        ? static_cast<double>(fallback) : median(values);
     deviations.clear();
     for (double value : values) {
         deviations.push_back(std::abs(value - center));
@@ -104,7 +163,9 @@ TimelapseEngine::Result TimelapseEngine::denoise(
         !std::isfinite(options.madThreshold) || options.madThreshold < 0.0 ||
         !std::isfinite(options.minimumDeviation) || options.minimumDeviation < 0.0 ||
         !std::isfinite(options.strength) ||
-        options.strength < 0.0 || options.strength > 100.0) {
+        options.strength < 0.0 || options.strength > 100.0 ||
+        !std::isfinite(options.motionProtection) ||
+        options.motionProtection < 0.0 || options.motionProtection > 100.0) {
         result.error = Error::InvalidOptions;
         return result;
     }
@@ -178,19 +239,59 @@ TimelapseEngine::Result TimelapseEngine::denoise(
     values.reserve(result.frameCount);
     deviations.reserve(result.frameCount);
 
+    std::vector<MotionGuide> motionGuides;
+    if (options.motionProtection > 0.0) {
+        motionGuides.reserve(result.frameCount);
+        for (size_t frameIndex = first; frameIndex < last; ++frameIndex) {
+            motionGuides.push_back(buildMotionGuide(
+                frames[frameIndex].rgb, width, height));
+        }
+    }
+
     const double blendAmount = options.strength / 100.0;
+    const double protectionAmount = options.motionProtection / 100.0;
+    const size_t targetGuideIndex = targetFrameIndex - first;
     for (size_t offset = 0; offset < expectedValueCount; offset += 3) {
         samples.clear();
+        bool motionProtected = false;
+        const size_t pixelIndex = offset / 3;
+        const size_t guidePixel = motionGuides.empty() ? 0
+            : static_cast<size_t>((pixelIndex / width) / 2) *
+                  motionGuides[targetGuideIndex].width +
+              (pixelIndex % width) / 2;
+        const double targetGuide = motionGuides.empty()
+            ? 0.0
+            : motionGuides[targetGuideIndex].luminance[guidePixel];
+        const double motionScale = std::clamp(
+            std::max(options.minimumDeviation * 12.0,
+                     192.0 + 4.0 * std::sqrt(targetGuide)),
+            192.0, 1536.0);
         for (size_t frameIndex = first; frameIndex < last; ++frameIndex) {
             const uint16_t* pixel = frames[frameIndex].rgb + offset;
             // 几何重采样通常用 (0,0,0) 标记画布外区域。只忽略三通道全零；
             // (0,G,B) 等颜色仍是合法样本，不能按单通道分别丢弃。
-            if (pixel[0] == 0 && pixel[1] == 0 && pixel[2] == 0) continue;
+            if (frameIndex != targetFrameIndex &&
+                pixel[0] == 0 && pixel[1] == 0 && pixel[2] == 0) {
+                continue;
+            }
+            double weight = frameWeights[frameIndex - first];
+            if (!motionGuides.empty() && frameIndex != targetFrameIndex) {
+                const double difference = std::abs(
+                    motionGuides[frameIndex - first].luminance[guidePixel] -
+                    targetGuide);
+                const double normalized = difference / motionScale;
+                const double similarity = std::exp(
+                    -0.5 * normalized * normalized);
+                weight *= 1.0 - protectionAmount * (1.0 - similarity);
+                motionProtected = motionProtected || similarity < 0.5;
+            }
             samples.push_back({
                 {pixel[0], pixel[1], pixel[2]},
-                frameWeights[frameIndex - first]
+                weight,
+                frameIndex == targetFrameIndex
             });
         }
+        if (motionProtected) ++result.motionProtectedPixels;
 
         for (int channel = 0; channel < 3; ++channel) {
             const uint16_t fallback = target[offset + static_cast<size_t>(channel)];

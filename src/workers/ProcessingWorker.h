@@ -24,6 +24,7 @@ public:
         bool timelapseMode = false;
         int timelapseWindowSize = 5;
         int timelapseStrength = 80;
+        int timelapseMotionProtection = 75;
         bool timelapseProtectGround = true;
         QString stackMethod = "average";
         double kappaValue = 2.5;
@@ -99,6 +100,18 @@ public:
     }
     double skyGroundSkyFraction() const { return m_skyGroundSkyFraction; }
     QString skyGroundMaskSource() const { return m_skyGroundMaskSource; }
+    uint64_t timelapseMotionProtectedPixelEvaluations() const {
+        return m_timelapseMotionProtectedPixelEvaluations;
+    }
+    int timelapseFlickerCorrectedFrames() const {
+        return m_timelapseFlickerCorrectedFrames;
+    }
+    double timelapseMaximumFlickerGainChange() const {
+        return m_timelapseMaximumFlickerGainChange;
+    }
+    double timelapseMaximumFlickerOffset() const {
+        return m_timelapseMaximumFlickerOffset;
+    }
 
     void requestCancel();
 
@@ -156,4 +169,8 @@ private:
     StarReductionStats m_starReductionStats;
     double m_skyGroundSkyFraction = 0.0;
     QString m_skyGroundMaskSource;
+    uint64_t m_timelapseMotionProtectedPixelEvaluations = 0;
+    int m_timelapseFlickerCorrectedFrames = 0;
+    double m_timelapseMaximumFlickerGainChange = 0.0;
+    double m_timelapseMaximumFlickerOffset = 0.0;
 };

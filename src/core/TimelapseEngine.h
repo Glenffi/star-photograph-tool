@@ -41,6 +41,10 @@ public:
 
         // 0 完全保留目标帧，100 完全使用时域估计，中间值连续线性混合。
         double strength = 50.0;
+
+        // 0 使用纯时间权重；100 会在与目标帧结构明显不同的区域强烈降低
+        // 邻帧贡献。运动判断基于共享亮度引导图，因此不会让 RGB 通道分离。
+        double motionProtection = 75.0;
     };
 
     enum class Error {
@@ -63,6 +67,7 @@ public:
         // 实际使用的连续窗口，表示为 [firstFrameIndex, endFrameIndex)。
         size_t firstFrameIndex = 0;
         size_t frameCount = 0;
+        size_t motionProtectedPixels = 0;
 
         bool ok() const noexcept { return error == Error::None; }
         explicit operator bool() const noexcept { return ok(); }

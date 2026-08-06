@@ -13,6 +13,7 @@
 #include "core/StackingEngine.h"
 #include "core/StarDetector.h"
 #include "core/StarReducer.h"
+#include "core/TemporalPhotometricSmoother.h"
 #include "core/TimelapseEngine.h"
 
 #include <QDateTime>
@@ -483,6 +484,12 @@ void ProcessingWorker::run() {
     m_photometricOutputAnchorGain = 1.0;
     m_photometricOutputAnchorMaxAbsOffset = 0.0;
     m_starReductionStats = {};
+    m_skyGroundSkyFraction = 0.0;
+    m_skyGroundMaskSource.clear();
+    m_timelapseMotionProtectedPixelEvaluations = 0;
+    m_timelapseFlickerCorrectedFrames = 0;
+    m_timelapseMaximumFlickerGainChange = 0.0;
+    m_timelapseMaximumFlickerOffset = 0.0;
     emit progress(0);
 
     if (m_files.isEmpty()) {
@@ -1050,7 +1057,8 @@ void ProcessingWorker::runTimelapse() {
     }
     const uint64_t estimatedBytes =
         ProcessingMemoryEstimator::estimateTimelapsePeakBytes(
-            metadataWidth, metadataHeight, windowSize, protectGround);
+            metadataWidth, metadataHeight, windowSize, protectGround,
+            m_params.timelapseMotionProtection > 0);
     const ProcessingMemoryEstimator::SystemMemoryInfo memoryInfo =
         ProcessingMemoryEstimator::systemMemoryInfo();
     const uint64_t budgetBytes =
@@ -1243,6 +1251,40 @@ void ProcessingWorker::runTimelapse() {
         }
     }
 
+    std::vector<TemporalPhotometricSmoother::Sample> sequencePhotometry(
+        static_cast<size_t>(m_files.size()));
+    if (m_params.photometricNormalizationEnabled) {
+        emit stageMessage("分析跨帧亮度与色偏曲线...");
+        const int anchorIndex = m_files.size() / 2;
+        std::vector<uint16_t> anchorRgb;
+        PhotometricReferenceProfile anchorProfile;
+        const std::vector<uint8_t>* photometricMask =
+            protectGround ? &skyMask : nullptr;
+        const bool anchorReady = decodedCache.readFrame(
+                anchorIndex, rgbValueCount, anchorRgb) &&
+            PhotometricNormalizer::buildReferenceProfile(
+                anchorRgb, width, height, anchorProfile, 65536,
+                photometricMask, 160);
+        if (anchorReady) {
+            sequencePhotometry[static_cast<size_t>(anchorIndex)].valid = true;
+            for (int index = 0; index < m_files.size(); ++index) {
+                if (stopIfCancelled()) return;
+                if (index == anchorIndex) continue;
+                std::vector<uint16_t> frameRgb;
+                PhotometricModel model;
+                if (decodedCache.readFrame(
+                        index, rgbValueCount, frameRgb) &&
+                    PhotometricNormalizer::estimate(
+                        anchorProfile, frameRgb, model)) {
+                    auto& sample = sequencePhotometry[
+                        static_cast<size_t>(index)];
+                    sample.valid = true;
+                    sample.model = model;
+                }
+            }
+        }
+    }
+
     QString rootOutput = m_params.outputPath;
     if (rootOutput.isEmpty()) {
         rootOutput = QDir::homePath() + "/StarProcessor/Output";
@@ -1264,6 +1306,11 @@ void ProcessingWorker::runTimelapse() {
     temporalOptions.madThreshold = 3.0;
     temporalOptions.minimumDeviation = 16.0;
     temporalOptions.strength = temporalStrength;
+    temporalOptions.motionProtection = std::clamp(
+        m_params.timelapseMotionProtection, 0, 100);
+    TemporalPhotometricSmoother::Options flickerOptions;
+    flickerOptions.windowSize = 5;
+    flickerOptions.strength = 65.0;
 
     emit stageMessage("逐帧滑动窗口降噪...");
     int writtenFrames = 0;
@@ -1397,6 +1444,8 @@ void ProcessingWorker::runTimelapse() {
                 .arg(TimelapseEngine::errorMessage(skyResult.error));
             return;
         }
+        m_timelapseMotionProtectedPixelEvaluations +=
+            skyResult.motionProtectedPixels;
         std::vector<uint16_t> resultRgb = std::move(skyResult.rgb);
 
         if (protectGround) {
@@ -1407,6 +1456,29 @@ void ProcessingWorker::runTimelapse() {
                     resultRgb, groundResult.rgb, skyMask, width, height)) {
                 m_errorString = "延时天地分离融合失败";
                 return;
+            }
+            m_timelapseMotionProtectedPixelEvaluations +=
+                groundResult.motionProtectedPixels;
+        }
+
+        PhotometricModel flickerCorrection;
+        if (m_params.photometricNormalizationEnabled &&
+            TemporalPhotometricSmoother::correctionForFrame(
+                sequencePhotometry, static_cast<size_t>(targetIndex),
+                flickerOptions, flickerCorrection)) {
+            double maximumOffset = 0.0;
+            for (double offset : flickerCorrection.offsets) {
+                maximumOffset = std::max(maximumOffset, std::abs(offset));
+            }
+            const double gainChange = std::abs(flickerCorrection.gain - 1.0);
+            if ((gainChange > 1e-5 || maximumOffset > 0.5) &&
+                PhotometricNormalizer::applyInPlace(
+                    resultRgb, width, height, flickerCorrection)) {
+                ++m_timelapseFlickerCorrectedFrames;
+                m_timelapseMaximumFlickerGainChange = std::max(
+                    m_timelapseMaximumFlickerGainChange, gainChange);
+                m_timelapseMaximumFlickerOffset = std::max(
+                    m_timelapseMaximumFlickerOffset, maximumOffset);
             }
         }
 

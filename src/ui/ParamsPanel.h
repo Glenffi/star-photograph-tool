@@ -51,6 +51,7 @@ public:
     int groundDetailStrength() const;
     int timelapseWindowSize() const;
     int timelapseStrength() const;
+    int timelapseMotionProtection() const;
     bool timelapseProtectGround() const;
     QString processingSignature() const;
     void setMaskPreview(const std::vector<uint8_t>& mask, int w, int h);
@@ -110,6 +111,8 @@ private:
     QComboBox* m_timelapseWindow = nullptr;
     QSlider* m_timelapseStrengthSlider = nullptr;
     QLabel* m_timelapseStrengthLabel = nullptr;
+    QSlider* m_timelapseMotionProtectionSlider = nullptr;
+    QLabel* m_timelapseMotionProtectionLabel = nullptr;
     QCheckBox* m_timelapseProtectGroundCheck = nullptr;
 
     // 自动优化组
