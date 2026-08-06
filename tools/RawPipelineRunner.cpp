@@ -66,6 +66,15 @@ int main(int argc, char* argv[]) {
         "single", "Refine the first RAW without alignment or stacking.");
     const QCommandLineOption timelapseOption(
         "timelapse", "Denoise every RAW with an aligned temporal window.");
+    const QCommandLineOption darkDirectoryOption(
+        "dark-dir", "Directory containing matched Dark RAW frames.",
+        "directory");
+    const QCommandLineOption flatDirectoryOption(
+        "flat-dir", "Directory containing Flat RAW frames.",
+        "directory");
+    const QCommandLineOption biasDirectoryOption(
+        "bias-dir", "Directory containing Bias RAW frames.",
+        "directory");
     const QCommandLineOption timelapseWindowOption(
         "timelapse-window", "Temporal window size: 3 or 5.", "count", "5");
     const QCommandLineOption timelapseStrengthOption(
@@ -130,7 +139,9 @@ int main(int argc, char* argv[]) {
         "Enable star reduction at strength 1-100; 0 disables it.",
         "value", "0");
     parser.addOptions({inputOption, outputOption, limitOption, singleOption,
-                       timelapseOption, timelapseWindowOption,
+                       timelapseOption, darkDirectoryOption,
+                       flatDirectoryOption, biasDirectoryOption,
+                       timelapseWindowOption,
                        timelapseStrengthOption,
                        timelapseMotionProtectionOption,
                        timelapseNoGroundOption,
@@ -178,6 +189,11 @@ int main(int argc, char* argv[]) {
     const bool stretchEnabled = parser.isSet(stretchOption);
     const bool singleFrameMode = parser.isSet(singleOption);
     const bool timelapseMode = parser.isSet(timelapseOption);
+    const QString darkDirectory = parser.value(darkDirectoryOption);
+    const QString flatDirectory = parser.value(flatDirectoryOption);
+    const QString biasDirectory = parser.value(biasDirectoryOption);
+    const bool deepSkyCalibration = !darkDirectory.isEmpty() ||
+        !flatDirectory.isEmpty() || !biasDirectory.isEmpty();
     const bool timelapseProtectGround =
         !parser.isSet(timelapseNoGroundOption);
     bool timelapseWindowOk = false;
@@ -201,6 +217,25 @@ int main(int argc, char* argv[]) {
     const int groundDetailStrength =
         parser.value(groundDetailOption).toInt(&groundDetailOk);
     const QString method = parser.value(methodOption).toLower();
+    if (deepSkyCalibration &&
+        (darkDirectory.isEmpty() || flatDirectory.isEmpty() ||
+         biasDirectory.isEmpty())) {
+        std::cerr << "Deep-sky calibration requires --dark-dir, --flat-dir, "
+                     "and --bias-dir together.\n";
+        return 2;
+    }
+    if (deepSkyCalibration &&
+        (!QDir(darkDirectory).exists() || !QDir(flatDirectory).exists() ||
+         !QDir(biasDirectory).exists())) {
+        std::cerr << "Every Dark, Flat, and Bias directory must exist.\n";
+        return 2;
+    }
+    if (deepSkyCalibration &&
+        (singleFrameMode || timelapseMode || skyGroundEnabled)) {
+        std::cerr << "Deep-sky calibration cannot be combined with --single, "
+                     "--timelapse, or sky/ground separation.\n";
+        return 2;
+    }
     if (!limitOk || limit < 0 || !referenceOk || referenceIndex < -1 ||
         !kappaOk || kappa <= 0.0 || !memoryBudgetOk ||
         !denoiseOk || denoiseStrength < 0 || denoiseStrength > 70 ||
@@ -250,6 +285,19 @@ int main(int argc, char* argv[]) {
         std::cerr << "--reference-index is outside the selected sequence.\n";
         return 2;
     }
+    const QStringList darkFrames = deepSkyCalibration
+        ? rawFiles(darkDirectory) : QStringList();
+    const QStringList flatFrames = deepSkyCalibration
+        ? rawFiles(flatDirectory) : QStringList();
+    const QStringList biasFrames = deepSkyCalibration
+        ? rawFiles(biasDirectory) : QStringList();
+    if (deepSkyCalibration &&
+        (darkFrames.size() < 3 || flatFrames.size() < 3 ||
+         biasFrames.size() < 3)) {
+        std::cerr << "Deep-sky calibration requires at least three RAW files "
+                     "in each Dark, Flat, and Bias directory.\n";
+        return 2;
+    }
 
     RawImageLoader loader;
     RawImageLoader::Metadata metadata;
@@ -265,6 +313,7 @@ int main(int argc, char* argv[]) {
     estimateOptions.dehaze = dehazeStrength > 0;
     estimateOptions.stretch = stretchEnabled;
     estimateOptions.starReduction = starReduceStrength > 0;
+    estimateOptions.rawCalibration = deepSkyCalibration;
     const uint64_t estimatedBytes = timelapseMode
         ? ProcessingMemoryEstimator::estimateTimelapsePeakBytes(
               metadata.width, metadata.height, timelapseWindow,
@@ -279,6 +328,10 @@ int main(int argc, char* argv[]) {
     ProcessingWorker::Params params;
     params.singleFrameMode = singleFrameMode;
     params.timelapseMode = timelapseMode;
+    params.deepSkyMode = deepSkyCalibration;
+    params.darkFramePaths = darkFrames;
+    params.flatFramePaths = flatFrames;
+    params.biasFramePaths = biasFrames;
     params.timelapseWindowSize = timelapseWindow;
     params.timelapseStrength = timelapseStrength;
     params.timelapseMotionProtection = timelapseMotionProtection;
@@ -353,13 +406,24 @@ int main(int argc, char* argv[]) {
     worker.wait();
 
     QJsonObject report;
-    report["schemaVersion"] = 9;
+    report["schemaVersion"] = 10;
     report["toolVersion"] = QCoreApplication::applicationVersion();
     report["generatedAt"] = QDateTime::currentDateTimeUtc().toString(Qt::ISODate);
     report["input"] = input;
     report["selectedFrames"] = files.size();
     report["singleFrameMode"] = singleFrameMode;
     report["timelapseMode"] = timelapseMode;
+    report["deepSkyCalibrationEnabled"] = deepSkyCalibration;
+    report["darkFrames"] = darkFrames.size();
+    report["flatFrames"] = flatFrames.size();
+    report["biasFrames"] = biasFrames.size();
+    report["calibratedLightFrames"] = worker.calibratedLightFrameCount();
+    report["calibrationClippedLowPixels"] = QString::number(
+        worker.calibrationClippedLowPixels());
+    report["calibrationClippedHighPixels"] = QString::number(
+        worker.calibrationClippedHighPixels());
+    report["calibrationInvalidFlatPixels"] = QString::number(
+        worker.calibrationInvalidFlatPixels());
     report["timelapseWindow"] = timelapseWindow;
     report["timelapseStrength"] = timelapseStrength;
     report["timelapseMotionProtection"] = timelapseMotionProtection;

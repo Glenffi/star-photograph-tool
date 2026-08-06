@@ -6,6 +6,7 @@
 #include "core/NoiseReductionEngine.h"
 #include "core/PhotometricNormalizer.h"
 #include "core/PresetManager.h"
+#include "core/RawCalibrationEngine.h"
 #include "core/RawImageLoader.h"
 #include "core/ProcessingMemoryEstimator.h"
 #include "core/PreviewToneMapper.h"
@@ -230,6 +231,94 @@ void testStacking() {
             }
         }
     }
+}
+
+void testRawCalibration() {
+    RawCalibrationEngine::MeanAccumulator robustMaster(1);
+    for (uint16_t value : {uint16_t{100}, uint16_t{100}, uint16_t{100},
+                           uint16_t{100}, uint16_t{4000}}) {
+        check(robustMaster.add(std::vector<uint16_t>{value}),
+              "Calibration master accumulator should accept matching frames");
+    }
+    std::vector<float> masterValue;
+    check(robustMaster.finish(masterValue) && masterValue.size() == 1 &&
+              std::abs(masterValue[0] - 100.0f) < 1e-6f,
+          "Five-frame calibration masters should reject one extreme sample");
+
+    constexpr int width = 4;
+    constexpr int height = 4;
+    constexpr size_t pixelCount = static_cast<size_t>(width) * height;
+    RawImageLoader::CfaImageData geometry;
+    geometry.width = width;
+    geometry.height = height;
+    geometry.rawWidth = width;
+    geometry.rawHeight = height;
+    geometry.iso = 800;
+    geometry.exposureTime = 60.0;
+    geometry.cameraModel = "Synthetic Bayer";
+    geometry.cfaPattern = {0, 1, 1, 2};
+    geometry.blackLevel = 100;
+    geometry.saturation = 4000;
+    geometry.data.resize(pixelCount);
+
+    std::vector<float> bias(pixelCount, 100.0f);
+    std::vector<float> dark(pixelCount, 110.0f); // Includes Bias + dark current.
+    const std::array<double, 4> phaseLevels = {
+        1000.0, 1200.0, 1100.0, 900.0};
+    std::vector<double> response(pixelCount, 1.0);
+    for (int y = 0; y < height; ++y) {
+        for (int x = 0; x < width; ++x) {
+            const size_t pixel = static_cast<size_t>(y) * width + x;
+            const size_t phase = static_cast<size_t>(
+                (y & 1) * 2 + (x & 1));
+            response[pixel] = x < 2 ? 0.5 : 1.5;
+            geometry.data[pixel] = static_cast<uint16_t>(std::lround(
+                100.0 + phaseLevels[phase] * response[pixel]));
+        }
+    }
+    std::vector<float> masterFlat;
+    check(RawCalibrationEngine::normalizeFlat(
+              geometry, bias, masterFlat) &&
+              RawCalibrationEngine::finalizeMasterFlat(
+                  masterFlat, width, height),
+          "Bias-corrected Bayer flats should normalize by CFA phase");
+
+    RawCalibrationEngine::MasterFrames masters;
+    masters.width = width;
+    masters.height = height;
+    masters.rawWidth = width;
+    masters.rawHeight = height;
+    masters.iso = geometry.iso;
+    masters.lightExposureTime = geometry.exposureTime;
+    masters.cameraModel = geometry.cameraModel;
+    masters.cfaPattern = geometry.cfaPattern;
+    masters.saturation = geometry.saturation;
+    masters.bias = bias;
+    masters.dark = dark;
+    masters.flat = masterFlat;
+
+    RawImageLoader::CfaImageData light = geometry;
+    for (size_t pixel = 0; pixel < pixelCount; ++pixel) {
+        light.data[pixel] = static_cast<uint16_t>(std::lround(
+            110.0 + 2000.0 * response[pixel]));
+    }
+    RawImageLoader::CfaImageData calibrated;
+    RawCalibrationEngine::CalibrationStats stats;
+    check(RawCalibrationEngine::calibrateLight(
+              light, masters, calibrated, &stats) &&
+              std::all_of(calibrated.data.begin(), calibrated.data.end(),
+                          [](uint16_t value) {
+                              return std::abs(static_cast<int>(value) - 2000) <= 1;
+                          }) &&
+              stats.invalidFlatPixels == 0,
+          "Light calibration should subtract Dark once and remove flat response");
+
+    RawImageLoader::CfaImageData incompatible = light;
+    incompatible.iso = 1600;
+    std::string reason;
+    check(!RawCalibrationEngine::compatible(light, incompatible, reason) &&
+              reason == "ISO/gain differs",
+          "Calibration frames with a different ISO/gain should be rejected");
 }
 
 void testTimelapseDenoise() {
@@ -634,6 +723,13 @@ void testMemoryEstimator() {
     check(ProcessingMemoryEstimator::estimateTimelapsePeakBytes(
               6000, 4000, 4, true) == 0,
           "Timelapse estimate should reject even windows");
+
+    ProcessingMemoryEstimator::EstimateOptions calibrated;
+    calibrated.frameCount = 10;
+    calibrated.rawCalibration = true;
+    check(ProcessingMemoryEstimator::estimatePeakBytes(
+              6000, 4000, calibrated) == frameBytes * 12,
+          "Bayer calibration should reserve master and CFA working buffers");
     check(ProcessingMemoryEstimator::estimatePeakBytes(0, 4000, 20, false) == 0,
           "Memory estimator should reject invalid dimensions");
     constexpr uint64_t gib = 1024ULL * 1024ULL * 1024ULL;
@@ -1579,6 +1675,7 @@ void testSkyGroundHorizonDetection() {
 int main(int argc, char* argv[]) {
     QCoreApplication application(argc, argv);
     testStacking();
+    testRawCalibration();
     testTimelapseDenoise();
     testTemporalPhotometricSmoothing();
     testImageBufferUtils();

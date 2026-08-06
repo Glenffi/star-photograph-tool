@@ -15,14 +15,17 @@
 #include <QLineEdit>
 #include <QFileDialog>
 #include <QFileInfo>
+#include <QDir>
 #include <QSettings>
 #include <QMessageBox>
 #include <QInputDialog>
+#include <QSet>
 #include <QTabWidget>
 
 #include <QSignalBlocker>
 
 #include <algorithm>
+#include <array>
 
 ParamsPanel::ParamsPanel(QWidget* parent)
     : QWidget(parent)
@@ -108,6 +111,110 @@ void ParamsPanel::setupUI() {
     QVBoxLayout* adjustPageLayout = createPage(QString::fromUtf8("调整"));
     QVBoxLayout* outputPageLayout = createPage(QString::fromUtf8("输出"));
     layout->addWidget(m_tabs, 1);
+
+    // Deep-sky calibration runs before alignment and stacking. The paths are
+    // intentionally session-only because removable disks and capture folders
+    // often move between launches.
+    m_calibrationGroup = createCollapsibleGroup(
+        QString::fromUtf8("校准帧"), true);
+    m_calibrationGroup->setVisible(false);
+    auto* calibrationLayout = new QVBoxLayout(m_calibrationGroup);
+    calibrationLayout->setSpacing(7);
+
+    auto* calibrationNote = new QLabel(
+        QString::fromUtf8(
+            "Light 主帧在左侧素材栏导入。\n"
+            "处理顺序：Bias → Dark → Flat → 对齐 → 堆栈。\n"
+            "每类至少 3 张，建议 10–20 张。"),
+        m_calibrationGroup);
+    calibrationNote->setWordWrap(true);
+    calibrationNote->setStyleSheet(
+        "color: #91A39F; background-color: #152522; "
+        "border-left: 3px solid #59C9E8; border-radius: 4px; "
+        "padding: 7px 9px; font-size: 11px; font-weight: 400;");
+    calibrationLayout->addWidget(calibrationNote);
+
+    const QString calibrationButtonStyle =
+        "QPushButton { background-color: #202A2D; border: 1px solid #344548; "
+        "border-radius: 4px; padding: 0; }"
+        "QPushButton:hover { background-color: #344548; border-color: #4D6265; }"
+        "QPushButton:pressed { background-color: #25463F; }"
+        "QPushButton:disabled { background-color: #171F21; border-color: #263234; }";
+
+    auto addCalibrationRow = [this, calibrationLayout,
+                              &calibrationButtonStyle](
+                                 const QString& name,
+                                 const QString& purpose,
+                                 QStringList& paths,
+                                 QLabel*& countLabel,
+                                 QPushButton*& clearButton) {
+        auto* row = new QHBoxLayout();
+        row->setSpacing(6);
+
+        auto* nameLabel = new QLabel(name, m_calibrationGroup);
+        nameLabel->setFixedWidth(34);
+        nameLabel->setStyleSheet(
+            "font-size: 12px; color: #D2DDDA; background-color: transparent;");
+        row->addWidget(nameLabel);
+
+        countLabel = new QLabel(QString::fromUtf8("0 张"), m_calibrationGroup);
+        countLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+        countLabel->setStyleSheet(
+            "font-size: 11px; color: #91A39F; background-color: transparent;");
+        row->addWidget(countLabel, 1);
+
+        auto* importButton = new QPushButton(m_calibrationGroup);
+        importButton->setIcon(
+            UiAssets::icon(UiAssets::Glyph::AddPhotos, QColor("#A7B8B4")));
+        importButton->setIconSize(QSize(16, 16));
+        importButton->setFixedSize(28, 28);
+        importButton->setStyleSheet(calibrationButtonStyle);
+        importButton->setToolTip(
+            QString::fromUtf8("导入%1：%2").arg(name, purpose));
+        importButton->setAccessibleName(importButton->toolTip());
+        row->addWidget(importButton);
+
+        clearButton = new QPushButton(m_calibrationGroup);
+        clearButton->setIcon(
+            UiAssets::icon(UiAssets::Glyph::Trash, QColor("#A7B8B4")));
+        clearButton->setIconSize(QSize(16, 16));
+        clearButton->setFixedSize(28, 28);
+        clearButton->setStyleSheet(calibrationButtonStyle);
+        clearButton->setToolTip(
+            QString::fromUtf8("清空已选%1").arg(name));
+        clearButton->setAccessibleName(clearButton->toolTip());
+        clearButton->setEnabled(false);
+        QStringList* const pathList = &paths;
+        connect(importButton, &QPushButton::clicked, this,
+                [this, pathList, countLabel, clearButton, name]() {
+                    importCalibrationFrames(
+                        *pathList, countLabel, clearButton,
+                        QString::fromUtf8("选择%1 RAW").arg(name));
+                });
+        connect(clearButton, &QPushButton::clicked, this,
+                [this, pathList, countLabel, clearButton]() {
+                    clearCalibrationFrames(
+                        *pathList, countLabel, clearButton);
+                });
+        row->addWidget(clearButton);
+
+        calibrationLayout->addLayout(row);
+    };
+
+    addCalibrationRow(
+        QString::fromUtf8("暗场"),
+        QString::fromUtf8("校正热噪声、固定图样噪声和热像素"),
+        m_darkFramePaths, m_darkFrameCount, m_darkFrameClear);
+    addCalibrationRow(
+        QString::fromUtf8("平场"),
+        QString::fromUtf8("校正暗角、灰尘阴影和像场亮度不均"),
+        m_flatFramePaths, m_flatFrameCount, m_flatFrameClear);
+    addCalibrationRow(
+        QString::fromUtf8("偏置场"),
+        QString::fromUtf8("校正传感器读出偏置，并为平场标定零点"),
+        m_biasFramePaths, m_biasFrameCount, m_biasFrameClear);
+
+    stackPageLayout->addWidget(m_calibrationGroup);
 
     // 对齐组（默认展开）
     m_alignGroup = createCollapsibleGroup(QString::fromUtf8("对齐"), true);
@@ -913,6 +1020,12 @@ void ParamsPanel::onRestoreDefaults() {
     m_timelapseStrengthSlider->setValue(80);
     m_timelapseMotionProtectionSlider->setValue(75);
     m_timelapseProtectGroundCheck->setChecked(true);
+    m_darkFramePaths.clear();
+    m_flatFramePaths.clear();
+    m_biasFramePaths.clear();
+    updateCalibrationCount(m_darkFrameCount, m_darkFrameClear, 0);
+    updateCalibrationCount(m_flatFrameCount, m_flatFrameClear, 0);
+    updateCalibrationCount(m_biasFrameCount, m_biasFrameClear, 0);
     m_userMaskPath.clear();
     m_maskPathLabel->clear();
     m_maskPathLabel->setVisible(false);
@@ -1361,6 +1474,9 @@ void ParamsPanel::applySceneProfile(ProcessingScene scene) {
     if (m_alignGroup) m_alignGroup->setVisible(!timelapse);
     if (m_stackGroup) m_stackGroup->setVisible(!timelapse);
     if (m_timelapseGroup) m_timelapseGroup->setVisible(timelapse);
+    if (m_calibrationGroup) {
+        m_calibrationGroup->setVisible(scene == ProcessingScene::DeepSky);
+    }
     // General stack presets change controls that do not participate in the
     // temporal pipeline, so keep this task-specific workspace focused.
     if (m_presetBar) m_presetBar->setVisible(!timelapse);
@@ -1566,6 +1682,95 @@ bool ParamsPanel::timelapseProtectGround() const {
         m_timelapseProtectGroundCheck->isChecked();
 }
 
+QStringList ParamsPanel::darkFramePaths() const {
+    return m_darkFramePaths;
+}
+
+QStringList ParamsPanel::flatFramePaths() const {
+    return m_flatFramePaths;
+}
+
+QStringList ParamsPanel::biasFramePaths() const {
+    return m_biasFramePaths;
+}
+
+void ParamsPanel::importCalibrationFrames(QStringList& paths,
+                                          QLabel* countLabel,
+                                          QPushButton* clearButton,
+                                          const QString& dialogTitle) {
+    const QStringList selected = QFileDialog::getOpenFileNames(
+        this, dialogTitle, QString(),
+        QString::fromUtf8(
+            "RAW 文件 (*.nef *.cr2 *.arw *.dng *.raw *.orf *.raf *.pef *.cr3);;"
+            "所有文件 (*)"));
+    if (selected.isEmpty()) return;
+
+    auto pathIdentity = [](const QString& path) {
+        QString identity = QFileInfo(path).canonicalFilePath();
+        if (identity.isEmpty()) identity = QFileInfo(path).absoluteFilePath();
+        return QDir::cleanPath(identity);
+    };
+    QSet<QString> otherCalibrationPaths;
+    const std::array<const QStringList*, 3> lists = {
+        &m_darkFramePaths, &m_flatFramePaths, &m_biasFramePaths};
+    for (const QStringList* list : lists) {
+        if (list == &paths) continue;
+        for (const QString& path : *list) {
+            otherCalibrationPaths.insert(pathIdentity(path));
+        }
+    }
+
+    QStringList merged = paths;
+    QSet<QString> currentCalibrationPaths;
+    for (const QString& path : paths) {
+        currentCalibrationPaths.insert(pathIdentity(path));
+    }
+    int categoryConflicts = 0;
+    for (const QString& path : selected) {
+        const QString absolutePath =
+            QDir::cleanPath(QFileInfo(path).absoluteFilePath());
+        const QString identity = pathIdentity(path);
+        if (otherCalibrationPaths.contains(identity)) {
+            ++categoryConflicts;
+        } else if (!absolutePath.isEmpty() &&
+                   !currentCalibrationPaths.contains(identity)) {
+            merged.append(absolutePath);
+            currentCalibrationPaths.insert(identity);
+        }
+    }
+    if (categoryConflicts > 0) {
+        QMessageBox::information(
+            this, QString::fromUtf8("已跳过重复校准帧"),
+            QString::fromUtf8(
+                "%1 张 RAW 已属于另一类校准帧，未重复导入。")
+                .arg(categoryConflicts));
+    }
+    if (merged == paths) return;
+
+    paths = merged;
+    updateCalibrationCount(countLabel, clearButton, paths.size());
+    markPresetCustom();
+    emitParamsChanged();
+}
+
+void ParamsPanel::clearCalibrationFrames(QStringList& paths,
+                                         QLabel* countLabel,
+                                         QPushButton* clearButton) {
+    if (paths.isEmpty()) return;
+    paths.clear();
+    updateCalibrationCount(countLabel, clearButton, 0);
+    markPresetCustom();
+    emitParamsChanged();
+}
+
+void ParamsPanel::updateCalibrationCount(QLabel* label,
+                                         QPushButton* clearButton,
+                                         int count) {
+    if (!label) return;
+    label->setText(QString::fromUtf8("%1 张").arg(count));
+    if (clearButton) clearButton->setEnabled(count > 0);
+}
+
 QString ParamsPanel::processingSignature() const {
     // Output path/format are intentionally excluded: changing only where or
     // how a cached result is written does not make its pixels stale.
@@ -1586,7 +1791,10 @@ QString ParamsPanel::processingSignature() const {
         QString::number(timelapseWindowSize()),
         QString::number(timelapseStrength()),
         QString::number(timelapseMotionProtection()),
-        QString::number(timelapseProtectGround())
+        QString::number(timelapseProtectGround()),
+        QStringLiteral("dark=") + m_darkFramePaths.join(QChar(0x1e)),
+        QStringLiteral("flat=") + m_flatFramePaths.join(QChar(0x1e)),
+        QStringLiteral("bias=") + m_biasFramePaths.join(QChar(0x1e))
     }.join('|');
 }
 

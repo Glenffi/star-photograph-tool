@@ -260,8 +260,11 @@ private:
                                 QString::fromUtf8("双路堆栈"), QString::fromUtf8("结果")};
             break;
         case ProcessingScene::Nightscape:
-        case ProcessingScene::DeepSky:
             m_sceneStepNames = {QString::fromUtf8("素材"), QString::fromUtf8("对齐"),
+                                QString::fromUtf8("堆栈"), QString::fromUtf8("结果")};
+            break;
+        case ProcessingScene::DeepSky:
+            m_sceneStepNames = {QString::fromUtf8("校准"), QString::fromUtf8("对齐"),
                                 QString::fromUtf8("堆栈"), QString::fromUtf8("结果")};
             break;
         case ProcessingScene::Timelapse:
@@ -293,14 +296,18 @@ private:
         if (!m_sceneActive) return;
         const int count = m_projectPanel->includedFilePaths().size();
         const int required = requiredFrameCount();
-        m_toolbar->enableProcess(count >= required);
+        const bool calibrationReady = m_scene != ProcessingScene::DeepSky ||
+            (m_paramsPanel->darkFramePaths().size() >= 3 &&
+             m_paramsPanel->flatFramePaths().size() >= 3 &&
+             m_paramsPanel->biasFramePaths().size() >= 3);
+        m_toolbar->enableProcess(count >= required && calibrationReady);
         m_toolbar->setProjectSummary(
             count > 0
                 ? QString::fromUtf8("%1 · %2 张素材").arg(sceneName()).arg(count)
                 : QString::fromUtf8("%1 · 等待素材").arg(sceneName()));
         m_paramsPanel->updateRefFrameList(m_projectPanel->includedFilePaths());
 
-        if (count >= required) {
+        if (count >= required && calibrationReady) {
             if ((m_scene == ProcessingScene::Nightscape ||
                  m_scene == ProcessingScene::SkyGround) && count >= 2) {
                 m_paramsPanel->recommendStackMethod(count);
@@ -309,11 +316,19 @@ private:
             if (m_scene == ProcessingScene::DeepSky && count < 6) {
                 status += QString::fromUtf8(" · 建议 6 张以上获得更稳健结果");
             }
-            setWorkflowStage(1, status);
-        } else {
+            setWorkflowStage(
+                m_scene == ProcessingScene::DeepSky ? 0 : 1,
+                m_scene == ProcessingScene::DeepSky
+                    ? QString::fromUtf8("%1 张 Light 与校准帧已齐，可以开始处理")
+                          .arg(count)
+                    : status);
+        } else if (count < required) {
             const int remaining = required - count;
             setWorkflowStage(0,
                 QString::fromUtf8("还需要 %1 张照片").arg(remaining));
+        } else {
+            setWorkflowStage(0, QString::fromUtf8(
+                "请分别导入至少 3 张 Dark、Flat 和 Bias 校准帧"));
         }
     }
 
@@ -569,6 +584,7 @@ private:
 
         // 参数变化
         connect(m_paramsPanel, &ParamsPanel::paramsChanged, this, [this]() {
+            updateProjectReadiness();
             if (m_cachedStackedData.empty()) return;
             const bool current =
                 m_paramsPanel->processingSignature() == m_lastProcessedSignature;
@@ -759,7 +775,7 @@ private slots:
             "<h2>StarProcessor</h2>"
             "<p>为星空摄影师打造的跨平台 RAW 处理工具</p>"
             "<p><b>版本：</b>" STARPROCESSOR_VERSION "</p>"
-            "<p><b>能力：</b>RAW 堆栈、天地分离、延时序列降噪、缩星与自动优化</p>"
+            "<p><b>能力：</b>Bayer 深空校准、RAW 堆栈、天地分离、延时序列降噪、缩星与自动优化</p>"
             "<p><b>技术栈：</b>C++17 + Qt6 + CMake + LibRaw</p>"
             "<p><b>目标平台：</b>Windows + macOS</p>"
             "<hr>"
@@ -790,6 +806,46 @@ private slots:
             if (source.isEmpty() || !files.contains(source)) source = files.first();
             files = {source};
         }
+        if (m_scene == ProcessingScene::DeepSky &&
+            (m_paramsPanel->darkFramePaths().size() < 3 ||
+             m_paramsPanel->flatFramePaths().size() < 3 ||
+             m_paramsPanel->biasFramePaths().size() < 3)) {
+            QMessageBox::warning(
+                this, QString::fromUtf8("深空校准帧不足"),
+                QString::fromUtf8(
+                    "标准深空流程至少需要 3 张 Dark、3 张 Flat 和 3 张 Bias。\n"
+                    "建议每类拍摄 10–20 张，以降低主校准帧自身噪声。"));
+            return;
+        }
+        if (m_scene == ProcessingScene::DeepSky) {
+            QSet<QString> usedPaths;
+            QString duplicatePath;
+            auto addUniquePaths = [&](const QStringList& paths) {
+                for (const QString& path : paths) {
+                    QString identity = QFileInfo(path).canonicalFilePath();
+                    if (identity.isEmpty()) {
+                        identity = QFileInfo(path).absoluteFilePath();
+                    }
+                    if (usedPaths.contains(identity)) {
+                        duplicatePath = path;
+                        return false;
+                    }
+                    usedPaths.insert(identity);
+                }
+                return true;
+            };
+            if (!addUniquePaths(files) ||
+                !addUniquePaths(m_paramsPanel->darkFramePaths()) ||
+                !addUniquePaths(m_paramsPanel->flatFramePaths()) ||
+                !addUniquePaths(m_paramsPanel->biasFramePaths())) {
+                QMessageBox::warning(
+                    this, QString::fromUtf8("校准素材重复"),
+                    QString::fromUtf8(
+                        "同一张 RAW 不能同时作为 Light、Dark、Flat 或 Bias：\n%1")
+                        .arg(QFileInfo(duplicatePath).fileName()));
+                return;
+            }
+        }
 
         // 保存当前参数设置
         m_paramsPanel->saveCurrentSettings();
@@ -803,6 +859,10 @@ private slots:
         ProcessingWorker::Params params;
         params.singleFrameMode = m_scene == ProcessingScene::SingleFrame;
         params.timelapseMode = m_scene == ProcessingScene::Timelapse;
+        params.deepSkyMode = m_scene == ProcessingScene::DeepSky;
+        params.darkFramePaths = m_paramsPanel->darkFramePaths();
+        params.flatFramePaths = m_paramsPanel->flatFramePaths();
+        params.biasFramePaths = m_paramsPanel->biasFramePaths();
         params.timelapseWindowSize = m_paramsPanel->timelapseWindowSize();
         params.timelapseStrength = m_paramsPanel->timelapseStrength();
         params.timelapseMotionProtection =
@@ -828,6 +888,7 @@ private slots:
         params.outputPath = m_paramsPanel->outputPath();
         params.skyGroundSepEnabled = !params.singleFrameMode &&
             !params.timelapseMode &&
+            !params.deepSkyMode &&
             m_paramsPanel->skyGroundSeparationEnabled();
         params.skyGroundMode = m_paramsPanel->skyGroundMode();
         params.userMaskPath = m_paramsPanel->userMaskPath();
@@ -847,7 +908,11 @@ private slots:
         m_paramsPanel->setEnabled(false);
         m_inlineProgress->setValue(0);
         m_inlineProgress->setVisible(true);
-        setWorkflowStage(1, QString::fromUtf8("正在准备处理"));
+        setWorkflowStage(
+            m_scene == ProcessingScene::DeepSky ? 0 : 1,
+            m_scene == ProcessingScene::DeepSky
+                ? QString::fromUtf8("正在准备 Bayer 校准")
+                : QString::fromUtf8("正在准备处理"));
 
         // 3. 创建进度对话框
         auto* dialog = new QProgressDialog(this);
@@ -890,6 +955,21 @@ private slots:
                     stage = 3;
                 } else if (msg.contains(QString::fromUtf8("预览"))) {
                     stage = 2;
+                }
+            } else if (m_scene == ProcessingScene::DeepSky) {
+                if (msg.contains(QString::fromUtf8("Master")) ||
+                    msg.contains(QString::fromUtf8("Bayer")) ||
+                    msg.contains(QString::fromUtf8("校准"))) {
+                    stage = 0;
+                } else if (msg.contains(QString::fromUtf8("堆栈")) ||
+                           msg.contains(QString::fromUtf8("裁切"))) {
+                    stage = 2;
+                } else if (msg.contains(QString::fromUtf8("优化")) ||
+                           msg.contains(QString::fromUtf8("降噪")) ||
+                           msg.contains(QString::fromUtf8("缩星")) ||
+                           msg.contains(QString::fromUtf8("导出")) ||
+                           msg.contains(QString::fromUtf8("完成"))) {
+                    stage = 3;
                 }
             } else if (msg.contains(QString::fromUtf8("堆栈")) ||
                 msg.contains(QString::fromUtf8("蒙版")) ||

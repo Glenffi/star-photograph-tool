@@ -191,9 +191,9 @@ SceneLauncher::SceneLauncher(QWidget* parent)
             QString::fromUtf8("素材  →  对齐  →  堆栈  →  优化"));
     addCard(1, 0, ProcessingScene::DeepSky,
             UiAssets::Glyph::DeepSky, QColor("#B397FF"),
-            QString::fromUtf8("建议 6 张+"), QString::fromUtf8("深空天体堆栈"),
-            QString::fromUtf8("为星云和星系启用长序列稳健堆栈、线性降噪与拉伸。"),
-            QString::fromUtf8("校验  →  对齐  →  稳健堆栈  →  拉伸"));
+            QString::fromUtf8("Light + 校准帧"), QString::fromUtf8("深空天体堆栈"),
+            QString::fromUtf8("先用 Bias、Dark、Flat 校准 Bayer 数据，再完成对齐、稳健堆栈与拉伸。"),
+            QString::fromUtf8("校准  →  去马赛克  →  对齐  →  稳健堆栈"));
     addCard(1, 1, ProcessingScene::SkyGround,
             UiAssets::Glyph::SkyGround, QColor("#F2B65A"),
             QString::fromUtf8("固定机位"), QString::fromUtf8("天地分离合成"),

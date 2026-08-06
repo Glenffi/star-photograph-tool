@@ -3,6 +3,7 @@
 #include <libraw/libraw.h>
 
 #include <algorithm>
+#include <array>
 #include <cstring>
 #include <ctime>
 #include <iostream>
@@ -117,6 +118,135 @@ bool loadFastHalfSize(const std::string& filePath,
     return copied;
 }
 
+bool extractBayerCfa(LibRaw& processor, RawImageLoader::CfaImageData& out,
+                     bool copyPixels) {
+    const auto& sizes = processor.imgdata.sizes;
+    const uint16_t* raw = processor.imgdata.rawdata.raw_image;
+    if (!raw || sizes.width == 0 || sizes.height == 0 ||
+        sizes.raw_width == 0 || sizes.raw_height == 0 ||
+        sizes.raw_pitch < sizes.raw_width * sizeof(uint16_t)) {
+        return false;
+    }
+    const size_t stride = sizes.raw_pitch / sizeof(uint16_t);
+    if (static_cast<size_t>(sizes.left_margin) + sizes.width > stride ||
+        static_cast<size_t>(sizes.top_margin) + sizes.height > sizes.raw_height) {
+        return false;
+    }
+
+    std::array<uint8_t, 4> pattern = {};
+    for (int y = 0; y < 2; ++y) {
+        for (int x = 0; x < 2; ++x) {
+            const int color = processor.COLOR(sizes.top_margin + y,
+                                              sizes.left_margin + x);
+            if (color < 0 || color > 3) return false;
+            pattern[static_cast<size_t>(y * 2 + x)] =
+                static_cast<uint8_t>(color);
+        }
+    }
+    // A repeating 2x2 pattern identifies Bayer data without relying on a
+    // camera-specific LibRaw filter constant. X-Trans fails this check.
+    for (int y = 0; y < std::min<int>(8, sizes.height); ++y) {
+        for (int x = 0; x < std::min<int>(8, sizes.width); ++x) {
+            if (processor.COLOR(sizes.top_margin + y,
+                                sizes.left_margin + x) !=
+                pattern[static_cast<size_t>((y & 1) * 2 + (x & 1))]) {
+                return false;
+            }
+        }
+    }
+
+    out.width = sizes.width;
+    out.height = sizes.height;
+    out.rawWidth = sizes.raw_width;
+    out.rawHeight = sizes.raw_height;
+    out.topMargin = sizes.top_margin;
+    out.leftMargin = sizes.left_margin;
+    out.cfaPattern = pattern;
+    out.blackLevel = static_cast<uint16_t>(std::clamp(
+        static_cast<int>(processor.imgdata.color.black), 0, 65535));
+    const int usableMaximum = std::max(
+        1, static_cast<int>(processor.imgdata.color.maximum) -
+               static_cast<int>(out.blackLevel));
+    out.saturation = static_cast<uint16_t>(
+        std::min(usableMaximum, 65535));
+
+    if (!copyPixels) return true;
+    const size_t pixelCount = static_cast<size_t>(out.width) * out.height;
+    out.data.resize(pixelCount);
+    for (int y = 0; y < out.height; ++y) {
+        const uint16_t* source = raw +
+            static_cast<size_t>(y + out.topMargin) * stride + out.leftMargin;
+        std::memcpy(out.data.data() + static_cast<size_t>(y) * out.width,
+                    source, static_cast<size_t>(out.width) * sizeof(uint16_t));
+    }
+    return true;
+}
+
+bool processOpenedRaw(LibRaw& processor, const std::string& filePath,
+                      RawImageLoader::ImageData& out,
+                      bool calibratedCfa, uint16_t calibratedSaturation) {
+    auto& params = processor.imgdata.params;
+    if (processor.imgdata.idata.filters != 0) {
+        params.user_qual = 3; // AHD demosaic for the full processing path.
+    }
+    params.use_camera_wb = 1;
+    params.use_camera_matrix = 1;
+    params.output_bps = 16;
+    params.no_auto_bright = 1;
+    params.output_color = 1; // sRGB primaries
+    params.gamm[0] = 1.0f;   // linear transfer function
+    params.gamm[1] = 1.0f;
+    if (calibratedCfa) {
+        // Dark/Bias subtraction has already removed the sensor pedestal. Tell
+        // LibRaw not to subtract it again, and retain the camera's usable range.
+        params.user_black = 0;
+        params.user_sat = std::max<int>(1, calibratedSaturation);
+    }
+
+    int result = processor.dcraw_process();
+    if (result != LIBRAW_SUCCESS) {
+        std::cerr << "LibRaw dcraw_process failed: " << filePath
+                  << " (code: " << result << ")" << std::endl;
+        return false;
+    }
+
+    libraw_processed_image_t* image = processor.dcraw_make_mem_image(&result);
+    if (!image || result != LIBRAW_SUCCESS || image->type != LIBRAW_IMAGE_BITMAP) {
+        std::cerr << "LibRaw dcraw_make_mem_image failed: " << filePath << std::endl;
+        if (image) LibRaw::dcraw_clear_mem(image);
+        return false;
+    }
+
+    if (image->bits != 16 || image->colors != 3) {
+        std::cerr << "Unsupported LibRaw output (bits=" << image->bits
+                  << ", colors=" << image->colors << "): " << filePath << std::endl;
+        LibRaw::dcraw_clear_mem(image);
+        return false;
+    }
+
+    const size_t pixelCount = static_cast<size_t>(image->width) * image->height;
+    if (pixelCount > std::numeric_limits<size_t>::max() /
+                         (3 * sizeof(uint16_t))) {
+        LibRaw::dcraw_clear_mem(image);
+        return false;
+    }
+    const size_t valueCount = pixelCount * 3;
+    const size_t expectedSize = valueCount * sizeof(uint16_t);
+    if (image->data_size < expectedSize) {
+        std::cerr << "LibRaw buffer is smaller than expected: " << filePath << std::endl;
+        LibRaw::dcraw_clear_mem(image);
+        return false;
+    }
+
+    out.width = static_cast<int>(image->width);
+    out.height = static_cast<int>(image->height);
+    out.channels = 3;
+    out.data.resize(valueCount);
+    std::memcpy(out.data.data(), image->data, expectedSize);
+    LibRaw::dcraw_clear_mem(image);
+    return true;
+}
+
 } // namespace
 
 bool RawImageLoader::loadMetadata(const std::string& filePath, Metadata& out) {
@@ -221,57 +351,83 @@ bool RawImageLoader::loadRaw(const std::string& filePath, ImageData& out) {
         return false;
     }
 
-    auto& params = processor->imgdata.params;
-    if (processor->imgdata.idata.filters != 0) {
-        params.user_qual = 3; // AHD demosaic for the full processing path.
-    }
-    params.use_camera_wb = 1;
-    params.use_camera_matrix = 1;
-    params.output_bps = 16;
-    params.no_auto_bright = 1;
-    params.output_color = 1; // sRGB primaries
-    params.gamm[0] = 1.0f;   // linear transfer function
-    params.gamm[1] = 1.0f;
+    return processOpenedRaw(*processor, filePath, out, false, 0);
+}
 
-    result = processor->dcraw_process();
+bool RawImageLoader::loadRawCfa(const std::string& filePath,
+                                CfaImageData& out) {
+    out = {};
+    auto processor = std::make_unique<LibRaw>();
+    int result = processor->open_file(filePath.c_str());
     if (result != LIBRAW_SUCCESS) {
-        std::cerr << "LibRaw dcraw_process failed: " << filePath
+        std::cerr << "LibRaw open_file failed: " << filePath
                   << " (code: " << result << ")" << std::endl;
         return false;
     }
-
-    libraw_processed_image_t* image = processor->dcraw_make_mem_image(&result);
-    if (!image || result != LIBRAW_SUCCESS || image->type != LIBRAW_IMAGE_BITMAP) {
-        std::cerr << "LibRaw dcraw_make_mem_image failed: " << filePath << std::endl;
-        if (image) LibRaw::dcraw_clear_mem(image);
+    result = processor->unpack();
+    if (result != LIBRAW_SUCCESS) {
+        std::cerr << "LibRaw unpack failed: " << filePath
+                  << " (code: " << result << ")" << std::endl;
         return false;
     }
-
-    if (image->bits != 16 || image->colors != 3) {
-        std::cerr << "Unsupported LibRaw output (bits=" << image->bits
-                  << ", colors=" << image->colors << "): " << filePath << std::endl;
-        LibRaw::dcraw_clear_mem(image);
+    if (!extractBayerCfa(*processor, out, true)) {
+        std::cerr << "RAW is not a supported repeating Bayer CFA: "
+                  << filePath << std::endl;
+        out = {};
         return false;
     }
-
-    const size_t pixelCount = static_cast<size_t>(image->width) * image->height;
-    if (pixelCount > std::numeric_limits<size_t>::max() / (3 * sizeof(uint16_t))) {
-        LibRaw::dcraw_clear_mem(image);
-        return false;
-    }
-    const size_t valueCount = pixelCount * 3;
-    const size_t expectedSize = valueCount * sizeof(uint16_t);
-    if (image->data_size < expectedSize) {
-        std::cerr << "LibRaw buffer is smaller than expected: " << filePath << std::endl;
-        LibRaw::dcraw_clear_mem(image);
-        return false;
-    }
-
-    out.width = static_cast<int>(image->width);
-    out.height = static_cast<int>(image->height);
-    out.channels = 3;
-    out.data.resize(valueCount);
-    std::memcpy(out.data.data(), image->data, expectedSize);
-    LibRaw::dcraw_clear_mem(image);
+    Metadata metadata;
+    extractMetadata(*processor, metadata);
+    out.iso = metadata.iso;
+    out.exposureTime = metadata.exposureTime;
+    out.cameraModel = metadata.cameraModel;
     return true;
+}
+
+bool RawImageLoader::processCalibratedCfa(
+    const std::string& filePath, const CfaImageData& calibrated,
+    ImageData& out) {
+    out = {};
+    if (calibrated.width <= 0 || calibrated.height <= 0 ||
+        calibrated.data.size() !=
+            static_cast<size_t>(calibrated.width) * calibrated.height ||
+        calibrated.saturation == 0) {
+        return false;
+    }
+
+    auto processor = std::make_unique<LibRaw>();
+    int result = processor->open_file(filePath.c_str());
+    if (result != LIBRAW_SUCCESS) return false;
+    Metadata metadata;
+    extractMetadata(*processor, metadata);
+    copyMetadata(metadata, out);
+    result = processor->unpack();
+    if (result != LIBRAW_SUCCESS) return false;
+
+    CfaImageData current;
+    if (!extractBayerCfa(*processor, current, false) ||
+        current.width != calibrated.width ||
+        current.height != calibrated.height ||
+        current.rawWidth != calibrated.rawWidth ||
+        current.rawHeight != calibrated.rawHeight ||
+        current.topMargin != calibrated.topMargin ||
+        current.leftMargin != calibrated.leftMargin ||
+        current.cfaPattern != calibrated.cfaPattern) {
+        return false;
+    }
+
+    uint16_t* raw = processor->imgdata.rawdata.raw_image;
+    const size_t stride = processor->imgdata.sizes.raw_pitch /
+        sizeof(uint16_t);
+    for (int y = 0; y < calibrated.height; ++y) {
+        uint16_t* destination = raw +
+            static_cast<size_t>(y + calibrated.topMargin) * stride +
+            calibrated.leftMargin;
+        std::memcpy(destination,
+                    calibrated.data.data() +
+                        static_cast<size_t>(y) * calibrated.width,
+                    static_cast<size_t>(calibrated.width) * sizeof(uint16_t));
+    }
+    return processOpenedRaw(*processor, filePath, out, true,
+                            calibrated.saturation);
 }

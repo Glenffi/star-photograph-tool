@@ -59,8 +59,16 @@ uint64_t ProcessingMemoryEstimator::estimatePeakBytes(
 
     // Decode/alignment keeps only a reference and current source frame resident.
     uint64_t alignmentPeak = 0;
-    if (!checkedMultiply(frameBytes,
-                         options.skyGroundSeparation ? 10ULL : 8ULL,
+    uint64_t alignmentFrameEquivalents =
+        options.skyGroundSeparation ? 10ULL : 8ULL;
+    // Bayer calibration keeps floating-point Master Dark/Flat, one CFA input,
+    // one calibrated CFA output and the current RGB decode. Twelve RGB16 frame
+    // equivalents conservatively cover master construction and alignment.
+    if (options.rawCalibration) {
+        alignmentFrameEquivalents = std::max<uint64_t>(
+            alignmentFrameEquivalents, 12ULL);
+    }
+    if (!checkedMultiply(frameBytes, alignmentFrameEquivalents,
                          alignmentPeak)) {
         return 0;
     }

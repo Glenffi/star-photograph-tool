@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -44,6 +45,24 @@ public:
         std::string timestamp;
     };
 
+    struct CfaImageData {
+        // Sensor-space Bayer samples before black subtraction, white balance,
+        // demosaic or camera-to-sRGB conversion. Calibration must happen here.
+        std::vector<uint16_t> data;
+        int width = 0;
+        int height = 0;
+        int rawWidth = 0;
+        int rawHeight = 0;
+        int topMargin = 0;
+        int leftMargin = 0;
+        int iso = 0;
+        double exposureTime = 0.0;
+        std::string cameraModel;
+        std::array<uint8_t, 4> cfaPattern = {};
+        uint16_t blackLevel = 0;
+        uint16_t saturation = 0; // Usable range after calibration removed black.
+    };
+
     // Quality tiers are deliberately separate:
     // - loadMetadata(): RAW header only; never unpacks or demosaics pixels.
     // - loadPreview(): embedded preview first, then a fast half-size fallback.
@@ -52,4 +71,11 @@ public:
     bool loadPreview(const std::string& filePath, int requestedMaxSize,
                      PreviewData& out, Metadata* metadata = nullptr);
     bool loadRaw(const std::string& filePath, ImageData& out);
+
+    // Deep-sky calibration path. Only repeating 2x2 Bayer sensors are accepted
+    // for now; X-Trans and already-demosaiced RAW variants fail explicitly.
+    bool loadRawCfa(const std::string& filePath, CfaImageData& out);
+    bool processCalibratedCfa(const std::string& filePath,
+                              const CfaImageData& calibrated,
+                              ImageData& out);
 };

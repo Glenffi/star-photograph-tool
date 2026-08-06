@@ -18,6 +18,7 @@ public:
         bool dehaze = false;
         bool stretch = false;
         bool starReduction = false;
+        bool rawCalibration = false;
     };
 
     // Estimates the peak resident image buffers used by the current in-memory

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QStringList>
 #include <QWidget>
 #include "core/PresetManager.h"
 #include "core/SkyGroundMask.h"
@@ -53,6 +54,9 @@ public:
     int timelapseStrength() const;
     int timelapseMotionProtection() const;
     bool timelapseProtectGround() const;
+    QStringList darkFramePaths() const;
+    QStringList flatFramePaths() const;
+    QStringList biasFramePaths() const;
     QString processingSignature() const;
     void setMaskPreview(const std::vector<uint8_t>& mask, int w, int h);
     void setDetectMaskEnabled(bool enabled);
@@ -84,6 +88,13 @@ private:
     void updateSkyGroundControls();
     void updateStackMethodDescription();
     void markPresetCustom();
+    void importCalibrationFrames(QStringList& paths, QLabel* countLabel,
+                                 QPushButton* clearButton,
+                                 const QString& dialogTitle);
+    void clearCalibrationFrames(QStringList& paths, QLabel* countLabel,
+                                QPushButton* clearButton);
+    void updateCalibrationCount(QLabel* label, QPushButton* clearButton,
+                                int count);
 
     // 预设
     QWidget* m_presetBar = nullptr;
@@ -114,6 +125,18 @@ private:
     QSlider* m_timelapseMotionProtectionSlider = nullptr;
     QLabel* m_timelapseMotionProtectionLabel = nullptr;
     QCheckBox* m_timelapseProtectGroundCheck = nullptr;
+
+    // 深空校准帧仅在当前会话内保存，避免下次启动引用已经移动的文件。
+    QGroupBox* m_calibrationGroup = nullptr;
+    QLabel* m_darkFrameCount = nullptr;
+    QLabel* m_flatFrameCount = nullptr;
+    QLabel* m_biasFrameCount = nullptr;
+    QPushButton* m_darkFrameClear = nullptr;
+    QPushButton* m_flatFrameClear = nullptr;
+    QPushButton* m_biasFrameClear = nullptr;
+    QStringList m_darkFramePaths;
+    QStringList m_flatFramePaths;
+    QStringList m_biasFramePaths;
 
     // 自动优化组
     QGroupBox* m_optimizeGroup = nullptr;

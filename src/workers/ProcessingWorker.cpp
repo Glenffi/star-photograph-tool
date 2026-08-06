@@ -9,6 +9,7 @@
 #include "core/PhotometricNormalizer.h"
 #include "core/ProcessingMemoryEstimator.h"
 #include "core/PreviewToneMapper.h"
+#include "core/RawCalibrationEngine.h"
 #include "core/RawImageLoader.h"
 #include "core/StackingEngine.h"
 #include "core/StarDetector.h"
@@ -23,6 +24,7 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QImage>
+#include <QSet>
 #include <QStorageInfo>
 #include <QTemporaryDir>
 
@@ -413,6 +415,16 @@ StackingEngine::GroundMethod groundMethodFromName(const QString& name) {
     return StackingEngine::GroundAverage;
 }
 
+bool exposureMatches(double first, double second) {
+    if (!std::isfinite(first) || !std::isfinite(second) ||
+        first <= 0.0 || second <= 0.0) {
+        return false;
+    }
+    const double tolerance = std::max(
+        0.01, std::max(first, second) * 0.01);
+    return std::abs(first - second) <= tolerance;
+}
+
 } // namespace
 
 ProcessingWorker::ProcessingWorker(const QStringList& files,
@@ -449,6 +461,203 @@ void ProcessingWorker::requestCancel() {
 bool ProcessingWorker::stopIfCancelled() {
     if (!m_cancelRequested.load()) return false;
     m_wasCancelled = true;
+    return true;
+}
+
+bool ProcessingWorker::buildDeepSkyCalibration(
+    RawImageLoader& loader,
+    const RawImageLoader::CfaImageData& referenceLight,
+    RawCalibrationEngine::MasterFrames& masters) {
+    if (m_params.biasFramePaths.size() < 3 ||
+        m_params.darkFramePaths.size() < 3 ||
+        m_params.flatFramePaths.size() < 3) {
+        m_errorString = "深空标准校准至少需要 3 张 Bias、3 张 Dark 和 3 张 Flat";
+        return false;
+    }
+    const size_t pixelCount = referenceLight.data.size();
+    if (pixelCount == 0) {
+        m_errorString = "参考 Light 的 Bayer 数据为空";
+        return false;
+    }
+    QSet<QString> uniquePaths;
+    auto addUniqueSet = [&](const QStringList& paths) {
+        for (const QString& path : paths) {
+            QString identity = QFileInfo(path).canonicalFilePath();
+            if (identity.isEmpty()) identity = QFileInfo(path).absoluteFilePath();
+            if (uniquePaths.contains(identity)) return false;
+            uniquePaths.insert(identity);
+        }
+        return true;
+    };
+    if (!addUniqueSet(m_files) ||
+        !addUniqueSet(m_params.biasFramePaths) ||
+        !addUniqueSet(m_params.darkFramePaths) ||
+        !addUniqueSet(m_params.flatFramePaths)) {
+        m_errorString =
+            "同一个 RAW 不能同时作为 Light、Bias、Dark 或 Flat";
+        return false;
+    }
+
+    const int totalCalibrationFrames = m_params.biasFramePaths.size() +
+        m_params.darkFramePaths.size() + m_params.flatFramePaths.size();
+    int processedCalibrationFrames = 0;
+    auto reportCalibrationProgress = [&]() {
+        ++processedCalibrationFrames;
+        emit progress(10 + static_cast<int>(
+            processedCalibrationFrames * 8.0 / totalCalibrationFrames));
+    };
+
+    masters = {};
+    masters.width = referenceLight.width;
+    masters.height = referenceLight.height;
+    masters.rawWidth = referenceLight.rawWidth;
+    masters.rawHeight = referenceLight.rawHeight;
+    masters.topMargin = referenceLight.topMargin;
+    masters.leftMargin = referenceLight.leftMargin;
+    masters.iso = referenceLight.iso;
+    masters.lightExposureTime = referenceLight.exposureTime;
+    masters.cameraModel = referenceLight.cameraModel;
+    masters.cfaPattern = referenceLight.cfaPattern;
+    masters.saturation = referenceLight.saturation;
+
+    auto loadCompatible = [&](const QString& path, const QString& kind,
+                              RawImageLoader::CfaImageData& frame) {
+        if (!loader.loadRawCfa(path.toStdString(), frame)) {
+            m_errorString = QString("无法解码%1: %2")
+                .arg(kind, QFileInfo(path).fileName());
+            return false;
+        }
+        std::string reason;
+        if (!RawCalibrationEngine::compatible(
+                referenceLight, frame, reason)) {
+            m_errorString = QString("%1与 Light 不匹配: %2（%3）")
+                .arg(kind, QFileInfo(path).fileName(),
+                     QString::fromStdString(reason));
+            return false;
+        }
+        return true;
+    };
+
+    emit stageMessage("生成 Master Bias...");
+    {
+        RawCalibrationEngine::MeanAccumulator biasAccumulator(pixelCount);
+        for (const QString& path : m_params.biasFramePaths) {
+            if (stopIfCancelled()) return false;
+            RawImageLoader::CfaImageData frame;
+            if (!loadCompatible(path, "Bias", frame) ||
+                !biasAccumulator.add(frame.data)) {
+                if (m_errorString.isEmpty()) {
+                    m_errorString = "Master Bias 累加失败";
+                }
+                return false;
+            }
+            const double maximumBiasExposure = std::min(
+                0.1, referenceLight.exposureTime * 0.01);
+            if (frame.exposureTime <= 0.0 ||
+                frame.exposureTime > maximumBiasExposure) {
+                m_errorString = QString(
+                    "Bias 必须使用相机最短曝光: %1（当前 %2 s）")
+                    .arg(QFileInfo(path).fileName())
+                    .arg(frame.exposureTime, 0, 'g', 6);
+                return false;
+            }
+            reportCalibrationProgress();
+        }
+        if (!biasAccumulator.finish(masters.bias)) {
+            m_errorString = "Master Bias 生成失败";
+            return false;
+        }
+    }
+
+    emit stageMessage("生成 Master Dark...");
+    {
+        RawCalibrationEngine::MeanAccumulator darkAccumulator(pixelCount);
+        for (const QString& path : m_params.darkFramePaths) {
+            if (stopIfCancelled()) return false;
+            RawImageLoader::CfaImageData frame;
+            if (!loadCompatible(path, "Dark", frame)) return false;
+            if (!exposureMatches(frame.exposureTime,
+                                 referenceLight.exposureTime)) {
+                m_errorString = QString(
+                    "Dark 曝光必须与 Light 匹配: %1（Dark %2 s，Light %3 s）")
+                    .arg(QFileInfo(path).fileName())
+                    .arg(frame.exposureTime, 0, 'g', 6)
+                    .arg(referenceLight.exposureTime, 0, 'g', 6);
+                return false;
+            }
+            if (!darkAccumulator.add(frame.data)) {
+                m_errorString = "Master Dark 累加失败";
+                return false;
+            }
+            reportCalibrationProgress();
+        }
+        if (!darkAccumulator.finish(masters.dark)) {
+            m_errorString = "Master Dark 生成失败";
+            return false;
+        }
+    }
+
+    emit stageMessage("校准并生成 Master Flat...");
+    {
+        RawCalibrationEngine::MeanAccumulator flatAccumulator(pixelCount);
+        for (const QString& path : m_params.flatFramePaths) {
+            if (stopIfCancelled()) return false;
+            RawImageLoader::CfaImageData frame;
+            if (!loadCompatible(path, "Flat", frame)) return false;
+            std::vector<float> normalized;
+            if (!RawCalibrationEngine::normalizeFlat(
+                    frame, masters.bias, normalized) ||
+                !flatAccumulator.add(normalized)) {
+                m_errorString = QString(
+                    "Flat 曝光不足、接近饱和或无法归一化: %1")
+                    .arg(QFileInfo(path).fileName());
+                return false;
+            }
+            reportCalibrationProgress();
+        }
+        if (!flatAccumulator.finish(masters.flat)) {
+            m_errorString = "Master Flat 累加失败";
+            return false;
+        }
+    }
+    if (!RawCalibrationEngine::finalizeMasterFlat(
+            masters.flat, masters.width, masters.height) ||
+        !masters.complete()) {
+        m_errorString = "Master Flat 生成失败";
+        return false;
+    }
+    return true;
+}
+
+bool ProcessingWorker::loadCalibratedRaw(
+    RawImageLoader& loader, const QString& path,
+    const RawCalibrationEngine::MasterFrames& masters,
+    RawImageLoader::ImageData& image) {
+    RawImageLoader::CfaImageData light;
+    if (!loader.loadRawCfa(path.toStdString(), light)) {
+        m_errorString = QString("无法读取 Light Bayer 数据: %1")
+            .arg(QFileInfo(path).fileName());
+        return false;
+    }
+    if (!exposureMatches(light.exposureTime, masters.lightExposureTime)) {
+        m_errorString = QString("Light 曝光与 Master Dark 不匹配: %1")
+            .arg(QFileInfo(path).fileName());
+        return false;
+    }
+    RawImageLoader::CfaImageData calibrated;
+    RawCalibrationEngine::CalibrationStats stats;
+    if (!RawCalibrationEngine::calibrateLight(
+            light, masters, calibrated, &stats) ||
+        !loader.processCalibratedCfa(
+            path.toStdString(), calibrated, image)) {
+        m_errorString = QString("Light 校准或去马赛克失败: %1")
+            .arg(QFileInfo(path).fileName());
+        return false;
+    }
+    ++m_calibratedLightFrameCount;
+    m_calibrationClippedLowPixels += stats.clippedLowPixels;
+    m_calibrationClippedHighPixels += stats.clippedHighPixels;
+    m_calibrationInvalidFlatPixels += stats.invalidFlatPixels;
     return true;
 }
 
@@ -490,6 +699,10 @@ void ProcessingWorker::run() {
     m_timelapseFlickerCorrectedFrames = 0;
     m_timelapseMaximumFlickerGainChange = 0.0;
     m_timelapseMaximumFlickerOffset = 0.0;
+    m_calibratedLightFrameCount = 0;
+    m_calibrationClippedLowPixels = 0;
+    m_calibrationClippedHighPixels = 0;
+    m_calibrationInvalidFlatPixels = 0;
     emit progress(0);
 
     if (m_files.isEmpty()) {
@@ -504,6 +717,14 @@ void ProcessingWorker::run() {
 
     if (m_params.singleFrameMode) {
         runSingleFrame();
+        return;
+    }
+
+    if (m_params.deepSkyMode &&
+        (m_params.biasFramePaths.size() < 3 ||
+         m_params.darkFramePaths.size() < 3 ||
+         m_params.flatFramePaths.size() < 3)) {
+        m_errorString = "深空标准校准至少需要 3 张 Bias、3 张 Dark 和 3 张 Flat";
         return;
     }
 
@@ -524,6 +745,20 @@ void ProcessingWorker::run() {
             explicitReferenceIndex = static_cast<size_t>(i);
         }
         metadata.push_back(std::move(item));
+    }
+
+    if (m_params.deepSkyMode) {
+        const RawImageLoader::Metadata& first = metadata.front();
+        for (int i = 1; i < static_cast<int>(metadata.size()); ++i) {
+            const RawImageLoader::Metadata& item = metadata[static_cast<size_t>(i)];
+            if (item.cameraModel != first.cameraModel || item.iso != first.iso ||
+                !exposureMatches(item.exposureTime, first.exposureTime)) {
+                m_errorString = QString(
+                    "深空 Light 必须来自同一相机、ISO 和曝光时间: %1")
+                    .arg(QFileInfo(m_files[i]).fileName());
+                return;
+            }
+        }
     }
 
     const bool automaticReference =
@@ -597,6 +832,7 @@ void ProcessingWorker::run() {
     estimateOptions.dehaze = m_params.dewarpEnabled;
     estimateOptions.stretch = m_params.stretchEnabled;
     estimateOptions.starReduction = m_params.starReduceEnabled;
+    estimateOptions.rawCalibration = m_params.deepSkyMode;
     const uint64_t estimatedBytes = ProcessingMemoryEstimator::estimatePeakBytes(
         metadataWidth, metadataHeight, estimateOptions);
     const ProcessingMemoryEstimator::SystemMemoryInfo memoryInfo =
@@ -633,6 +869,22 @@ void ProcessingWorker::run() {
         return;
     }
 
+    RawCalibrationEngine::MasterFrames calibrationMasters;
+    RawImageLoader::CfaImageData calibrationReference;
+    if (m_params.deepSkyMode) {
+        emit stageMessage("读取参考 Light 的 Bayer 数据...");
+        if (!loader.loadRawCfa(
+                m_files[static_cast<int>(referenceIndex)].toStdString(),
+                calibrationReference)) {
+            m_errorString = "参考 Light 不是当前支持的 2×2 Bayer RAW";
+            return;
+        }
+        if (!buildDeepSkyCalibration(
+                loader, calibrationReference, calibrationMasters)) {
+            return;
+        }
+    }
+
     DiskFrameStore alignedCache("starprocessor-aligned");
     DiskFrameStore originalCache("starprocessor-original");
     if (!alignedCache.isValid() ||
@@ -643,8 +895,30 @@ void ProcessingWorker::run() {
 
     emit stageMessage("加载参考帧...");
     RawImageLoader::ImageData referenceImage;
-    if (!loader.loadRaw(m_files[static_cast<int>(referenceIndex)].toStdString(),
-                        referenceImage)) {
+    bool referenceLoaded = false;
+    if (m_params.deepSkyMode) {
+        RawImageLoader::CfaImageData calibrated;
+        RawCalibrationEngine::CalibrationStats stats;
+        referenceLoaded = RawCalibrationEngine::calibrateLight(
+                calibrationReference, calibrationMasters,
+                calibrated, &stats) &&
+            loader.processCalibratedCfa(
+                m_files[static_cast<int>(referenceIndex)].toStdString(),
+                calibrated, referenceImage);
+        if (referenceLoaded) {
+            ++m_calibratedLightFrameCount;
+            m_calibrationClippedLowPixels += stats.clippedLowPixels;
+            m_calibrationClippedHighPixels += stats.clippedHighPixels;
+            m_calibrationInvalidFlatPixels += stats.invalidFlatPixels;
+        }
+        calibrationReference.data.clear();
+        calibrationReference.data.shrink_to_fit();
+    } else {
+        referenceLoaded = loader.loadRaw(
+            m_files[static_cast<int>(referenceIndex)].toStdString(),
+            referenceImage);
+    }
+    if (!referenceLoaded) {
         m_errorString = QString("无法加载参考帧: %1")
                             .arg(QFileInfo(m_files[static_cast<int>(referenceIndex)]).fileName());
         return;
@@ -750,7 +1024,12 @@ void ProcessingWorker::run() {
         if (static_cast<size_t>(i) == referenceIndex) continue;
 
         RawImageLoader::ImageData sourceImage;
-        if (!loader.loadRaw(m_files[i].toStdString(), sourceImage)) {
+        const bool sourceLoaded = m_params.deepSkyMode
+            ? loadCalibratedRaw(
+                  loader, m_files[i], calibrationMasters, sourceImage)
+            : loader.loadRaw(m_files[i].toStdString(), sourceImage);
+        if (!sourceLoaded) {
+            if (m_params.deepSkyMode) return;
             qWarning() << "RAW 加载失败，跳过:" << m_files[i];
             continue;
         }

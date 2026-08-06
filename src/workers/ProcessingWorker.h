@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/FrameQualityEvaluator.h"
+#include "core/RawCalibrationEngine.h"
 #include "core/SkyGroundMask.h"
 #include "core/StarReducer.h"
 
@@ -22,6 +23,10 @@ public:
         // stacking while retaining the same finishing and export stages.
         bool singleFrameMode = false;
         bool timelapseMode = false;
+        bool deepSkyMode = false;
+        QStringList darkFramePaths;
+        QStringList flatFramePaths;
+        QStringList biasFramePaths;
         int timelapseWindowSize = 5;
         int timelapseStrength = 80;
         int timelapseMotionProtection = 75;
@@ -112,6 +117,18 @@ public:
     double timelapseMaximumFlickerOffset() const {
         return m_timelapseMaximumFlickerOffset;
     }
+    int calibratedLightFrameCount() const {
+        return m_calibratedLightFrameCount;
+    }
+    uint64_t calibrationClippedLowPixels() const {
+        return m_calibrationClippedLowPixels;
+    }
+    uint64_t calibrationClippedHighPixels() const {
+        return m_calibrationClippedHighPixels;
+    }
+    uint64_t calibrationInvalidFlatPixels() const {
+        return m_calibrationInvalidFlatPixels;
+    }
 
     void requestCancel();
 
@@ -126,6 +143,14 @@ private:
     bool stopIfCancelled();
     void runSingleFrame();
     void runTimelapse();
+    bool buildDeepSkyCalibration(
+        RawImageLoader& loader,
+        const RawImageLoader::CfaImageData& referenceLight,
+        RawCalibrationEngine::MasterFrames& masters);
+    bool loadCalibratedRaw(
+        RawImageLoader& loader, const QString& path,
+        const RawCalibrationEngine::MasterFrames& masters,
+        RawImageLoader::ImageData& image);
     bool finishResult(std::vector<uint16_t>& resultRgb, int width, int height,
                       std::vector<uint8_t>& mask);
 
@@ -173,4 +198,8 @@ private:
     int m_timelapseFlickerCorrectedFrames = 0;
     double m_timelapseMaximumFlickerGainChange = 0.0;
     double m_timelapseMaximumFlickerOffset = 0.0;
+    int m_calibratedLightFrameCount = 0;
+    uint64_t m_calibrationClippedLowPixels = 0;
+    uint64_t m_calibrationClippedHighPixels = 0;
+    uint64_t m_calibrationInvalidFlatPixels = 0;
 };

@@ -70,6 +70,22 @@ void testTimelapseRejectsTooFewFrames() {
           "Rejected timelapse input should not report output frames");
 }
 
+void testDeepSkyRequiresCalibrationSets() {
+    ProcessingWorker::Params params;
+    params.deepSkyMode = true;
+    ProcessingWorker worker(
+        {"first.raw", "second.raw"}, "first.raw", params);
+    worker.start();
+    check(worker.wait(3000),
+          "Deep-sky calibration validation should finish promptly");
+    check(worker.errorString().contains("Bias") &&
+              worker.errorString().contains("Dark") &&
+              worker.errorString().contains("Flat"),
+          "Deep-sky input should identify every required calibration set");
+    check(worker.calibratedLightFrameCount() == 0,
+          "Rejected deep-sky input should not report calibrated lights");
+}
+
 } // namespace
 
 int main(int argc, char* argv[]) {
@@ -79,6 +95,7 @@ int main(int argc, char* argv[]) {
     testRawLoaderFitsWorkerStack();
     testSingleFrameFailureUsesDedicatedPath();
     testTimelapseRejectsTooFewFrames();
+    testDeepSkyRequiresCalibrationSets();
     if (failures == 0) {
         std::cout << "All worker tests passed.\n";
         return 0;
