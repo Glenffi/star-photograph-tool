@@ -1428,6 +1428,69 @@ void testStarDetectionAndReduction() {
           "A consistently blue star should retain its chromaticity because "
           "its wing is not more saturated than its core");
 
+    // A round subpixel structuring element must not favor horizontal/vertical
+    // stars over a diagonal trail. This fixture represents the roughly
+    // three-pixel motion seen in a 20 s ultra-wide exposure.
+    std::vector<uint16_t> trailedRgb(
+        static_cast<size_t>(width) * height * 3, 1600);
+    const auto addTrailedStar = [&](double centerX, double centerY,
+                                    double angle) {
+        const double cosine = std::cos(angle);
+        const double sine = std::sin(angle);
+        for (int y = 0; y < height; ++y) {
+            for (int x = 0; x < width; ++x) {
+                const double dx = x - centerX;
+                const double dy = y - centerY;
+                const double major = dx * cosine + dy * sine;
+                const double minor = -dx * sine + dy * cosine;
+                const double signal = 26000.0 * std::exp(
+                    -(major * major / (2.0 * 2.0 * 2.0) +
+                      minor * minor / (2.0 * 1.15 * 1.15)));
+                const size_t pixel = static_cast<size_t>(y) * width + x;
+                for (int channel = 0; channel < 3; ++channel) {
+                    trailedRgb[pixel * 3 + channel] =
+                        static_cast<uint16_t>(std::clamp(
+                            std::lround(trailedRgb[pixel * 3 + channel] +
+                                        signal),
+                            0L, 65535L));
+                }
+            }
+        }
+    };
+    addTrailedStar(24.25, 24.25, 0.0);
+    addTrailedStar(70.25, 48.25, 0.7853981633974483);
+    const auto localStarFlux = [&](const std::vector<uint16_t>& values,
+                                   double centerX, double centerY) {
+        double flux = 0.0;
+        for (int y = std::max(0, static_cast<int>(centerY) - 7);
+             y <= std::min(height - 1, static_cast<int>(centerY) + 7); ++y) {
+            for (int x = std::max(0, static_cast<int>(centerX) - 7);
+                 x <= std::min(width - 1, static_cast<int>(centerX) + 7); ++x) {
+                const size_t index =
+                    (static_cast<size_t>(y) * width + x) * 3;
+                flux += std::max(0, static_cast<int>(values[index]) - 1600);
+            }
+        }
+        return flux;
+    };
+    const double horizontalFluxBefore =
+        localStarFlux(trailedRgb, 24.25, 24.25);
+    const double diagonalFluxBefore =
+        localStarFlux(trailedRgb, 70.25, 48.25);
+    StarReductionStats trailedStats;
+    check(StarReducer::reduce(
+              trailedRgb, width, height, 70, &trailedStats),
+          "Star reduction should process mildly trailed stars");
+    const double horizontalRetention =
+        localStarFlux(trailedRgb, 24.25, 24.25) / horizontalFluxBefore;
+    const double diagonalRetention =
+        localStarFlux(trailedRgb, 70.25, 48.25) / diagonalFluxBefore;
+    check(trailedStats.processedStars >= 2 &&
+              std::abs(horizontalRetention - diagonalRetention) < 0.08,
+          "Round subpixel erosion should have little orientation bias "
+          "(horizontal=" + std::to_string(horizontalRetention) +
+          ", diagonal=" + std::to_string(diagonalRetention) + ")");
+
     std::vector<uint16_t> saturatedLargeStar(
         static_cast<size_t>(width) * height * 3, 1500);
     for (int y = 0; y < height; ++y) {
@@ -1444,12 +1507,16 @@ void testStarDetectionAndReduction() {
             saturatedLargeStar[pixel * 3 + 2] = value;
         }
     }
+    const std::vector<uint16_t> saturatedLargeStarInput = saturatedLargeStar;
     StarReductionStats saturatedStats;
     check(StarReducer::reduce(
               saturatedLargeStar, width, height, 70, &saturatedStats),
           "Star reduction should safely inspect a saturated large star");
     check(saturatedStats.defringedPixels == 0,
           "Automatic defringing should skip saturated large stars");
+    check(saturatedLargeStar == saturatedLargeStarInput,
+          "Automatic reduction should preserve saturated large stars instead "
+          "of carving clipped halos into rings");
 
     std::vector<uint16_t> overlapLuminance(width * height, 1200);
     addGaussianStar(overlapLuminance, width, height,
@@ -1789,6 +1856,8 @@ void testFrameQualitySelection() {
           "Frame quality metrics should distinguish sharp and defocused stars");
     check(metrics[1].usableStars > metrics[3].usableStars,
           "Frame quality metrics should detect star loss in a poor frame");
+    check(FrameQualityEvaluator::medianValidEllipticity(metrics) > 0.0,
+          "Frame quality summary should expose the valid sequence star shape");
 
     FrameQualitySelection selection;
     check(FrameQualityEvaluator::selectSequence(

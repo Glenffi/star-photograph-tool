@@ -1358,9 +1358,20 @@ private slots:
                 const int rejectedCount = worker->qualityRejectedFiles().size();
                 const int skippedCount = static_cast<int>(
                     worker->skippedFrames().size());
+                const double medianEllipticity =
+                    FrameQualityEvaluator::medianValidEllipticity(
+                        worker->frameQualityMetrics());
+                const bool elongatedStars =
+                    m_scene != ProcessingScene::SingleFrame &&
+                    m_scene != ProcessingScene::Timelapse &&
+                    m_scene != ProcessingScene::StarTrail &&
+                    medianEllipticity >= 0.22;
                 setWorkflowStage(3,
-                    QString::fromUtf8("处理完成 · %1 帧 · %2×%3")
-                        .arg(frameCount).arg(m_cachedWidth).arg(m_cachedHeight),
+                    (QString::fromUtf8("处理完成 · %1 帧 · %2×%3")
+                        .arg(frameCount).arg(m_cachedWidth).arg(m_cachedHeight) +
+                     (elongatedStars
+                          ? QString::fromUtf8(" · 星点偏长，请检查曝光拖线/像差")
+                          : QString())),
                     true);
                 if (currentProcessingSignature() !=
                     m_lastProcessedSignature) {
@@ -1382,11 +1393,15 @@ private slots:
                                       "星轨合成完成 — %1×%2 · %3 帧 | %4")
                                       .arg(m_cachedWidth).arg(m_cachedHeight)
                                       .arg(frameCount).arg(worker->outputFile())
-                                : QString::fromUtf8(
+                        : (QString::fromUtf8(
                               "处理完成 — %1×%2 已堆栈 %3 帧 | 参考 %4 | 质量排除 %5 帧 | 跳过 %6 帧")
                               .arg(m_cachedWidth).arg(m_cachedHeight)
                               .arg(frameCount).arg(referenceName)
-                              .arg(rejectedCount).arg(skippedCount),
+                              .arg(rejectedCount).arg(skippedCount) +
+                           (elongatedStars
+                                ? QString::fromUtf8(
+                                      " | 星点偏长，检查曝光拖线/像差")
+                                : QString())),
                     5000);
             } else {
                 QMessageBox::warning(this, "处理失败", worker->errorString());

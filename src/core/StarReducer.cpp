@@ -295,34 +295,89 @@ size_t reduceStarColorFringes(
     return affectedPixels;
 }
 
-void erodeRoundLuminance(const std::vector<uint16_t>& luminance,
-                         int width, int height, int radius,
-                         std::vector<uint16_t>& eroded) {
-    eroded.resize(luminance.size());
-    const int radiusSquared = radius * radius;
+double sampleLuminanceBilinear(const std::vector<uint16_t>& luminance,
+                               int width, int height,
+                               double x, double y) {
+    x = std::clamp(x, 0.0, static_cast<double>(width - 1));
+    y = std::clamp(y, 0.0, static_cast<double>(height - 1));
+    const int x0 = static_cast<int>(std::floor(x));
+    const int y0 = static_cast<int>(std::floor(y));
+    const int x1 = std::min(x0 + 1, width - 1);
+    const int y1 = std::min(y0 + 1, height - 1);
+    const double tx = x - x0;
+    const double ty = y - y0;
+    const auto at = [&](int sampleX, int sampleY) {
+        return static_cast<double>(
+            luminance[static_cast<size_t>(sampleY) * width + sampleX]);
+    };
+    const double top = at(x0, y0) * (1.0 - tx) + at(x1, y0) * tx;
+    const double bottom = at(x0, y1) * (1.0 - tx) + at(x1, y1) * tx;
+    return top * (1.0 - ty) + bottom * ty;
+}
+
+void erodeRoundLuminanceSubpixel(
+        const std::vector<uint16_t>& luminance,
+        int width, int height, double radius,
+        std::vector<uint16_t>& eroded) {
+    if (radius <= 1e-6) {
+        eroded = luminance;
+        return;
+    }
+
+    eroded.assign(luminance.size(), 0);
+    constexpr int sampleCount = 16;
+    constexpr double twoPi = 6.28318530717958647692;
+    std::array<double, sampleCount> offsetX = {};
+    std::array<double, sampleCount> offsetY = {};
+    for (int sample = 0; sample < sampleCount; ++sample) {
+        const double angle = twoPi * sample / sampleCount;
+        offsetX[sample] = std::cos(angle) * radius;
+        offsetY[sample] = std::sin(angle) * radius;
+    }
+
+    // The star layer is zero outside detected footprints, so the branch keeps
+    // full-frame work bounded to a cheap scan while the subpixel samples are
+    // evaluated only where a detected star actually contributed signal.
     for (int y = 0; y < height; ++y) {
         for (int x = 0; x < width; ++x) {
             const size_t pixel = static_cast<size_t>(y) * width + x;
-            uint16_t darkest = luminance[pixel];
-            for (int dy = -radius; dy <= radius; ++dy) {
-                for (int dx = -radius; dx <= radius; ++dx) {
-                    if (dx * dx + dy * dy > radiusSquared) continue;
-                    const int sampleX = x + dx;
-                    const int sampleY = y + dy;
-                    if (sampleX < 0 || sampleX >= width ||
-                        sampleY < 0 || sampleY >= height) {
-                        continue;
-                    }
-                    const size_t sample =
-                        static_cast<size_t>(sampleY) * width + sampleX;
-                    if (luminance[sample] < darkest) {
-                        darkest = luminance[sample];
-                    }
-                }
+            if (luminance[pixel] == 0) continue;
+            double darkest = luminance[pixel];
+            for (int sample = 0; sample < sampleCount; ++sample) {
+                darkest = std::min(
+                    darkest,
+                    sampleLuminanceBilinear(
+                        luminance, width, height,
+                        x + offsetX[sample], y + offsetY[sample]));
             }
-            eroded[pixel] = darkest;
+            eroded[pixel] = static_cast<uint16_t>(std::clamp(
+                std::lround(darkest), 0L, 65535L));
         }
     }
+}
+
+bool hasSaturatedCore(const std::vector<uint16_t>& rgb,
+                      int width, int height,
+                      const StarPoint& star) {
+    const int centerX = std::clamp(
+        static_cast<int>(std::lround(star.x)), 0, width - 1);
+    const int centerY = std::clamp(
+        static_cast<int>(std::lround(star.y)), 0, height - 1);
+    const int radius = std::clamp(
+        static_cast<int>(std::ceil(star.fwhm * 0.5)), 1, 5);
+    for (int y = std::max(0, centerY - radius);
+         y <= std::min(height - 1, centerY + radius); ++y) {
+        for (int x = std::max(0, centerX - radius);
+             x <= std::min(width - 1, centerX + radius); ++x) {
+            const size_t index =
+                (static_cast<size_t>(y) * width + x) * 3;
+            if (rgb[index] >= 65000 || rgb[index + 1] >= 65000 ||
+                rgb[index + 2] >= 65000) {
+                return true;
+            }
+        }
+    }
+    return false;
 }
 
 int32_t blendLayerSample(int32_t first, int32_t second, double amount) {
@@ -385,13 +440,9 @@ bool StarReducer::reduce(std::vector<uint16_t>& image, int width, int height,
             (*processingMask)[static_cast<size_t>(centerY) * width + centerX] < 128) {
             continue;
         }
-        const bool prominent =
-            starIndex < std::min<size_t>(2000, stars.size() / 20);
-        const bool compact =
-            star.fwhm <= 7.5 && star.ellipticity <= 0.68;
-        if (star.fwhm < 0.7 || star.fwhm > 20.0 ||
-            star.ellipticity > 0.7 || star.flux < 100.0 ||
-            (!compact && !prominent)) {
+        if (star.fwhm < 0.7 || star.fwhm > 8.0 ||
+            star.ellipticity > 0.60 || star.flux < 100.0 ||
+            hasSaturatedCore(image, width, height, star)) {
             continue;
         }
         filteredStars.push_back(star);
@@ -404,6 +455,9 @@ bool StarReducer::reduce(std::vector<uint16_t>& image, int width, int height,
     }
     if (filteredStars.empty()) return true;
 
+    // Saturated and large stars were excluded above: replacing their broad,
+    // clipped cores with an annulus estimate can leave a false ring once the
+    // reconstructed star layer is contracted.
     // Build an explicit starless layer from immutable input. The center of each
     // footprint is fully replaced with its local annulus median; only the outer
     // ~1 px is feathered. For overlaps, keep the darkest valid proposal.
@@ -489,18 +543,16 @@ bool StarReducer::reduce(std::vector<uint16_t>& image, int width, int height,
         }
     }
 
-    std::vector<uint16_t> erodedRadiusOne;
-    erodeRoundLuminance(starLayerLuminance,
-                        width, height, 1, erodedRadiusOne);
-
     const double normalizedStrength = strength / 100.0;
-    // Values around 0.3-1.2 px cover normal photographic reduction. The upper
-    // end extends to 2 px so the existing 70-100 "strong/near-clear" range can
-    // remove undersampled stars instead of merely lowering their peaks.
-    const double effectiveRadius = normalizedStrength * 2.0;
-    const bool useSecondRadius = effectiveRadius > 1.0;
-    const double interpolation = useSecondRadius
-        ? effectiveRadius - 1.0 : effectiveRadius;
+    // A continuously sampled disk approximates Photoshop's round Minimum
+    // behavior without snapping the operation to a 4-neighbour pixel cross.
+    // Faint-star removal is handled separately below, so a radius above 1.2 px
+    // is unnecessary and would damage undersampled or slightly trailed stars.
+    const double effectiveRadius = normalizedStrength * 1.2;
+    std::vector<uint16_t> erodedLuminance;
+    erodeRoundLuminanceSubpixel(
+        starLayerLuminance, width, height,
+        effectiveRadius, erodedLuminance);
 
     std::vector<uint16_t> starPeaks;
     starPeaks.reserve(filteredStars.size());
@@ -519,23 +571,10 @@ bool StarReducer::reduce(std::vector<uint16_t>& image, int width, int height,
     const double residualFloor =
         typicalStarPeak * 0.75 * clearProgress;
 
-    std::vector<uint16_t> erodedRadiusTwo;
-    if (useSecondRadius) {
-        // Applying the radius-1 disk twice produces a compact round diamond
-        // footprint at this scale without copying a neighbouring pixel's RGB.
-        erodeRoundLuminance(erodedRadiusOne,
-                            width, height, 1, erodedRadiusTwo);
-    }
-
     for (size_t pixel = 0; pixel < pixelCount; ++pixel) {
-        const double blendedLuminance = useSecondRadius
-            ? erodedRadiusOne[pixel] * (1.0 - interpolation) +
-                  erodedRadiusTwo[pixel] * interpolation
-            : starLayerLuminance[pixel] * (1.0 - interpolation) +
-                  erodedRadiusOne[pixel] * interpolation;
-        const double retainedLuminance = blendedLuminance <= residualFloor
+        const double retainedLuminance = erodedLuminance[pixel] <= residualFloor
             ? 0.0
-            : blendedLuminance - residualFloor;
+            : erodedLuminance[pixel] - residualFloor;
         const double retainedFraction = starLayerLuminance[pixel] > 0
             ? retainedLuminance / starLayerLuminance[pixel] : 0.0;
         for (int channel = 0; channel < 3; ++channel) {

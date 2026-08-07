@@ -819,8 +819,8 @@ void ParamsPanel::setupUI() {
     m_starReduceCheck = new QCheckBox(QString::fromUtf8("启用缩星"), m_starReduceGroup);
     m_starReduceCheck->setEnabled(true);
     m_starReduceCheck->setToolTip(QString::fromUtf8(
-        "自动建立无星层，仅对星层应用圆形 Minimum\n"
-        "关闭时保留原始星点"));
+        "自动建立无星层，仅对星层应用亚像素圆形 Minimum\n"
+        "饱和大星保持原样，避免宽光晕形成暗环"));
     m_starReduceCheck->setStyleSheet(m_dewarpCheck->styleSheet());
     connect(m_starReduceCheck, &QCheckBox::toggled, this, &ParamsPanel::onCheckChanged);
     starRow->addWidget(m_starReduceCheck);

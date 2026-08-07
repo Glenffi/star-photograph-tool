@@ -679,6 +679,22 @@ int main(int argc, char* argv[]) {
         qualityFrames.append(quality);
     }
     report["frameQuality"] = qualityFrames;
+    const double medianFrameEllipticity =
+        FrameQualityEvaluator::medianValidEllipticity(qualityMetrics);
+    const bool starShapeWarning =
+        !singleFrameMode && !timelapseMode && !starTrailMode &&
+        medianFrameEllipticity >= 0.22;
+    report["medianFrameEllipticity"] = medianFrameEllipticity;
+    report["starShapeWarning"] = starShapeWarning;
+    report["starShapeWarningReason"] = starShapeWarning
+        ? QString::fromUtf8("星点偏长，请检查单帧曝光拖线或镜头像差")
+        : QString();
+    if (starShapeWarning) {
+        std::cerr << "Warning: median star ellipticity is "
+                  << medianFrameEllipticity
+                  << "; inspect single-frame trailing or lens aberration."
+                  << std::endl;
+    }
     QJsonArray skippedFrames;
     for (const ProcessingWorker::SkippedFrameInfo& skipped :
          worker.skippedFrames()) {

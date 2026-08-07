@@ -316,3 +316,15 @@ bool FrameQualityEvaluator::selectSequence(
     selection.validMetricCount = validIndices.size();
     return true;
 }
+
+double FrameQualityEvaluator::medianValidEllipticity(
+        const std::vector<FrameQualityMetrics>& metrics) {
+    std::vector<double> values;
+    values.reserve(metrics.size());
+    for (const FrameQualityMetrics& item : metrics) {
+        if (item.valid && item.medianEllipticity > 0.0) {
+            values.push_back(item.medianEllipticity);
+        }
+    }
+    return median(std::move(values));
+}

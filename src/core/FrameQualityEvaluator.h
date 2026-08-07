@@ -41,4 +41,8 @@ public:
                                size_t preferredCenterIndex,
                                bool rejectSevereOutliers,
                                FrameQualitySelection& selection);
+
+    // Returns zero when no valid per-frame star shape metric is available.
+    static double medianValidEllipticity(
+        const std::vector<FrameQualityMetrics>& metrics);
 };
