@@ -8,6 +8,7 @@ enum class ProcessingScene {
     Nightscape,
     DeepSky,
     SkyGround,
+    StarTrail,
     Timelapse
 };
 

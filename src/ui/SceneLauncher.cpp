@@ -199,12 +199,17 @@ SceneLauncher::SceneLauncher(QWidget* parent)
             QString::fromUtf8("固定机位"), QString::fromUtf8("天地分离合成"),
             QString::fromUtf8("天空跟随星点对齐，地景保持原坐标，避免山体和建筑拖影。"),
             QString::fromUtf8("检测地平线  →  双路堆栈  →  融合"));
-    addCard(2, 0, ProcessingScene::Timelapse,
+    addCard(2, 0, ProcessingScene::StarTrail,
+            UiAssets::Glyph::StarTrail, QColor("#FF7F6E"),
+            QString::fromUtf8("3 张以上 · 固定机位"), QString::fromUtf8("星轨合成"),
+            QString::fromUtf8("保持星空原坐标逐帧取亮，可生成连续或彗星式星轨，并单独保护地景。"),
+            QString::fromUtf8("素材  →  星轨累积  →  地景融合  →  优化"));
+    addCard(2, 1, ProcessingScene::Timelapse,
             UiAssets::Glyph::Timelapse, QColor("#59C9E8"),
             QString::fromUtf8("3 张以上"), QString::fromUtf8("星空延时序列降噪"),
             QString::fromUtf8("以每张 RAW 为中心对齐邻近帧，逐张输出降噪 TIFF；固定地景保持原位。"),
             QString::fromUtf8("预分析  →  滑动窗口  →  时域降噪  →  图片序列"),
-            2, 150);
+            1, 166);
 
     contentLayout->addLayout(grid);
     outer->addStretch();

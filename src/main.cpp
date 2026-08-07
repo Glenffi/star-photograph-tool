@@ -239,6 +239,8 @@ private:
             return QString::fromUtf8("深空天体");
         case ProcessingScene::SkyGround:
             return QString::fromUtf8("天地分离");
+        case ProcessingScene::StarTrail:
+            return QString::fromUtf8("星轨合成");
         case ProcessingScene::Timelapse:
             return QString::fromUtf8("延时序列");
         }
@@ -247,7 +249,8 @@ private:
 
     int requiredFrameCount() const {
         if (m_scene == ProcessingScene::SingleFrame) return 1;
-        if (m_scene == ProcessingScene::Timelapse) return 3;
+        if (m_scene == ProcessingScene::Timelapse ||
+            m_scene == ProcessingScene::StarTrail) return 3;
         return 2;
     }
 
@@ -272,6 +275,10 @@ private:
         case ProcessingScene::DeepSky:
             m_sceneStepNames = {QString::fromUtf8("校准"), QString::fromUtf8("对齐"),
                                 QString::fromUtf8("堆栈"), QString::fromUtf8("结果")};
+            break;
+        case ProcessingScene::StarTrail:
+            m_sceneStepNames = {QString::fromUtf8("素材"), QString::fromUtf8("星轨累积"),
+                                QString::fromUtf8("地景融合"), QString::fromUtf8("结果")};
             break;
         case ProcessingScene::Timelapse:
             m_sceneStepNames = {QString::fromUtf8("素材"), QString::fromUtf8("预分析"),
@@ -766,10 +773,13 @@ private:
         options.dehazeStrength = m_paramsPanel->dewarpStrength();
         options.stretchEnabled = m_paramsPanel->stretchEnabled();
         options.skyGroundSeparation =
-            m_scene == ProcessingScene::SkyGround &&
-            m_paramsPanel->skyGroundSeparationEnabled();
+            (m_scene == ProcessingScene::SkyGround &&
+             m_paramsPanel->skyGroundSeparationEnabled()) ||
+            (m_scene == ProcessingScene::StarTrail &&
+             m_paramsPanel->starTrailProtectGround());
         options.groundDetailStrength =
-            options.skyGroundSeparation
+            m_scene == ProcessingScene::SkyGround &&
+                options.skyGroundSeparation
                 ? m_paramsPanel->groundDetailStrength() : 0;
         options.starReductionEnabled =
             m_paramsPanel->starReduceEnabled();
@@ -1062,7 +1072,9 @@ private slots:
                 requiredFrameCount() == 1
                     ? QString::fromUtf8("请先导入 1 张 RAW 图像")
                     : requiredFrameCount() == 3
-                        ? QString::fromUtf8("延时降噪需要至少 3 张未排除的 RAW 图像")
+                        ? (m_scene == ProcessingScene::StarTrail
+                               ? QString::fromUtf8("星轨合成需要至少 3 张未排除的固定机位 RAW 图像")
+                               : QString::fromUtf8("延时降噪需要至少 3 张未排除的 RAW 图像"))
                         : QString::fromUtf8("需要至少 2 张未排除的图像才能开始处理"));
             return;
         }
@@ -1129,6 +1141,7 @@ private slots:
         ProcessingWorker::Params params;
         params.singleFrameMode = m_scene == ProcessingScene::SingleFrame;
         params.timelapseMode = m_scene == ProcessingScene::Timelapse;
+        params.starTrailMode = m_scene == ProcessingScene::StarTrail;
         params.deepSkyMode = m_scene == ProcessingScene::DeepSky;
         params.darkFramePaths = m_paramsPanel->darkFramePaths();
         params.flatFramePaths = m_paramsPanel->flatFramePaths();
@@ -1139,6 +1152,11 @@ private slots:
             m_paramsPanel->timelapseMotionProtection();
         params.timelapseProtectGround =
             m_paramsPanel->timelapseProtectGround();
+        params.starTrailCometStrength =
+            m_paramsPanel->starTrailCometStrength();
+        params.starTrailReverse = m_paramsPanel->starTrailReverse();
+        params.starTrailProtectGround =
+            m_paramsPanel->starTrailProtectGround();
         params.stackMethod = m_paramsPanel->stackMethod();
         params.kappaValue = m_paramsPanel->kappaValue();
         params.autoRejectLowQualityFrames =
@@ -1162,19 +1180,22 @@ private slots:
         params.dewarpEnabled = m_paramsPanel->dewarpEnabled();
         params.dewarpStrength = m_paramsPanel->dewarpStrength();
         params.stretchEnabled = m_paramsPanel->stretchEnabled();
-        params.starReduceEnabled = m_paramsPanel->starReduceEnabled();
+        params.starReduceEnabled = !params.starTrailMode &&
+            m_paramsPanel->starReduceEnabled();
         params.starReduceStrength = m_paramsPanel->starReduceStrength();
         params.outputFormat = m_paramsPanel->outputFormat();
         params.outputPath = m_paramsPanel->outputPath();
         params.skyGroundSepEnabled = !params.singleFrameMode &&
             !params.timelapseMode &&
+            !params.starTrailMode &&
             !params.deepSkyMode &&
             m_paramsPanel->skyGroundSeparationEnabled();
         params.skyGroundMode = m_paramsPanel->skyGroundMode();
         params.userMaskPath = m_paramsPanel->userMaskPath();
         params.featherRadius = m_paramsPanel->featherRadius();
         params.groundStackMethod = m_paramsPanel->groundStackMethod();
-        params.groundDetailStrength = m_paramsPanel->groundDetailStrength();
+        params.groundDetailStrength = params.starTrailMode
+            ? 0 : m_paramsPanel->groundDetailStrength();
 
         // A new run invalidates the previous export immediately. A cancelled or
         // failed run must never leave an old result looking current.
@@ -1222,7 +1243,18 @@ private slots:
         connect(worker, &ProcessingWorker::stageMessage, dialog, [this, dialog](const QString& msg) {
             dialog->setLabelText(msg);
             int stage = 1;
-            if (m_scene == ProcessingScene::Timelapse) {
+            if (m_scene == ProcessingScene::StarTrail) {
+                if (msg.contains(QString::fromUtf8("地景")) ||
+                    msg.contains(QString::fromUtf8("蒙版"))) {
+                    stage = 2;
+                } else if (msg.contains(QString::fromUtf8("优化")) ||
+                           msg.contains(QString::fromUtf8("降噪")) ||
+                           msg.contains(QString::fromUtf8("色彩")) ||
+                           msg.contains(QString::fromUtf8("导出")) ||
+                           msg.contains(QString::fromUtf8("完成"))) {
+                    stage = 3;
+                }
+            } else if (m_scene == ProcessingScene::Timelapse) {
                 if (msg.contains(QString::fromUtf8("逐帧")) ||
                     msg.contains(QString::fromUtf8("滑动窗口"))) {
                     stage = 2;
@@ -1345,7 +1377,12 @@ private slots:
                                   "延时降噪完成 — 已输出 %1 张 · %2×%3 | %4")
                                   .arg(frameCount).arg(m_cachedWidth).arg(m_cachedHeight)
                                   .arg(worker->outputFile())
-                            : QString::fromUtf8(
+                            : m_scene == ProcessingScene::StarTrail
+                                ? QString::fromUtf8(
+                                      "星轨合成完成 — %1×%2 · %3 帧 | %4")
+                                      .arg(m_cachedWidth).arg(m_cachedHeight)
+                                      .arg(frameCount).arg(worker->outputFile())
+                                : QString::fromUtf8(
                               "处理完成 — %1×%2 已堆栈 %3 帧 | 参考 %4 | 质量排除 %5 帧 | 跳过 %6 帧")
                               .arg(m_cachedWidth).arg(m_cachedHeight)
                               .arg(frameCount).arg(referenceName)
@@ -1407,7 +1444,9 @@ private slots:
 
         QString fileName = QDateTime::currentDateTime().toString("yyyyMMdd_hhmmss") +
             (m_scene == ProcessingScene::SingleFrame
-                ? "_single_export" : "_stacked_export") + ext;
+                ? "_single_export"
+                : m_scene == ProcessingScene::StarTrail
+                    ? "_star_trail_export" : "_stacked_export") + ext;
         QString fullPath = outPath + "/" + fileName;
 
         if (ImageExporter::exportRgb16(m_cachedStackedData, m_cachedWidth, m_cachedHeight,
@@ -1601,6 +1640,8 @@ int main(int argc, char* argv[]) {
             window.selectStartupScene(ProcessingScene::DeepSky);
         } else if (argument == "--scene=sky-ground") {
             window.selectStartupScene(ProcessingScene::SkyGround);
+        } else if (argument == "--scene=star-trail") {
+            window.selectStartupScene(ProcessingScene::StarTrail);
         } else if (argument == "--scene=timelapse") {
             window.selectStartupScene(ProcessingScene::Timelapse);
         }

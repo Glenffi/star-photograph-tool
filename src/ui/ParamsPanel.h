@@ -63,6 +63,9 @@ public:
     int timelapseStrength() const;
     int timelapseMotionProtection() const;
     bool timelapseProtectGround() const;
+    int starTrailCometStrength() const;
+    bool starTrailReverse() const;
+    bool starTrailProtectGround() const;
     QStringList darkFramePaths() const;
     QStringList flatFramePaths() const;
     QStringList biasFramePaths() const;
@@ -138,6 +141,13 @@ private:
     QSlider* m_timelapseMotionProtectionSlider = nullptr;
     QLabel* m_timelapseMotionProtectionLabel = nullptr;
     QCheckBox* m_timelapseProtectGroundCheck = nullptr;
+
+    // 星轨合成组。星轨保持相机坐标，不参与普通的星点对齐和堆栈。
+    QGroupBox* m_starTrailGroup = nullptr;
+    QSlider* m_starTrailCometSlider = nullptr;
+    QLabel* m_starTrailCometLabel = nullptr;
+    QCheckBox* m_starTrailReverseCheck = nullptr;
+    QCheckBox* m_starTrailProtectGroundCheck = nullptr;
 
     // 深空校准帧仅在当前会话内保存，避免下次启动引用已经移动的文件。
     QGroupBox* m_calibrationGroup = nullptr;

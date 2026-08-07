@@ -162,6 +162,14 @@ void paintGlyph(QPainter& painter, UiAssets::Glyph glyph,
             drawSpark(painter, QPointF(8.0, 6.5), 3.0, 0.9, color);
             painter.drawEllipse(QPointF(17.0, 6.0), 1.0, 1.0);
             break;
+        case UiAssets::Glyph::StarTrail:
+            painter.drawArc(QRectF(3.0, 3.0, 18.0, 18.0), 25 * 16, 82 * 16);
+            painter.drawArc(QRectF(6.0, 6.0, 12.0, 12.0), 34 * 16, 88 * 16);
+            painter.drawArc(QRectF(9.0, 9.0, 6.0, 6.0), 42 * 16, 96 * 16);
+            painter.drawEllipse(QPointF(19.0, 8.0), 1.1, 1.1);
+            painter.drawEllipse(QPointF(16.0, 11.5), 0.8, 0.8);
+            painter.drawEllipse(QPointF(13.5, 13.0), 0.6, 0.6);
+            break;
         case UiAssets::Glyph::Timelapse:
             painter.drawRoundedRect(QRectF(2.5, 7.0, 10.0, 9.0), 1.5, 1.5);
             painter.drawRoundedRect(QRectF(6.5, 5.0, 10.0, 11.0), 1.5, 1.5);

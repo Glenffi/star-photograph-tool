@@ -12,6 +12,7 @@
 #include "core/RawImageLoader.h"
 #include "core/StackingEngine.h"
 #include "core/StarDetector.h"
+#include "core/StarTrailEngine.h"
 #include "core/TemporalPhotometricSmoother.h"
 #include "core/TimelapseEngine.h"
 
@@ -32,6 +33,7 @@
 #include <cstring>
 #include <functional>
 #include <limits>
+#include <new>
 #include <numeric>
 #include <utility>
 
@@ -722,6 +724,21 @@ void ProcessingWorker::run() {
         return;
     }
 
+    const int dedicatedModeCount =
+        static_cast<int>(m_params.singleFrameMode) +
+        static_cast<int>(m_params.timelapseMode) +
+        static_cast<int>(m_params.starTrailMode) +
+        static_cast<int>(m_params.deepSkyMode);
+    if (dedicatedModeCount > 1) {
+        m_errorString = "单张、延时、星轨和深空校准模式不能同时启用";
+        return;
+    }
+
+    if (m_params.starTrailMode) {
+        runStarTrail();
+        return;
+    }
+
     if (m_params.timelapseMode) {
         runTimelapse();
         return;
@@ -1382,6 +1399,285 @@ void ProcessingWorker::run() {
     if (!finishResult(resultRgb, width, height, mask)) return;
 }
 
+void ProcessingWorker::runStarTrail() {
+    if (m_files.size() < 3) {
+        m_errorString = "星轨合成至少需要 3 张固定机位 RAW";
+        return;
+    }
+    if (m_params.starReduceEnabled && m_params.starReduceStrength > 0) {
+        m_errorString = "星轨合成不能同时启用缩星";
+        return;
+    }
+
+    emit stageMessage("检查星轨序列与内存预算...");
+    RawImageLoader loader;
+    std::vector<RawImageLoader::Metadata> metadata;
+    metadata.reserve(static_cast<size_t>(m_files.size()));
+    for (int index = 0; index < m_files.size(); ++index) {
+        if (stopIfCancelled()) return;
+        RawImageLoader::Metadata item;
+        if (!loader.loadMetadata(m_files[index].toStdString(), item)) {
+            m_errorString = QString("无法读取元数据: %1")
+                                .arg(QFileInfo(m_files[index]).fileName());
+            return;
+        }
+        if (!metadata.empty() &&
+            (item.width != metadata.front().width ||
+             item.height != metadata.front().height)) {
+            m_errorString = QString("星轨序列尺寸不一致: %1")
+                                .arg(QFileInfo(m_files[index]).fileName());
+            return;
+        }
+        metadata.push_back(std::move(item));
+    }
+
+    std::vector<int> chronologicalOrder(static_cast<size_t>(m_files.size()));
+    std::iota(chronologicalOrder.begin(), chronologicalOrder.end(), 0);
+    const bool allHaveTimestamps = std::all_of(
+        metadata.begin(), metadata.end(),
+        [](const RawImageLoader::Metadata& item) {
+            return !item.timestamp.empty();
+        });
+    std::stable_sort(
+        chronologicalOrder.begin(), chronologicalOrder.end(),
+        [this, &metadata, allHaveTimestamps](int left, int right) {
+            const std::string& leftTime = metadata[static_cast<size_t>(left)].timestamp;
+            const std::string& rightTime = metadata[static_cast<size_t>(right)].timestamp;
+            if (allHaveTimestamps && leftTime != rightTime) {
+                return leftTime < rightTime;
+            }
+            return QFileInfo(m_files[left]).fileName().compare(
+                       QFileInfo(m_files[right]).fileName(),
+                       Qt::CaseInsensitive) < 0;
+        });
+    QStringList orderedFiles;
+    orderedFiles.reserve(m_files.size());
+    std::vector<RawImageLoader::Metadata> orderedMetadata;
+    orderedMetadata.reserve(metadata.size());
+    for (int index : chronologicalOrder) {
+        orderedFiles.append(m_files[index]);
+        orderedMetadata.push_back(std::move(metadata[static_cast<size_t>(index)]));
+    }
+    m_files = std::move(orderedFiles);
+    metadata = std::move(orderedMetadata);
+
+    const int width = metadata.front().width;
+    const int height = metadata.front().height;
+    ProcessingMemoryEstimator::EstimateOptions estimateOptions;
+    // The compositor is streaming. One synthetic frame keeps the generic
+    // estimator's finishing-stage model while avoiding a false frame-count
+    // multiplier; sky/ground mode also reserves the online foreground mean.
+    estimateOptions.frameCount = 1;
+    estimateOptions.skyGroundSeparation = m_params.starTrailProtectGround;
+    estimateOptions.noiseReduction = m_params.noiseReductionEnabled;
+    estimateOptions.modifiedCameraColor = m_params.modifiedCameraColorEnabled;
+    estimateOptions.dehaze = m_params.dewarpEnabled;
+    estimateOptions.stretch = m_params.stretchEnabled;
+    estimateOptions.starReduction = false;
+    const uint64_t estimatedBytes = ProcessingMemoryEstimator::estimatePeakBytes(
+        width, height, estimateOptions);
+    const ProcessingMemoryEstimator::SystemMemoryInfo memoryInfo =
+        ProcessingMemoryEstimator::systemMemoryInfo();
+    const uint64_t budgetBytes =
+        ProcessingMemoryEstimator::calculateEffectiveBudgetBytes(
+            memoryInfo.safeBudgetBytes, m_params.memoryBudgetBytes);
+    if (estimatedBytes == 0 || estimatedBytes > budgetBytes) {
+        m_errorString = QString(
+            "星轨合成预计需要约 %1 内存，当前安全预算为 %2"
+            "（系统当前可用约 %3）。请关闭去雾或降噪后重试。")
+                            .arg(formatMemoryBytes(estimatedBytes))
+                            .arg(formatMemoryBytes(budgetBytes))
+                            .arg(formatMemoryBytes(memoryInfo.availableBytes));
+        return;
+    }
+
+    StarTrailEngine::Options trailOptions;
+    trailOptions.cometStrength =
+        std::clamp(m_params.starTrailCometStrength, 0, 100);
+    trailOptions.mode = trailOptions.cometStrength > 0
+        ? StarTrailEngine::Mode::Comet : StarTrailEngine::Mode::Lighten;
+    trailOptions.direction = m_params.starTrailReverse
+        ? StarTrailEngine::TailDirection::Reverse
+        : StarTrailEngine::TailDirection::Forward;
+    StarTrailEngine trailEngine;
+    if (!trailEngine.initialize(width, height, trailOptions)) {
+        m_errorString = QString::fromUtf8("无法初始化星轨合成器：%1")
+            .arg(QString::fromLatin1(
+                StarTrailEngine::errorMessage(trailEngine.lastError())));
+        return;
+    }
+
+    bool protectGround = m_params.starTrailProtectGround;
+    bool groundMaskReady = false;
+    std::vector<uint8_t> skyMask;
+    if (protectGround) {
+        emit stageMessage("检测固定地景蒙版...");
+        const int maskFrameIndex = m_files.size() / 2;
+        QImage preview;
+        if (loadMaskPreview(m_files[maskFrameIndex], preview) &&
+            SkyGroundMask::autoDetectPreview(
+                preview, width, height, skyMask, m_params.featherRadius)) {
+            m_skyGroundMaskSource = "star-trail-auto-preview";
+            groundMaskReady = true;
+        }
+    }
+
+    emit stageMessage(
+        trailOptions.mode == StarTrailEngine::Mode::Lighten
+            ? QString::fromUtf8("逐帧累积连续星轨...")
+            : QString::fromUtf8("逐帧累积彗星星轨..."));
+    std::vector<uint16_t> groundAverage;
+    PhotometricReferenceProfile photometricReference;
+    bool photometricReferenceReady = false;
+    size_t groundFrameCount = 0;
+    for (int index = 0; index < m_files.size(); ++index) {
+        if (stopIfCancelled()) return;
+        RawImageLoader::ImageData image;
+        if (!loader.loadRaw(m_files[index].toStdString(), image) ||
+            image.width != width || image.height != height ||
+            image.channels != 3) {
+            m_errorString = QString("无法解码星轨 RAW: %1")
+                                .arg(QFileInfo(m_files[index]).fileName());
+            return;
+        }
+
+        if (index == 0 && protectGround && !groundMaskReady) {
+            std::vector<uint16_t> luminance;
+            if (ImageBufferUtils::extractLuminance(
+                    image.data, width, height, luminance) &&
+                SkyGroundMask::autoDetect(
+                    luminance, width, height, skyMask,
+                    m_params.featherRadius)) {
+                m_skyGroundMaskSource = "star-trail-auto-linear";
+                groundMaskReady = true;
+            } else {
+                qWarning() << "星轨地平线检测失败，本次按纯天空序列合成";
+                emit stageMessage("未检测到可靠地景，按纯天空星轨处理");
+                try {
+                    skyMask.assign(
+                        static_cast<size_t>(width) * height, uint8_t{255});
+                } catch (const std::bad_alloc&) {
+                    m_errorString = "无法分配星轨全天空蒙版";
+                    return;
+                }
+                m_skyGroundMaskSource = "star-trail-all-sky-fallback";
+            }
+        }
+
+        if (index == 0 && m_params.photometricNormalizationEnabled) {
+            photometricReferenceReady =
+                PhotometricNormalizer::buildReferenceProfile(
+                    image.data, width, height, photometricReference, 65536,
+                    protectGround ? &skyMask : nullptr);
+            if (!photometricReferenceReady) {
+                qWarning() << "星轨参考帧光度模型不可用，保留原始帧亮度";
+            }
+        } else if (photometricReferenceReady) {
+            PhotometricModel model;
+            if (PhotometricNormalizer::estimate(
+                    photometricReference, image.data, model) &&
+                PhotometricNormalizer::applyInPlace(
+                    image.data, width, height, model)) {
+                ++m_photometricNormalizedFrameCount;
+                m_photometricGainSum += model.gain;
+                if (m_photometricNormalizedFrameCount == 1) {
+                    m_photometricMinGain = model.gain;
+                    m_photometricMaxGain = model.gain;
+                } else {
+                    m_photometricMinGain = std::min(
+                        m_photometricMinGain, model.gain);
+                    m_photometricMaxGain = std::max(
+                        m_photometricMaxGain, model.gain);
+                }
+                for (double offset : model.offsets) {
+                    m_photometricMaxAbsOffset = std::max(
+                        m_photometricMaxAbsOffset, std::abs(offset));
+                }
+            } else {
+                ++m_photometricSkippedFrameCount;
+                qWarning() << "星轨帧光度匹配失败，保留原亮度:"
+                           << m_files[index];
+            }
+        }
+
+        if (!trailEngine.addFrame(image.data)) {
+            m_errorString = QString::fromUtf8("星轨累积失败：%1")
+                .arg(QString::fromLatin1(
+                    StarTrailEngine::errorMessage(trailEngine.lastError())));
+            return;
+        }
+
+        if (protectGround && groundMaskReady) {
+            if (groundFrameCount == 0) {
+                try {
+                    groundAverage = image.data;
+                } catch (const std::bad_alloc&) {
+                    m_errorString = "无法分配地景降噪缓冲";
+                    return;
+                }
+            } else {
+                const uint64_t oldCount =
+                    static_cast<uint64_t>(groundFrameCount);
+                const uint64_t newCount = oldCount + 1;
+                for (size_t value = 0; value < groundAverage.size(); ++value) {
+                    if ((value & 0xfffffU) == 0 && stopIfCancelled()) return;
+                    const uint64_t weighted =
+                        static_cast<uint64_t>(groundAverage[value]) * oldCount +
+                        image.data[value];
+                    groundAverage[value] = static_cast<uint16_t>(
+                        (weighted + newCount / 2) / newCount);
+                }
+            }
+            ++groundFrameCount;
+        }
+
+        emit progress(10 + static_cast<int>(
+            (index + 1) * 60.0 / m_files.size()));
+    }
+
+    std::vector<uint16_t> resultRgb;
+    if (!trailEngine.render(resultRgb)) {
+        m_errorString = QString::fromUtf8("星轨结果生成失败：%1")
+            .arg(QString::fromLatin1(
+                StarTrailEngine::errorMessage(trailEngine.lastError())));
+        return;
+    }
+    trailEngine.reset();
+
+    if (protectGround) {
+        const uint64_t skySum = std::accumulate(
+            skyMask.begin(), skyMask.end(), uint64_t{0});
+        m_skyGroundSkyFraction = skyMask.empty() ? 0.0
+            : static_cast<double>(skySum) /
+                (255.0 * static_cast<double>(skyMask.size()));
+        if (groundMaskReady) {
+            emit stageMessage("融合降噪地景...");
+            if (!ImageBufferUtils::blendSkyGroundInPlace(
+                    resultRgb, groundAverage, skyMask, width, height)) {
+                m_errorString = "星轨天空与地景融合失败";
+                return;
+            }
+        }
+        if (!m_params.skyGroundMaskOutputPath.isEmpty()) {
+            const QImage borrowedMask(
+                skyMask.data(), width, height, width,
+                QImage::Format_Grayscale8);
+            if (!borrowedMask.copy().save(m_params.skyGroundMaskOutputPath)) {
+                m_errorString = "无法保存星轨地景蒙版诊断图";
+                return;
+            }
+        }
+    }
+
+    m_width = width;
+    m_height = height;
+    m_frameCount = m_files.size();
+    m_selectedReferenceIndex = 0;
+    m_selectedReferenceFrame = m_files.front();
+    emit progress(78);
+    if (!finishResult(resultRgb, width, height, skyMask)) return;
+}
+
 void ProcessingWorker::runTimelapse() {
     if (m_files.size() < 3) {
         m_errorString = "延时序列降噪至少需要 3 张 RAW";
@@ -1957,6 +2253,8 @@ void ProcessingWorker::runSingleFrame() {
 bool ProcessingWorker::finishResult(std::vector<uint16_t>& resultRgb,
                                     int width, int height,
                                     std::vector<uint8_t>& mask) {
+    const bool usesSkyGroundMask = m_params.skyGroundSepEnabled ||
+        (m_params.starTrailMode && m_params.starTrailProtectGround);
     constexpr int kQuickPreviewLongSide = 2400;
     if (!ImageBufferUtils::resizeRgb16ToLongSide(
             resultRgb, width, height, kQuickPreviewLongSide,
@@ -1966,7 +2264,7 @@ bool ProcessingWorker::finishResult(std::vector<uint16_t>& resultRgb,
         m_quickPreviewSource.clear();
         m_quickPreviewWidth = 0;
         m_quickPreviewHeight = 0;
-    } else if (m_params.skyGroundSepEnabled &&
+    } else if (usesSkyGroundMask &&
                !ImageBufferUtils::resizeMask8(
                    mask, width, height,
                    m_quickPreviewWidth, m_quickPreviewHeight,
@@ -1983,7 +2281,7 @@ bool ProcessingWorker::finishResult(std::vector<uint16_t>& resultRgb,
         || m_params.modifiedCameraColorEnabled
         || m_params.dewarpEnabled
         || m_params.stretchEnabled
-        || (m_params.skyGroundSepEnabled && m_params.groundDetailStrength > 0)
+        || (usesSkyGroundMask && m_params.groundDetailStrength > 0)
         || (m_params.starReduceEnabled && m_params.starReduceStrength > 0);
     if (hasFinishingStage) {
         constexpr int kComparisonLongSide = 2400;
@@ -2013,7 +2311,7 @@ bool ProcessingWorker::finishResult(std::vector<uint16_t>& resultRgb,
     finishingOptions.dehazeEnabled = m_params.dewarpEnabled;
     finishingOptions.dehazeStrength = m_params.dewarpStrength;
     finishingOptions.stretchEnabled = m_params.stretchEnabled;
-    finishingOptions.skyGroundSeparation = m_params.skyGroundSepEnabled;
+    finishingOptions.skyGroundSeparation = usesSkyGroundMask;
     finishingOptions.groundDetailStrength = m_params.groundDetailStrength;
     finishingOptions.starReductionEnabled = m_params.starReduceEnabled;
     finishingOptions.starReductionStrength = m_params.starReduceStrength;
@@ -2021,7 +2319,7 @@ bool ProcessingWorker::finishResult(std::vector<uint16_t>& resultRgb,
     FinishingResult finishingResult;
     const bool finished = FinishingPipeline::process(
         resultRgb, width, height,
-        m_params.skyGroundSepEnabled ? &mask : nullptr,
+        usesSkyGroundMask ? &mask : nullptr,
         finishingOptions, finishingResult,
         [this](FinishingStage stage) {
             switch (stage) {
@@ -2085,9 +2383,12 @@ bool ProcessingWorker::finishResult(std::vector<uint16_t>& resultRgb,
     QDir().mkpath(outputPath);
     const bool png = m_params.outputFormat == "png8";
     const QString extension = png ? ".png" : ".tiff";
+    const QString outputSuffix = m_params.singleFrameMode
+        ? "_single"
+        : m_params.starTrailMode ? "_star_trail" : "_stacked";
     m_outputFile = outputPath + "/" +
         QDateTime::currentDateTime().toString("yyyyMMdd_hhmmss") +
-        (m_params.singleFrameMode ? "_single" : "_stacked") + extension;
+        outputSuffix + extension;
     if (!ImageExporter::exportRgb16(m_stackedData, width, height,
                                     m_outputFile.toStdString(),
                                     png ? ImageExporter::Png8 : ImageExporter::Tiff16)) {

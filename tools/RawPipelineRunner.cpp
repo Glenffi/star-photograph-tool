@@ -149,6 +149,19 @@ int main(int argc, char* argv[]) {
     const QCommandLineOption timelapseNoGroundOption(
         "timelapse-no-ground",
         "Treat the complete timelapse frame as sky; do not protect fixed ground.");
+    const QCommandLineOption starTrailOption(
+        "star-trail",
+        "Composite at least three fixed-tripod RAW frames into star trails.");
+    const QCommandLineOption starTrailCometStrengthOption(
+        "star-trail-comet-strength",
+        "Star-trail comet taper strength from 0 to 100; 0 uses Lighten.",
+        "value", "0");
+    const QCommandLineOption starTrailReverseOption(
+        "star-trail-reverse",
+        "Reverse the frame order used by the star-trail comet taper.");
+    const QCommandLineOption starTrailNoGroundProtectionOption(
+        "star-trail-no-ground-protection",
+        "Apply the star-trail composite to the complete frame without fixed-ground protection.");
     const QCommandLineOption referenceOption("reference-index",
         "Zero-based reference index; -1 selects the best frame automatically.", "index", "-1");
     const QCommandLineOption methodOption("method",
@@ -219,6 +232,10 @@ int main(int argc, char* argv[]) {
                        timelapseStrengthOption,
                        timelapseMotionProtectionOption,
                        timelapseNoGroundOption,
+                       starTrailOption,
+                       starTrailCometStrengthOption,
+                       starTrailReverseOption,
+                       starTrailNoGroundProtectionOption,
                        referenceOption,
                        methodOption, kappaOption, memoryBudgetOption,
                        noPhotometricNormalizationOption,
@@ -296,6 +313,14 @@ int main(int argc, char* argv[]) {
         !modifiedCameraGrayPointText.isEmpty();
     const bool singleFrameMode = parser.isSet(singleOption);
     const bool timelapseMode = parser.isSet(timelapseOption);
+    const bool starTrailMode = parser.isSet(starTrailOption);
+    bool starTrailCometStrengthOk = false;
+    const int starTrailCometStrength =
+        parser.value(starTrailCometStrengthOption).toInt(
+            &starTrailCometStrengthOk);
+    const bool starTrailReverse = parser.isSet(starTrailReverseOption);
+    const bool starTrailProtectGround =
+        !parser.isSet(starTrailNoGroundProtectionOption);
     const QString darkDirectory = parser.value(darkDirectoryOption);
     const QString flatDirectory = parser.value(flatDirectoryOption);
     const QString biasDirectory = parser.value(biasDirectoryOption);
@@ -338,9 +363,21 @@ int main(int argc, char* argv[]) {
         return 2;
     }
     if (deepSkyCalibration &&
-        (singleFrameMode || timelapseMode || skyGroundEnabled)) {
+        (singleFrameMode || timelapseMode || starTrailMode ||
+         skyGroundEnabled)) {
         std::cerr << "Deep-sky calibration cannot be combined with --single, "
-                     "--timelapse, or sky/ground separation.\n";
+                     "--timelapse, --star-trail, or sky/ground separation.\n";
+        return 2;
+    }
+    if (starTrailMode &&
+        (singleFrameMode || timelapseMode || skyGroundEnabled)) {
+        std::cerr << "--star-trail cannot be combined with --single, "
+                     "--timelapse, deep-sky calibration, or --sky-ground.\n";
+        return 2;
+    }
+    if (starTrailMode && starReduceStrength > 0) {
+        std::cerr << "--star-trail cannot be combined with "
+                     "--star-reduce-strength.\n";
         return 2;
     }
     if (timelapseMode && modifiedCameraColorEnabled) {
@@ -359,6 +396,8 @@ int main(int argc, char* argv[]) {
         !modifiedCameraGrayPointOk ||
         !starReduceOk || starReduceStrength < 0 ||
         starReduceStrength > 100 ||
+        !starTrailCometStrengthOk || starTrailCometStrength < 0 ||
+        starTrailCometStrength > 100 ||
         !skyGroundFeatherOk || skyGroundFeather < 0 ||
         skyGroundFeather > 50 ||
         (!skyGroundMask.isEmpty() && !QFileInfo::exists(skyGroundMask)) ||
@@ -381,7 +420,8 @@ int main(int argc, char* argv[]) {
                      "--method, --kappa, "
                      "--memory-budget-mib, --denoise-strength, "
                      "--dehaze-strength, modified-camera color, or "
-                     "--star-reduce-strength/timelapse/sky-ground options.\n";
+                     "--star-reduce-strength/timelapse/star-trail/sky-ground "
+                     "options.\n";
         return 2;
     }
     const uint64_t requestedMemoryBudgetBytes =
@@ -395,12 +435,15 @@ int main(int argc, char* argv[]) {
     if (startIndex > 0) files = files.mid(startIndex);
     if (limit > 0 && files.size() > limit) files = files.mid(0, limit);
     if (singleFrameMode && files.size() > 1) files = files.mid(0, 1);
-    const int minimumFrames = singleFrameMode ? 1 : (timelapseMode ? 3 : 2);
+    const int minimumFrames = singleFrameMode
+        ? 1 : ((timelapseMode || starTrailMode) ? 3 : 2);
     if (files.size() < minimumFrames) {
         std::cerr << (singleFrameMode
             ? "At least one RAW file is required.\n"
             : timelapseMode
                 ? "At least three RAW files are required for timelapse.\n"
+                : starTrailMode
+                    ? "At least three RAW files are required for star trails.\n"
                 : "At least two RAW files are required.\n");
         return 2;
     }
@@ -429,9 +472,13 @@ int main(int argc, char* argv[]) {
         return 3;
     }
     ProcessingMemoryEstimator::EstimateOptions estimateOptions;
-    estimateOptions.frameCount = files.size();
+    // Star trails stream source frames and do not retain a stacking chunk per
+    // input frame. One frame still lets the estimator cover decode, composite,
+    // optional ground protection, and finishing-stage resident buffers.
+    estimateOptions.frameCount = starTrailMode ? 1 : files.size();
     estimateOptions.skyGroundSeparation =
-        skyGroundEnabled && !singleFrameMode && !timelapseMode;
+        (skyGroundEnabled && !singleFrameMode && !timelapseMode) ||
+        (starTrailMode && starTrailProtectGround);
     estimateOptions.noiseReduction = denoiseStrength > 0;
     estimateOptions.modifiedCameraColor = modifiedCameraColorEnabled;
     estimateOptions.dehaze = dehazeStrength > 0;
@@ -444,7 +491,7 @@ int main(int argc, char* argv[]) {
               timelapseProtectGround, timelapseMotionProtection > 0)
         : ProcessingMemoryEstimator::estimatePeakBytes(
               metadata.width, metadata.height, estimateOptions);
-    const uint64_t scratchBytes = singleFrameMode ? 0
+    const uint64_t scratchBytes = (singleFrameMode || starTrailMode) ? 0
         : ProcessingMemoryEstimator::estimateScratchDiskBytes(
               metadata.width, metadata.height, files.size(),
               skyGroundEnabled && !timelapseMode);
@@ -452,6 +499,7 @@ int main(int argc, char* argv[]) {
     ProcessingWorker::Params params;
     params.singleFrameMode = singleFrameMode;
     params.timelapseMode = timelapseMode;
+    params.starTrailMode = starTrailMode;
     params.deepSkyMode = deepSkyCalibration;
     params.darkFramePaths = darkFrames;
     params.flatFramePaths = flatFrames;
@@ -460,6 +508,9 @@ int main(int argc, char* argv[]) {
     params.timelapseStrength = timelapseStrength;
     params.timelapseMotionProtection = timelapseMotionProtection;
     params.timelapseProtectGround = timelapseProtectGround;
+    params.starTrailCometStrength = starTrailCometStrength;
+    params.starTrailReverse = starTrailReverse;
+    params.starTrailProtectGround = starTrailProtectGround;
     params.stackMethod = method;
     params.kappaValue = kappa;
     params.outputFormat = "tiff16";
@@ -475,11 +526,12 @@ int main(int argc, char* argv[]) {
     params.featherRadius = skyGroundFeather;
     const QString generatedSkyGroundMask =
         (params.skyGroundSepEnabled ||
-         (params.timelapseMode && params.timelapseProtectGround))
+         (params.timelapseMode && params.timelapseProtectGround) ||
+         (params.starTrailMode && params.starTrailProtectGround))
         ? QDir(output).filePath("sky-ground-mask.png") : QString();
     params.skyGroundMaskOutputPath = generatedSkyGroundMask;
     params.autoRejectLowQualityFrames = !singleFrameMode && !timelapseMode &&
-        !parser.isSet(noQualityRejectionOption);
+        !starTrailMode && !parser.isSet(noQualityRejectionOption);
     params.photometricNormalizationEnabled = !singleFrameMode &&
         !parser.isSet(noPhotometricNormalizationOption);
     params.noiseReductionEnabled = denoiseStrength > 0;
@@ -520,8 +572,12 @@ int main(int argc, char* argv[]) {
     const uint64_t effectiveMemoryBudget =
         ProcessingMemoryEstimator::calculateEffectiveBudgetBytes(
             memoryInfo.safeBudgetBytes, requestedMemoryBudgetBytes);
-    const QString effectiveMethod = timelapseMode
-        ? QStringLiteral("temporal-mad-weighted-mean") : method;
+    const QString effectiveMethod = starTrailMode
+        ? (starTrailCometStrength > 0
+               ? QStringLiteral("star-trail-comet")
+               : QStringLiteral("star-trail-lighten"))
+        : timelapseMode
+            ? QStringLiteral("temporal-mad-weighted-mean") : method;
     std::cout << "Frames: " << files.size()
               << ", reference: "
               << (referenceIndex >= 0
@@ -538,7 +594,7 @@ int main(int argc, char* argv[]) {
     worker.wait();
 
     QJsonObject report;
-    report["schemaVersion"] = 15;
+    report["schemaVersion"] = 16;
     report["toolVersion"] = QCoreApplication::applicationVersion();
     report["generatedAt"] = QDateTime::currentDateTimeUtc().toString(Qt::ISODate);
     report["input"] = input;
@@ -546,6 +602,10 @@ int main(int argc, char* argv[]) {
     report["selectedFrames"] = files.size();
     report["singleFrameMode"] = singleFrameMode;
     report["timelapseMode"] = timelapseMode;
+    report["starTrailMode"] = starTrailMode;
+    report["starTrailCometStrength"] = starTrailCometStrength;
+    report["starTrailReverse"] = starTrailReverse;
+    report["starTrailProtectGround"] = starTrailProtectGround;
     report["deepSkyCalibrationEnabled"] = deepSkyCalibration;
     report["darkFrames"] = darkFrames.size();
     report["flatFrames"] = flatFrames.size();
@@ -575,13 +635,13 @@ int main(int argc, char* argv[]) {
         QFileInfo(worker.selectedReferenceFrame()).fileName();
     report["autoQualityRejectionEnabled"] =
         params.autoRejectLowQualityFrames;
-    const bool timelapseGroundApplied = timelapseMode &&
+    const bool sequenceGroundApplied = (timelapseMode || starTrailMode) &&
         !worker.skyGroundMaskSource().isEmpty();
     report["skyGroundSeparationEnabled"] =
-        params.skyGroundSepEnabled || timelapseGroundApplied;
+        params.skyGroundSepEnabled || sequenceGroundApplied;
     report["skyGroundMode"] = params.skyGroundSepEnabled
         ? (skyGroundMask.isEmpty() ? "automatic" : "user-mask")
-        : timelapseGroundApplied ? "automatic" : "disabled";
+        : sequenceGroundApplied ? "automatic" : "disabled";
     report["skyGroundMask"] = skyGroundMask;
     report["skyGroundMaskOutput"] = generatedSkyGroundMask;
     report["skyGroundFeatherRadius"] = skyGroundFeather;

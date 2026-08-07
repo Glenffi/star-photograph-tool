@@ -46,6 +46,7 @@ public:
         // stacking while retaining the same finishing and export stages.
         bool singleFrameMode = false;
         bool timelapseMode = false;
+        bool starTrailMode = false;
         bool deepSkyMode = false;
         QStringList darkFramePaths;
         QStringList flatFramePaths;
@@ -54,6 +55,9 @@ public:
         int timelapseStrength = 80;
         int timelapseMotionProtection = 75;
         bool timelapseProtectGround = true;
+        int starTrailCometStrength = 0;
+        bool starTrailReverse = false;
+        bool starTrailProtectGround = true;
         QString stackMethod = "average";
         double kappaValue = 2.5;
         bool autoRejectLowQualityFrames = true;
@@ -184,6 +188,7 @@ private:
     bool stopIfCancelled();
     void runSingleFrame();
     void runTimelapse();
+    void runStarTrail();
     bool buildDeepSkyCalibration(
         RawImageLoader& loader,
         const RawImageLoader::CfaImageData& referenceLight,

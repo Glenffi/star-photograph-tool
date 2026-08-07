@@ -72,6 +72,22 @@ void testTimelapseRejectsTooFewFrames() {
           "Rejected timelapse input should not report output frames");
 }
 
+void testStarTrailRejectsTooFewFrames() {
+    ProcessingWorker::Params params;
+    params.starTrailMode = true;
+    ProcessingWorker worker(
+        {"first.raw", "second.raw"}, "first.raw", params);
+    worker.start();
+    check(worker.wait(3000),
+          "Short star-trail input should finish promptly");
+    check(!worker.wasCancelled(),
+          "Short star-trail input is an error, not cancellation");
+    check(worker.errorString().contains("3"),
+          "Star-trail input error should explain the three-frame minimum");
+    check(worker.stackedFrameCount() == 0,
+          "Rejected star-trail input should not report output frames");
+}
+
 void testDeepSkyRequiresCalibrationSets() {
     ProcessingWorker::Params params;
     params.deepSkyMode = true;
@@ -86,6 +102,32 @@ void testDeepSkyRequiresCalibrationSets() {
           "Deep-sky input should identify every required calibration set");
     check(worker.calibratedLightFrameCount() == 0,
           "Rejected deep-sky input should not report calibrated lights");
+}
+
+void testDedicatedModesAreMutuallyExclusive() {
+    ProcessingWorker::Params params;
+    params.singleFrameMode = true;
+    params.starTrailMode = true;
+    ProcessingWorker worker({"not-read.raw"}, {}, params);
+    worker.start();
+    check(worker.wait(3000),
+          "Conflicting dedicated modes should finish promptly");
+    check(worker.errorString().contains(QString::fromUtf8("不能同时启用")),
+          "Conflicting dedicated modes should expose an explicit error");
+}
+
+void testStarTrailRejectsStarReduction() {
+    ProcessingWorker::Params params;
+    params.starTrailMode = true;
+    params.starReduceEnabled = true;
+    params.starReduceStrength = 70;
+    ProcessingWorker worker(
+        {"first.raw", "second.raw", "third.raw"}, {}, params);
+    worker.start();
+    check(worker.wait(3000),
+          "Star-trail and star-reduction conflict should finish promptly");
+    check(worker.errorString().contains(QString::fromUtf8("缩星")),
+          "Star-trail and star-reduction conflict should be explicit");
 }
 
 void testQuickPreviewNoOpAndCancellation() {
@@ -156,7 +198,10 @@ int main(int argc, char* argv[]) {
     testRawLoaderFitsWorkerStack();
     testSingleFrameFailureUsesDedicatedPath();
     testTimelapseRejectsTooFewFrames();
+    testStarTrailRejectsTooFewFrames();
     testDeepSkyRequiresCalibrationSets();
+    testDedicatedModesAreMutuallyExclusive();
+    testStarTrailRejectsStarReduction();
     testQuickPreviewNoOpAndCancellation();
     if (failures == 0) {
         std::cout << "All worker tests passed.\n";

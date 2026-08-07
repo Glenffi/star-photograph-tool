@@ -488,6 +488,70 @@ void ParamsPanel::setupUI() {
 
     stackPageLayout->addWidget(m_stackGroup);
 
+    m_starTrailGroup = createCollapsibleGroup(
+        QString::fromUtf8("星轨合成"), true);
+    m_starTrailGroup->setVisible(false);
+    auto* starTrailLayout = new QVBoxLayout(m_starTrailGroup);
+    starTrailLayout->setSpacing(10);
+
+    auto* starTrailNote = new QLabel(
+        QString::fromUtf8(
+            "固定机位序列保持原坐标，不进行星点对齐。天空逐帧取亮形成轨迹；开启地景保护后，山体和建筑使用原坐标均值降噪。"),
+        m_starTrailGroup);
+    starTrailNote->setWordWrap(true);
+    starTrailNote->setStyleSheet(
+        "color: #91A39F; background-color: #241F1E; "
+        "border-left: 3px solid #FF7F6E; border-radius: 4px; "
+        "padding: 7px 9px; font-size: 11px; font-weight: 400;");
+    starTrailLayout->addWidget(starTrailNote);
+
+    auto* cometRow = new QHBoxLayout();
+    auto* cometName = new QLabel(
+        QString::fromUtf8("彗星拖尾:"), m_starTrailGroup);
+    m_starTrailCometSlider = createSlider(0, 100, 0);
+    m_starTrailCometSlider->setMinimumWidth(96);
+    m_starTrailCometSlider->setToolTip(QString::fromUtf8(
+        "0% 为每帧等亮的连续星轨；提高后，较早帧逐渐变暗，形成一端明、一端暗的彗星效果"));
+    m_starTrailCometLabel = new QLabel("0%", m_starTrailGroup);
+    m_starTrailCometLabel->setMinimumWidth(32);
+    connect(m_starTrailCometSlider, &QSlider::valueChanged, this,
+            [this](int value) {
+                m_starTrailCometLabel->setText(QString::number(value) + "%");
+                if (m_starTrailReverseCheck) {
+                    m_starTrailReverseCheck->setEnabled(value > 0);
+                }
+                onSliderValueChanged(value);
+            });
+    connect(m_starTrailCometSlider, &QSlider::sliderReleased,
+            this, &ParamsPanel::onSliderReleased);
+    cometRow->addWidget(cometName);
+    cometRow->addWidget(m_starTrailCometSlider, 1);
+    cometRow->addWidget(m_starTrailCometLabel);
+    starTrailLayout->addLayout(cometRow);
+
+    m_starTrailReverseCheck = new QCheckBox(
+        QString::fromUtf8("反转彗星方向"), m_starTrailGroup);
+    m_starTrailReverseCheck->setToolTip(QString::fromUtf8(
+        "交换星轨亮端和暗端；连续星轨（0%）不受影响"));
+    m_starTrailReverseCheck->setEnabled(false);
+    m_starTrailReverseCheck->setStyleSheet(
+        m_autoRejectQualityCheck->styleSheet());
+    connect(m_starTrailReverseCheck, &QCheckBox::toggled,
+            this, &ParamsPanel::onCheckChanged);
+    starTrailLayout->addWidget(m_starTrailReverseCheck);
+
+    m_starTrailProtectGroundCheck = new QCheckBox(
+        QString::fromUtf8("保护固定地景"), m_starTrailGroup);
+    m_starTrailProtectGroundCheck->setChecked(true);
+    m_starTrailProtectGroundCheck->setToolTip(QString::fromUtf8(
+        "自动检测地平线；天空合成星轨，地景在相机坐标中平均降噪，避免灯光取亮和前景发糊"));
+    m_starTrailProtectGroundCheck->setStyleSheet(
+        m_autoRejectQualityCheck->styleSheet());
+    connect(m_starTrailProtectGroundCheck, &QCheckBox::toggled,
+            this, &ParamsPanel::onCheckChanged);
+    starTrailLayout->addWidget(m_starTrailProtectGroundCheck);
+    stackPageLayout->addWidget(m_starTrailGroup);
+
     m_timelapseGroup = createCollapsibleGroup(
         QString::fromUtf8("滑动窗口降噪"), true);
     m_timelapseGroup->setVisible(false);
@@ -1146,6 +1210,9 @@ void ParamsPanel::onRestoreDefaults() {
     m_timelapseStrengthSlider->setValue(80);
     m_timelapseMotionProtectionSlider->setValue(75);
     m_timelapseProtectGroundCheck->setChecked(true);
+    m_starTrailCometSlider->setValue(0);
+    m_starTrailReverseCheck->setChecked(false);
+    m_starTrailProtectGroundCheck->setChecked(true);
     m_darkFramePaths.clear();
     m_flatFramePaths.clear();
     m_biasFramePaths.clear();
@@ -1260,6 +1327,9 @@ void ParamsPanel::saveCurrentSettings() {
     settings.setValue("timelapseStrength", timelapseStrength());
     settings.setValue("timelapseMotionProtection", timelapseMotionProtection());
     settings.setValue("timelapseProtectGround", timelapseProtectGround());
+    settings.setValue("starTrailCometStrength", starTrailCometStrength());
+    settings.setValue("starTrailReverse", starTrailReverse());
+    settings.setValue("starTrailProtectGround", starTrailProtectGround());
 }
 
 void ParamsPanel::loadCustomPresets() {
@@ -1317,6 +1387,12 @@ void ParamsPanel::loadPreset() {
         settings.value("timelapseMotionProtection", 75).toInt();
     bool timelapseProtectGround =
         settings.value("timelapseProtectGround", true).toBool();
+    int starTrailCometStrength =
+        settings.value("starTrailCometStrength", 0).toInt();
+    bool starTrailReverse =
+        settings.value("starTrailReverse", false).toBool();
+    bool starTrailProtectGround =
+        settings.value("starTrailProtectGround", true).toBool();
 
     // 使用信号阻塞避免触发 paramsChanged
     QSignalBlocker blocker1(m_alignMethod);
@@ -1345,6 +1421,9 @@ void ParamsPanel::loadPreset() {
     QSignalBlocker blocker24(m_timelapseProtectGroundCheck);
     QSignalBlocker blocker25(m_modifiedCameraColorStrengthSlider);
     QSignalBlocker blocker26(m_modifiedCameraColorMode);
+    QSignalBlocker blocker27(m_starTrailCometSlider);
+    QSignalBlocker blocker28(m_starTrailReverseCheck);
+    QSignalBlocker blocker29(m_starTrailProtectGroundCheck);
 
     Q_UNUSED(alignIndex)
     m_alignMethod->setCurrentIndex(0);
@@ -1405,6 +1484,14 @@ void ParamsPanel::loadPreset() {
     m_timelapseMotionProtectionLabel->setText(
         QString::number(m_timelapseMotionProtectionSlider->value()) + "%");
     m_timelapseProtectGroundCheck->setChecked(timelapseProtectGround);
+    m_starTrailCometSlider->setValue(
+        std::clamp(starTrailCometStrength, 0, 100));
+    m_starTrailCometLabel->setText(
+        QString::number(m_starTrailCometSlider->value()) + "%");
+    m_starTrailReverseCheck->setChecked(starTrailReverse);
+    m_starTrailReverseCheck->setEnabled(
+        m_starTrailCometSlider->value() > 0);
+    m_starTrailProtectGroundCheck->setChecked(starTrailProtectGround);
     updateSkyGroundControls();
     updateStackMethodDescription();
 
@@ -1611,6 +1698,18 @@ void ParamsPanel::applySceneProfile(ProcessingScene scene) {
         skyGroundEnabled = true;
         title = QString::fromUtf8("天地分离参数");
         break;
+    case ProcessingScene::StarTrail:
+        preset.name = QString::fromUtf8("星轨合成");
+        preset.stackMethod = "average";
+        preset.autoRejectLowQualityFrames = false;
+        preset.photometricNormalizationEnabled = true;
+        preset.noiseReductionEnabled = false;
+        preset.dewarpEnabled = false;
+        preset.stretchEnabled = true;
+        preset.starReduceEnabled = false;
+        presetIndex = 0;
+        title = QString::fromUtf8("星轨合成参数");
+        break;
     case ProcessingScene::Timelapse:
         preset.name = QString::fromUtf8("延时序列");
         preset.stackMethod = "average";
@@ -1639,16 +1738,20 @@ void ParamsPanel::applySceneProfile(ProcessingScene scene) {
 
     if (m_titleLabel) m_titleLabel->setText(title);
     const bool timelapse = scene == ProcessingScene::Timelapse;
-    if (m_alignGroup) m_alignGroup->setVisible(!timelapse);
-    if (m_stackGroup) m_stackGroup->setVisible(!timelapse);
+    const bool starTrail = scene == ProcessingScene::StarTrail;
+    const bool sequenceTool = timelapse || starTrail;
+    if (m_alignGroup) m_alignGroup->setVisible(!sequenceTool);
+    if (m_stackGroup) m_stackGroup->setVisible(!sequenceTool);
+    if (m_starTrailGroup) m_starTrailGroup->setVisible(starTrail);
     if (m_timelapseGroup) m_timelapseGroup->setVisible(timelapse);
     if (m_calibrationGroup) {
         m_calibrationGroup->setVisible(scene == ProcessingScene::DeepSky);
     }
     // General stack presets change controls that do not participate in the
     // temporal pipeline, so keep this task-specific workspace focused.
-    if (m_presetBar) m_presetBar->setVisible(!timelapse);
-    if (m_savePresetBtn) m_savePresetBtn->setVisible(!timelapse);
+    if (m_presetBar) m_presetBar->setVisible(!sequenceTool);
+    if (m_savePresetBtn) m_savePresetBtn->setVisible(!sequenceTool);
+    if (m_starReduceGroup) m_starReduceGroup->setVisible(!starTrail);
     if (m_tabs) {
         // A single frame has no alignment or stack phase, so that page is
         // removed instead of leaving irrelevant disabled controls in view.
@@ -1910,6 +2013,19 @@ bool ParamsPanel::timelapseProtectGround() const {
         m_timelapseProtectGroundCheck->isChecked();
 }
 
+int ParamsPanel::starTrailCometStrength() const {
+    return m_starTrailCometSlider ? m_starTrailCometSlider->value() : 0;
+}
+
+bool ParamsPanel::starTrailReverse() const {
+    return m_starTrailReverseCheck && m_starTrailReverseCheck->isChecked();
+}
+
+bool ParamsPanel::starTrailProtectGround() const {
+    return m_starTrailProtectGroundCheck &&
+        m_starTrailProtectGroundCheck->isChecked();
+}
+
 QStringList ParamsPanel::darkFramePaths() const {
     return m_darkFramePaths;
 }
@@ -2012,6 +2128,9 @@ QString ParamsPanel::upstreamSignature() const {
         QString::number(timelapseStrength()),
         QString::number(timelapseMotionProtection()),
         QString::number(timelapseProtectGround()),
+        QString::number(starTrailCometStrength()),
+        QString::number(starTrailReverse()),
+        QString::number(starTrailProtectGround()),
         QStringLiteral("dark=") + m_darkFramePaths.join(QChar(0x1e)),
         QStringLiteral("flat=") + m_flatFramePaths.join(QChar(0x1e)),
         QStringLiteral("bias=") + m_biasFramePaths.join(QChar(0x1e))

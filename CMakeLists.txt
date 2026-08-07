@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(StarProcessor VERSION 0.6.4 LANGUAGES CXX)
+project(StarProcessor VERSION 0.6.5 LANGUAGES CXX)
 
 include(CTest)
 option(BUILD_SAMPLE_TOOLS "Build local RAW sample regression tools" ON)
@@ -104,6 +104,7 @@ set(CORE_SOURCES
     src/core/PresetManager.cpp
     src/core/RawCalibrationEngine.cpp
     src/core/StarReducer.cpp
+    src/core/StarTrailEngine.cpp
     src/core/TimelapseEngine.cpp
     src/core/TemporalPhotometricSmoother.cpp
 )
@@ -137,6 +138,7 @@ set(CORE_HEADERS
     src/core/PresetManager.h
     src/core/RawCalibrationEngine.h
     src/core/StarReducer.h
+    src/core/StarTrailEngine.h
     src/core/TimelapseEngine.h
     src/core/TemporalPhotometricSmoother.h
 )
@@ -207,6 +209,11 @@ if(BUILD_TESTING)
         PRIVATE StarProcessorCore)
     add_test(NAME finishing_pipeline
         COMMAND StarProcessorFinishingPipelineTests)
+
+    add_executable(StarProcessorStarTrailTests
+        tests/StarTrailEngineTests.cpp)
+    target_link_libraries(StarProcessorStarTrailTests PRIVATE StarProcessorCore)
+    add_test(NAME star_trail_engine COMMAND StarProcessorStarTrailTests)
 endif()
 
 if(BUILD_SAMPLE_TOOLS)
