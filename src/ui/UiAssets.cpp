@@ -171,6 +171,13 @@ void paintGlyph(QPainter& painter, UiAssets::Glyph glyph,
             painter.drawLine(QPointF(14.0, 21.0), QPointF(16.0, 19.0));
             drawSpark(painter, QPointF(12.0, 10.5), 2.5, 0.7, color);
             break;
+        case UiAssets::Glyph::Eyedropper:
+            painter.drawRoundedRect(QRectF(13.0, 3.5, 7.0, 7.0), 1.5, 1.5);
+            painter.drawLine(QPointF(14.5, 9.0), QPointF(7.0, 16.5));
+            painter.drawLine(QPointF(11.0, 5.5), QPointF(18.0, 12.5));
+            painter.drawLine(QPointF(7.0, 16.5), QPointF(4.0, 19.5));
+            painter.drawLine(QPointF(4.0, 19.5), QPointF(8.5, 18.5));
+            break;
         case UiAssets::Glyph::ChevronRight:
             painter.drawLine(QPointF(8.0, 5.0), QPointF(15.0, 12.0));
             painter.drawLine(QPointF(15.0, 12.0), QPointF(8.0, 19.0));

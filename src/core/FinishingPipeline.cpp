@@ -65,14 +65,16 @@ bool FinishingPipeline::process(
     try {
         if (stopIfCancelled()) return false;
 
-        if (options.modifiedCameraColorEnabled) {
+        if (options.modifiedCameraColorEnabled &&
+            options.modifiedCameraColor.strength > 0) {
             if (!beginStage(FinishingStage::ModifiedCameraColor)) return false;
             std::vector<uint16_t> restored;
             const std::vector<uint8_t>* samplingMask =
                 options.skyGroundSeparation ? skyMask : nullptr;
             if (!AutoOptimizeEngine::restoreModifiedCameraColorRgb(
                     rgb, width, height, restored,
-                    &result.modifiedCameraColorStats, samplingMask)) {
+                    &result.modifiedCameraColorStats, samplingMask,
+                    options.modifiedCameraColor)) {
                 result.error = "Modified-camera color restoration failed";
                 return false;
             }

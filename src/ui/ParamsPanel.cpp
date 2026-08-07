@@ -26,6 +26,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 
 ParamsPanel::ParamsPanel(QWidget* parent)
     : QWidget(parent)
@@ -620,8 +621,85 @@ void ParamsPanel::setupUI() {
         "QCheckBox { font-size: 12px; color: #D2DDDA; background-color: transparent; }"
         "QCheckBox::indicator { width: 14px; height: 14px; }");
     connect(m_modifiedCameraColorCheck, &QCheckBox::toggled,
-            this, &ParamsPanel::onCheckChanged);
+            this, [this](bool checked) {
+                updateModifiedCameraColorControls();
+                onCheckChanged(checked ? Qt::Checked : Qt::Unchecked);
+            });
     optimizeLayout->addWidget(m_modifiedCameraColorCheck);
+
+    auto* modifiedStrengthRow = new QHBoxLayout();
+    auto* modifiedStrengthName = new QLabel(
+        QString::fromUtf8("校正强度"), m_optimizeGroup);
+    modifiedStrengthName->setStyleSheet(
+        "font-size: 11px; color: #91A39F; background-color: transparent;");
+    modifiedStrengthRow->addWidget(modifiedStrengthName);
+    m_modifiedCameraColorStrengthSlider = createSlider(0, 100, 100);
+    m_modifiedCameraColorStrengthSlider->setMinimumWidth(84);
+    m_modifiedCameraColorStrengthSlider->setToolTip(QString::fromUtf8(
+        "0 为保留原始改机色偏，100 为完整回归中性色彩"));
+    connect(m_modifiedCameraColorStrengthSlider, &QSlider::valueChanged,
+            this, [this](int value) {
+                m_modifiedCameraColorStrengthLabel->setText(
+                    QString::number(value) + "%");
+                onSliderValueChanged(value);
+            });
+    connect(m_modifiedCameraColorStrengthSlider, &QSlider::sliderReleased,
+            this, &ParamsPanel::onSliderReleased);
+    modifiedStrengthRow->addWidget(
+        m_modifiedCameraColorStrengthSlider, 1);
+    m_modifiedCameraColorStrengthLabel = new QLabel("100%", m_optimizeGroup);
+    m_modifiedCameraColorStrengthLabel->setMinimumWidth(32);
+    modifiedStrengthRow->addWidget(m_modifiedCameraColorStrengthLabel);
+    optimizeLayout->addLayout(modifiedStrengthRow);
+
+    auto* modifiedSampleRow = new QHBoxLayout();
+    m_modifiedCameraColorMode = new QComboBox(m_optimizeGroup);
+    m_modifiedCameraColorMode->addItem(QString::fromUtf8("自动灰点"));
+    m_modifiedCameraColorMode->addItem(QString::fromUtf8("手动灰点"));
+    m_modifiedCameraColorMode->setToolTip(QString::fromUtf8(
+        "自动模式从中性天空估计；手动模式从预览中选择应为灰色的区域"));
+    connect(m_modifiedCameraColorMode,
+            QOverload<int>::of(&QComboBox::currentIndexChanged),
+            this, [this](int index) {
+                updateModifiedCameraColorControls();
+                if (index == 1 && !hasModifiedCameraGrayPoint()) {
+                    {
+                        const QSignalBlocker blocker(
+                            m_modifiedCameraColorMode);
+                        m_modifiedCameraColorMode->setCurrentIndex(0);
+                    }
+                    updateModifiedCameraColorControls();
+                    emit modifiedCameraGrayPointRequested();
+                    return;
+                }
+                onComboChanged(index);
+            });
+    modifiedSampleRow->addWidget(m_modifiedCameraColorMode, 1);
+    m_modifiedCameraGrayPointButton = new QPushButton(m_optimizeGroup);
+    m_modifiedCameraGrayPointButton->setIcon(
+        UiAssets::icon(UiAssets::Glyph::Eyedropper, QColor("#A7B8B4")));
+    m_modifiedCameraGrayPointButton->setIconSize(QSize(16, 16));
+    m_modifiedCameraGrayPointButton->setFixedSize(30, 28);
+    m_modifiedCameraGrayPointButton->setToolTip(
+        QString::fromUtf8("在结果预览中重新采样手动灰点"));
+    m_modifiedCameraGrayPointButton->setAccessibleName(
+        m_modifiedCameraGrayPointButton->toolTip());
+    m_modifiedCameraGrayPointButton->setStyleSheet(
+        "QPushButton { background-color: #202A2D; border: 1px solid #344548; "
+        "border-radius: 4px; padding: 0; }"
+        "QPushButton:hover { background-color: #344548; border-color: #4ED7AE; }"
+        "QPushButton:disabled { background-color: #171F21; border-color: #263234; }");
+    connect(m_modifiedCameraGrayPointButton, &QPushButton::clicked,
+            this, &ParamsPanel::modifiedCameraGrayPointRequested);
+    modifiedSampleRow->addWidget(m_modifiedCameraGrayPointButton);
+    optimizeLayout->addLayout(modifiedSampleRow);
+
+    m_modifiedCameraGrayPointStatus = new QLabel(m_optimizeGroup);
+    m_modifiedCameraGrayPointStatus->setWordWrap(true);
+    m_modifiedCameraGrayPointStatus->setStyleSheet(
+        "font-size: 10px; color: #718681; background-color: transparent;");
+    optimizeLayout->addWidget(m_modifiedCameraGrayPointStatus);
+    updateModifiedCameraColorControls();
 
     auto* dewarpRow = new QHBoxLayout();
     m_dewarpCheck = new QCheckBox(QString::fromUtf8("去雾"), m_optimizeGroup);
@@ -889,6 +967,39 @@ void ParamsPanel::updateSkyGroundControls() {
     if (m_groundDetailNameLabel) m_groundDetailNameLabel->setVisible(enabled);
 }
 
+void ParamsPanel::updateModifiedCameraColorControls() {
+    const bool enabled = modifiedCameraColorEnabled();
+    const bool manual = m_modifiedCameraColorMode &&
+        m_modifiedCameraColorMode->currentIndex() == 1;
+    if (m_modifiedCameraColorStrengthSlider) {
+        m_modifiedCameraColorStrengthSlider->setEnabled(enabled);
+    }
+    if (m_modifiedCameraColorStrengthLabel) {
+        m_modifiedCameraColorStrengthLabel->setEnabled(enabled);
+    }
+    if (m_modifiedCameraColorMode) {
+        m_modifiedCameraColorMode->setEnabled(enabled);
+    }
+    if (m_modifiedCameraGrayPointButton) {
+        m_modifiedCameraGrayPointButton->setEnabled(enabled);
+    }
+    if (!m_modifiedCameraGrayPointStatus) return;
+    m_modifiedCameraGrayPointStatus->setEnabled(enabled);
+    if (!enabled) {
+        m_modifiedCameraGrayPointStatus->setText(
+            QString::fromUtf8("普通相机请保持关闭"));
+    } else if (!manual) {
+        m_modifiedCameraGrayPointStatus->setText(
+            QString::fromUtf8("自动从中等亮度天空估计中性色"));
+    } else if (hasModifiedCameraGrayPoint()) {
+        m_modifiedCameraGrayPointStatus->setText(
+            QString::fromUtf8("手动灰点已设置，可用吸管重新采样"));
+    } else {
+        m_modifiedCameraGrayPointStatus->setText(
+            QString::fromUtf8("请点击吸管，再在结果预览中选择中性天空"));
+    }
+}
+
 QGroupBox* ParamsPanel::createCollapsibleGroup(const QString& title, bool expanded) {
     Q_UNUSED(expanded)
     auto* group = new QGroupBox(title, this);
@@ -1017,6 +1128,8 @@ void ParamsPanel::onRestoreDefaults() {
     m_noiseReductionCheck->setChecked(false);
     m_noiseReductionSlider->setValue(30);
     m_modifiedCameraColorCheck->setChecked(false);
+    m_modifiedCameraColorStrengthSlider->setValue(100);
+    clearModifiedCameraGrayPoint();
     m_stretchCheck->setChecked(false);
     m_starReduceCheck->setChecked(false);
     m_starReduceSlider->setValue(70);
@@ -1072,6 +1185,8 @@ void ParamsPanel::onSavePreset() {
     settings.setValue("noiseReductionStrength", m_noiseReductionSlider->value());
     settings.setValue("modifiedCameraColorEnabled",
                       m_modifiedCameraColorCheck->isChecked());
+    settings.setValue("modifiedCameraColorStrength",
+                      m_modifiedCameraColorStrengthSlider->value());
     settings.setValue("stretchEnabled", m_stretchCheck->isChecked());
     settings.setValue("starReduceEnabled", m_starReduceCheck->isChecked());
     settings.setValue("starReduceStrength", m_starReduceSlider->value());
@@ -1126,6 +1241,8 @@ void ParamsPanel::saveCurrentSettings() {
     settings.setValue("noiseReductionStrength", m_noiseReductionSlider->value());
     settings.setValue("modifiedCameraColorEnabled",
                       m_modifiedCameraColorCheck->isChecked());
+    settings.setValue("modifiedCameraColorStrength",
+                      m_modifiedCameraColorStrengthSlider->value());
     settings.setValue("stretchEnabled", m_stretchCheck->isChecked());
     settings.setValue("starReduceEnabled", m_starReduceCheck->isChecked());
     settings.setValue("starReduceStrength", m_starReduceSlider->value());
@@ -1178,6 +1295,8 @@ void ParamsPanel::loadPreset() {
     int noiseReductionStrength = settings.value("noiseReductionStrength", 30).toInt();
     bool modifiedCameraColor =
         settings.value("modifiedCameraColorEnabled", false).toBool();
+    int modifiedCameraColorStrength =
+        settings.value("modifiedCameraColorStrength", 100).toInt();
     bool stretch = settings.value("stretchEnabled", false).toBool();
     bool starReduce = settings.value("starReduceEnabled", false).toBool();
     int starReduceStrength = settings.value("starReduceStrength", 70).toInt();
@@ -1224,6 +1343,8 @@ void ParamsPanel::loadPreset() {
     QSignalBlocker blocker22(m_timelapseStrengthSlider);
     QSignalBlocker blocker23(m_timelapseMotionProtectionSlider);
     QSignalBlocker blocker24(m_timelapseProtectGroundCheck);
+    QSignalBlocker blocker25(m_modifiedCameraColorStrengthSlider);
+    QSignalBlocker blocker26(m_modifiedCameraColorMode);
 
     Q_UNUSED(alignIndex)
     m_alignMethod->setCurrentIndex(0);
@@ -1243,6 +1364,14 @@ void ParamsPanel::loadPreset() {
     m_noiseReductionLabel->setText(QString("%1%").arg(noiseReductionStrength));
     m_noiseReductionLabel->setEnabled(noiseReduction);
     m_modifiedCameraColorCheck->setChecked(modifiedCameraColor);
+    m_modifiedCameraColorStrengthSlider->setValue(
+        std::clamp(modifiedCameraColorStrength, 0, 100));
+    m_modifiedCameraColorStrengthLabel->setText(
+        QString::number(m_modifiedCameraColorStrengthSlider->value()) + "%");
+    m_modifiedCameraColorMode->setCurrentIndex(0);
+    m_modifiedCameraGrayPointX = -1.0;
+    m_modifiedCameraGrayPointY = -1.0;
+    updateModifiedCameraColorControls();
     m_stretchCheck->setChecked(stretch);
     m_starReduceCheck->setChecked(starReduce);
     m_starReduceSlider->setValue(starReduceStrength);
@@ -1318,6 +1447,8 @@ void ParamsPanel::onPresetChanged(int index) {
             preset.noiseReductionStrength = settings.value("noiseReductionStrength", 30).toInt();
             preset.modifiedCameraColorEnabled =
                 settings.value("modifiedCameraColorEnabled", false).toBool();
+            preset.modifiedCameraColorStrength =
+                settings.value("modifiedCameraColorStrength", 100).toInt();
             preset.stretchEnabled = settings.value("stretchEnabled", false).toBool();
             preset.starReduceEnabled = settings.value("starReduceEnabled", false).toBool();
             preset.starReduceStrength = settings.value("starReduceStrength", 70).toInt();
@@ -1376,6 +1507,8 @@ void ParamsPanel::applyPreset(const Preset& preset) {
     QSignalBlocker blocker12(m_outputFormat);
     QSignalBlocker blocker13(m_photometricCheck);
     QSignalBlocker blocker14(m_autoRejectQualityCheck);
+    QSignalBlocker blocker15(m_modifiedCameraColorStrengthSlider);
+    QSignalBlocker blocker16(m_modifiedCameraColorMode);
 
     // Align method
     // 当前产品只提供已经实现并验证过的星点对齐。
@@ -1413,6 +1546,14 @@ void ParamsPanel::applyPreset(const Preset& preset) {
 
     m_modifiedCameraColorCheck->setChecked(
         preset.modifiedCameraColorEnabled);
+    m_modifiedCameraColorStrengthSlider->setValue(
+        std::clamp(preset.modifiedCameraColorStrength, 0, 100));
+    m_modifiedCameraColorStrengthLabel->setText(
+        QString::number(m_modifiedCameraColorStrengthSlider->value()) + "%");
+    m_modifiedCameraColorMode->setCurrentIndex(0);
+    m_modifiedCameraGrayPointX = -1.0;
+    m_modifiedCameraGrayPointY = -1.0;
+    updateModifiedCameraColorControls();
 
     // Stretch
     m_stretchCheck->setChecked(preset.stretchEnabled);
@@ -1612,6 +1753,61 @@ bool ParamsPanel::noiseReductionEnabled() const {
 bool ParamsPanel::modifiedCameraColorEnabled() const {
     return m_modifiedCameraColorCheck &&
         m_modifiedCameraColorCheck->isChecked();
+}
+
+int ParamsPanel::modifiedCameraColorStrength() const {
+    return m_modifiedCameraColorStrengthSlider
+        ? m_modifiedCameraColorStrengthSlider->value() : 100;
+}
+
+ModifiedCameraNeutralMode ParamsPanel::modifiedCameraColorMode() const {
+    if (m_modifiedCameraColorMode &&
+        m_modifiedCameraColorMode->currentIndex() == 1 &&
+        hasModifiedCameraGrayPoint()) {
+        return ModifiedCameraNeutralMode::ManualPoint;
+    }
+    return ModifiedCameraNeutralMode::Automatic;
+}
+
+bool ParamsPanel::hasModifiedCameraGrayPoint() const {
+    return std::isfinite(m_modifiedCameraGrayPointX) &&
+        std::isfinite(m_modifiedCameraGrayPointY) &&
+        m_modifiedCameraGrayPointX >= 0.0 &&
+        m_modifiedCameraGrayPointX <= 1.0 &&
+        m_modifiedCameraGrayPointY >= 0.0 &&
+        m_modifiedCameraGrayPointY <= 1.0;
+}
+
+double ParamsPanel::modifiedCameraGrayPointX() const {
+    return m_modifiedCameraGrayPointX;
+}
+
+double ParamsPanel::modifiedCameraGrayPointY() const {
+    return m_modifiedCameraGrayPointY;
+}
+
+void ParamsPanel::setModifiedCameraGrayPoint(double normalizedX,
+                                              double normalizedY) {
+    if (!std::isfinite(normalizedX) || !std::isfinite(normalizedY)) return;
+    m_modifiedCameraGrayPointX = std::clamp(normalizedX, 0.0, 1.0);
+    m_modifiedCameraGrayPointY = std::clamp(normalizedY, 0.0, 1.0);
+    const QSignalBlocker checkBlocker(m_modifiedCameraColorCheck);
+    const QSignalBlocker modeBlocker(m_modifiedCameraColorMode);
+    m_modifiedCameraColorCheck->setChecked(true);
+    m_modifiedCameraColorMode->setCurrentIndex(1);
+    updateModifiedCameraColorControls();
+    markPresetCustom();
+    emitParamsChanged();
+}
+
+void ParamsPanel::clearModifiedCameraGrayPoint() {
+    m_modifiedCameraGrayPointX = -1.0;
+    m_modifiedCameraGrayPointY = -1.0;
+    if (m_modifiedCameraColorMode) {
+        const QSignalBlocker blocker(m_modifiedCameraColorMode);
+        m_modifiedCameraColorMode->setCurrentIndex(0);
+    }
+    updateModifiedCameraColorControls();
 }
 
 int ParamsPanel::noiseReductionStrength() const {
@@ -1827,6 +2023,10 @@ QString ParamsPanel::finishingSignature() const {
         QString::number(noiseReductionEnabled()),
         QString::number(noiseReductionStrength()),
         QString::number(modifiedCameraColorEnabled()),
+        QString::number(modifiedCameraColorStrength()),
+        QString::number(static_cast<int>(modifiedCameraColorMode())),
+        QString::number(modifiedCameraGrayPointX(), 'f', 6),
+        QString::number(modifiedCameraGrayPointY(), 'f', 6),
         QString::number(dewarpEnabled()), QString::number(dewarpStrength()),
         QString::number(stretchEnabled()), QString::number(starReduceEnabled()),
         QString::number(starReduceStrength()),

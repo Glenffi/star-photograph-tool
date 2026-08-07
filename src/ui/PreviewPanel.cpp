@@ -299,6 +299,8 @@ void PreviewPanel::setupBottomBar() {
 }
 
 void PreviewPanel::loadImage(const QString& filePath) {
+    setPointSelectionActive(false);
+    clearSelectedPoint();
     clearMaskOverlay();
     const uint64_t generation = ++m_previewGeneration;
     m_previewPool.clear();
@@ -388,6 +390,8 @@ void PreviewPanel::loadImage(const QString& filePath) {
 }
 
 void PreviewPanel::loadImage(const QImage& image) {
+    setPointSelectionActive(false);
+    clearSelectedPoint();
     clearMaskOverlay();
     ++m_previewGeneration;
     m_previewPool.clear();
@@ -408,6 +412,7 @@ void PreviewPanel::loadImage(const QImage& image) {
 }
 
 void PreviewPanel::load16BitImage(const std::vector<uint16_t>& data, int w, int h) {
+    setPointSelectionActive(false);
     clearMaskOverlay();
     ++m_previewGeneration;
     m_previewPool.clear();
@@ -439,6 +444,7 @@ void PreviewPanel::load16BitImage(const std::vector<uint16_t>& data, int w, int 
 }
 
 void PreviewPanel::loadRgb16BitImage(const std::vector<uint16_t>& rgb, int w, int h) {
+    setPointSelectionActive(false);
     clearMaskOverlay();
     ++m_previewGeneration;
     m_previewPool.clear();
@@ -474,6 +480,7 @@ void PreviewPanel::loadRgb16BitComparison(const QImage& before,
                                            int w, int h,
                                            uint16_t blackPoint,
                                            uint16_t whitePoint) {
+    setPointSelectionActive(false);
     clearMaskOverlay();
     ++m_previewGeneration;
     m_previewPool.clear();
@@ -522,6 +529,9 @@ void PreviewPanel::loadRgb16BitComparison(const QImage& before,
 }
 
 void PreviewPanel::clearImage() {
+    setPointSelectionActive(false);
+    m_selectedPointX = -1.0;
+    m_selectedPointY = -1.0;
     ++m_previewGeneration;
     m_previewPool.clear();
     m_maskOverlay = QImage();
@@ -572,6 +582,38 @@ void PreviewPanel::setResultLabel(const QString& label) {
     if (!m_showingResult) return;
     m_imageFileName = label;
     updateZoomDisplay();
+}
+
+void PreviewPanel::setPointSelectionActive(bool active) {
+    m_pointSelectionActive = active && !m_currentImage.isNull();
+    if (!m_imageLabel) return;
+    if (m_pointSelectionActive && hasComparison()) {
+        m_viewMode = 0;
+        m_beforeAfterMode = false;
+        if (m_beforeBtn) m_beforeBtn->setChecked(true);
+        emit beforeAfterModeChanged(false);
+        applyZoom();
+    }
+    m_imageLabel->setCursor(
+        m_pointSelectionActive ? Qt::CrossCursor : Qt::ArrowCursor);
+    if (m_pointSelectionActive && m_mouseInfo) {
+        m_mouseInfo->setText(QString::fromUtf8("点击应为灰色的天空区域"));
+    }
+}
+
+void PreviewPanel::setSelectedPoint(double normalizedX,
+                                    double normalizedY) {
+    if (!std::isfinite(normalizedX) || !std::isfinite(normalizedY)) return;
+    m_selectedPointX = std::clamp(normalizedX, 0.0, 1.0);
+    m_selectedPointY = std::clamp(normalizedY, 0.0, 1.0);
+    applyZoom();
+}
+
+void PreviewPanel::clearSelectedPoint() {
+    if (m_selectedPointX < 0.0 && m_selectedPointY < 0.0) return;
+    m_selectedPointX = -1.0;
+    m_selectedPointY = -1.0;
+    if (!m_currentImage.isNull()) applyZoom();
 }
 
 void PreviewPanel::onFitView() {
@@ -677,6 +719,27 @@ void PreviewPanel::applyZoom() {
         QImage scaledMask = m_maskOverlay.scaled(pixmap.size(), Qt::KeepAspectRatio, Qt::SmoothTransformation);
         painter.drawImage(0, 0, scaledMask);
         painter.end();
+    }
+
+    if (m_selectedPointX >= 0.0 && m_selectedPointY >= 0.0) {
+        QPainter painter(&pixmap);
+        painter.setRenderHint(QPainter::Antialiasing, true);
+        const QPointF center(
+            m_selectedPointX * pixmap.width(),
+            m_selectedPointY * pixmap.height());
+        painter.setBrush(Qt::NoBrush);
+        painter.setPen(QPen(QColor(9, 13, 15, 210), 4.0));
+        painter.drawEllipse(center, 8.0, 8.0);
+        painter.setPen(QPen(QColor("#4ED7AE"), 2.0));
+        painter.drawEllipse(center, 8.0, 8.0);
+        painter.drawLine(center + QPointF(-12.0, 0.0),
+                         center + QPointF(-5.0, 0.0));
+        painter.drawLine(center + QPointF(5.0, 0.0),
+                         center + QPointF(12.0, 0.0));
+        painter.drawLine(center + QPointF(0.0, -12.0),
+                         center + QPointF(0.0, -5.0));
+        painter.drawLine(center + QPointF(0.0, 5.0),
+                         center + QPointF(0.0, 12.0));
     }
 
     m_imageLabel->setPixmap(pixmap);
@@ -807,7 +870,30 @@ bool PreviewPanel::eventFilter(QObject* watched, QEvent* event) {
 
     if (event->type() == QEvent::MouseButtonPress) {
         auto* mouse = static_cast<QMouseEvent*>(event);
+        if (m_pointSelectionActive &&
+            mouse->button() == Qt::RightButton) {
+            setPointSelectionActive(false);
+            m_mouseInfo->setText(QString::fromUtf8("手动灰点采样已取消"));
+            return true;
+        }
         if (mouse->button() == Qt::LeftButton) {
+            if (m_pointSelectionActive) {
+                const QPointF position = mouse->position();
+                const int labelWidth = std::max(1, m_imageLabel->width());
+                const int labelHeight = std::max(1, m_imageLabel->height());
+                if (position.x() >= 0.0 && position.x() < labelWidth &&
+                    position.y() >= 0.0 && position.y() < labelHeight) {
+                    const double normalizedX = std::clamp(
+                        (position.x() + 0.5) / labelWidth, 0.0,
+                        std::nextafter(1.0, 0.0));
+                    const double normalizedY = std::clamp(
+                        (position.y() + 0.5) / labelHeight, 0.0,
+                        std::nextafter(1.0, 0.0));
+                    setPointSelectionActive(false);
+                    emit imagePointSelected(normalizedX, normalizedY);
+                }
+                return true;
+            }
             m_panning = true;
             m_lastPanPos = mouse->globalPosition().toPoint();
             m_imageLabel->setCursor(Qt::ClosedHandCursor);

@@ -280,6 +280,7 @@ private:
         }
 
         if (changed) {
+            m_paramsPanel->clearModifiedCameraGrayPoint();
             invalidateCachedResult();
             m_paramsPanel->applySceneProfile(scene);
         }
@@ -541,6 +542,32 @@ private:
         connect(m_previewPanel, &PreviewPanel::resultRequested, this, [this]() {
             showBestAvailableResult();
         });
+        connect(m_paramsPanel, &ParamsPanel::modifiedCameraGrayPointRequested,
+                this, [this]() {
+                    if (!m_quickPreviewSource || m_quickPreviewSource->empty()) {
+                        m_paramsPanel->clearModifiedCameraGrayPoint();
+                        QMessageBox::information(
+                            this, QString::fromUtf8("手动灰点"),
+                            QString::fromUtf8(
+                                "请先完成一次正式处理。之后可在结果预览中采样，"
+                                "并立即通过快速预览检查色彩。"));
+                        return;
+                    }
+                    cancelQuickPreview(false);
+                    showBestAvailableResult();
+                    m_previewPanel->setPointSelectionActive(true);
+                    statusBar()->showMessage(
+                        QString::fromUtf8("请在结果中点击应为灰色的天空区域"));
+                });
+        connect(m_previewPanel, &PreviewPanel::imagePointSelected,
+                this, [this](double normalizedX, double normalizedY) {
+                    m_paramsPanel->setModifiedCameraGrayPoint(
+                        normalizedX, normalizedY);
+                    m_previewPanel->setSelectedPoint(
+                        normalizedX, normalizedY);
+                    statusBar()->showMessage(
+                        QString::fromUtf8("灰点已采样，正在更新快速预览"), 3000);
+                });
 
         // 项目面板拖放导入
         connect(m_projectPanel, &ProjectPanel::filesDropped, this, [this](const QStringList& paths) {
@@ -557,6 +584,7 @@ private:
         // 文件变化 -> 更新按钮状态 & 参考帧列表 & 智能推荐堆栈算法
         connect(m_projectPanel, &ProjectPanel::filesChanged, this, [this]() {
             const bool wasShowingResult = m_previewPanel->isShowingResult();
+            m_paramsPanel->clearModifiedCameraGrayPoint();
             invalidateCachedResult();
             updateProjectReadiness();
             if (wasShowingResult) {
@@ -683,6 +711,15 @@ private:
     void handleProcessingParametersChanged() {
         updateProjectReadiness();
         if (m_cachedStackedData.empty()) return;
+        if (m_paramsPanel->hasModifiedCameraGrayPoint() &&
+            !m_lastProcessedUpstreamSignature.isEmpty() &&
+            currentUpstreamSignature() !=
+                m_lastProcessedUpstreamSignature) {
+            // A manual point is tied to the crop and geometry of the cached
+            // pre-finishing image. Any upstream change requires a new sample.
+            m_paramsPanel->clearModifiedCameraGrayPoint();
+            m_previewPanel->clearSelectedPoint();
+        }
         const bool current =
             currentProcessingSignature() == m_lastProcessedSignature;
         m_toolbar->enableExport(current);
@@ -717,6 +754,14 @@ private:
             m_paramsPanel->noiseReductionStrength();
         options.modifiedCameraColorEnabled =
             m_paramsPanel->modifiedCameraColorEnabled();
+        options.modifiedCameraColor.strength =
+            m_paramsPanel->modifiedCameraColorStrength();
+        options.modifiedCameraColor.neutralMode =
+            m_paramsPanel->modifiedCameraColorMode();
+        options.modifiedCameraColor.manualPointX =
+            m_paramsPanel->modifiedCameraGrayPointX();
+        options.modifiedCameraColor.manualPointY =
+            m_paramsPanel->modifiedCameraGrayPointY();
         options.dehazeEnabled = m_paramsPanel->dewarpEnabled();
         options.dehazeStrength = m_paramsPanel->dewarpStrength();
         options.stretchEnabled = m_paramsPanel->stretchEnabled();
@@ -761,6 +806,16 @@ private:
             m_previewPanel->setResultLabel(QString::fromUtf8(
                 "快速预览 %1×%2 · 完整导出需重新处理")
                 .arg(m_quickPreviewWidth).arg(m_quickPreviewHeight));
+            if (m_paramsPanel->modifiedCameraColorEnabled() &&
+                m_paramsPanel->modifiedCameraColorMode() ==
+                    ModifiedCameraNeutralMode::ManualPoint &&
+                m_paramsPanel->hasModifiedCameraGrayPoint()) {
+                m_previewPanel->setSelectedPoint(
+                    m_paramsPanel->modifiedCameraGrayPointX(),
+                    m_paramsPanel->modifiedCameraGrayPointY());
+            } else {
+                m_previewPanel->clearSelectedPoint();
+            }
             m_previewPanel->setResultAvailable(true, true);
             return;
         }
@@ -773,6 +828,16 @@ private:
         } else {
             m_previewPanel->loadRgb16BitImage(
                 m_cachedStackedData, m_cachedWidth, m_cachedHeight);
+        }
+        if (m_paramsPanel->modifiedCameraColorEnabled() &&
+            m_paramsPanel->modifiedCameraColorMode() ==
+                ModifiedCameraNeutralMode::ManualPoint &&
+            m_paramsPanel->hasModifiedCameraGrayPoint()) {
+            m_previewPanel->setSelectedPoint(
+                m_paramsPanel->modifiedCameraGrayPointX(),
+                m_paramsPanel->modifiedCameraGrayPointY());
+        } else {
+            m_previewPanel->clearSelectedPoint();
         }
         m_previewPanel->setResultAvailable(true, true);
     }
@@ -1086,6 +1151,14 @@ private slots:
             m_paramsPanel->noiseReductionStrength();
         params.modifiedCameraColorEnabled =
             m_paramsPanel->modifiedCameraColorEnabled();
+        params.modifiedCameraColor.strength =
+            m_paramsPanel->modifiedCameraColorStrength();
+        params.modifiedCameraColor.neutralMode =
+            m_paramsPanel->modifiedCameraColorMode();
+        params.modifiedCameraColor.manualPointX =
+            m_paramsPanel->modifiedCameraGrayPointX();
+        params.modifiedCameraColor.manualPointY =
+            m_paramsPanel->modifiedCameraGrayPointY();
         params.dewarpEnabled = m_paramsPanel->dewarpEnabled();
         params.dewarpStrength = m_paramsPanel->dewarpStrength();
         params.stretchEnabled = m_paramsPanel->stretchEnabled();

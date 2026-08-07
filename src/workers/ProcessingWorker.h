@@ -61,6 +61,7 @@ public:
         bool noiseReductionEnabled = false;
         int noiseReductionStrength = 30;
         bool modifiedCameraColorEnabled = false;
+        ModifiedCameraColorOptions modifiedCameraColor;
         bool dewarpEnabled = false;
         int dewarpStrength = 30;
         bool stretchEnabled = false;

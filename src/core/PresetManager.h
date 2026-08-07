@@ -15,6 +15,7 @@ struct Preset {
     bool noiseReductionEnabled = false;
     int noiseReductionStrength = 30;
     bool modifiedCameraColorEnabled = false;
+    int modifiedCameraColorStrength = 100;
     bool stretchEnabled = false;
     bool starReduceEnabled = false;
     int starReduceStrength = 70;

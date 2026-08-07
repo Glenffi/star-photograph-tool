@@ -275,59 +275,110 @@ bool AutoOptimizeEngine::neutralizeBackgroundRgb(
 bool AutoOptimizeEngine::restoreModifiedCameraColorRgb(
     const std::vector<uint16_t>& src, int w, int h,
     std::vector<uint16_t>& dst, ModifiedCameraColorStats* outputStats,
-    const std::vector<uint8_t>* skyMask) {
+    const std::vector<uint8_t>* skyMask,
+    const ModifiedCameraColorOptions& options) {
     ModifiedCameraColorStats stats;
     size_t pixelCount = 0;
     if (!rgbPixelCount(src, w, h, pixelCount) ||
-        (skyMask && skyMask->size() != pixelCount)) {
+        (skyMask && skyMask->size() != pixelCount) ||
+        options.strength < 0 || options.strength > 100 ||
+        (options.neutralMode == ModifiedCameraNeutralMode::ManualPoint &&
+         (!std::isfinite(options.manualPointX) ||
+          !std::isfinite(options.manualPointY) ||
+          options.manualPointX < 0.0 || options.manualPointX > 1.0 ||
+          options.manualPointY < 0.0 || options.manualPointY > 1.0))) {
         return false;
     }
+    if (options.strength == 0) {
+        dst = src;
+        if (outputStats) *outputStats = stats;
+        return true;
+    }
 
-    constexpr size_t kMaximumSamples = 262144;
-    const size_t step = std::max<size_t>(
-        1, (pixelCount - 1) / kMaximumSamples + 1);
-    std::vector<size_t> candidateIndices;
-    std::vector<uint16_t> candidateLuminance;
-    candidateIndices.reserve(std::min(pixelCount, kMaximumSamples + 1));
-    candidateLuminance.reserve(candidateIndices.capacity());
+    std::array<std::vector<uint16_t>, 3> neutralChannels;
+    if (options.neutralMode == ModifiedCameraNeutralMode::ManualPoint) {
+        stats.usedManualPoint = true;
+        stats.samplePointX = options.manualPointX;
+        stats.samplePointY = options.manualPointY;
+        const auto pointToPixel = [](double coordinate, int extent) {
+            const double bounded = std::clamp(
+                coordinate, 0.0, std::nextafter(1.0, 0.0));
+            return std::min(
+                extent - 1, static_cast<int>(std::floor(bounded * extent)));
+        };
+        const int centerX = pointToPixel(options.manualPointX, w);
+        const int centerY = pointToPixel(options.manualPointY, h);
+        // A robust neighborhood behaves like a multi-pixel Camera Raw
+        // eyedropper and maps consistently between preview resolutions.
+        const int radius = std::clamp(
+            static_cast<int>(std::lround(std::min(w, h) * 0.004)), 2, 64);
+        const int radiusSquared = radius * radius;
+        for (int y = std::max(0, centerY - radius);
+             y <= std::min(h - 1, centerY + radius); ++y) {
+            for (int x = std::max(0, centerX - radius);
+                 x <= std::min(w - 1, centerX + radius); ++x) {
+                const int dx = x - centerX;
+                const int dy = y - centerY;
+                if (dx * dx + dy * dy > radiusSquared) continue;
+                const size_t pixel = static_cast<size_t>(y) * w + x;
+                const size_t base = pixel * 3;
+                if (luminanceAt(src, pixel) < 16 ||
+                    std::max({src[base], src[base + 1], src[base + 2]}) >=
+                        64500) {
+                    continue;
+                }
+                for (size_t channel = 0; channel < 3; ++channel) {
+                    neutralChannels[channel].push_back(src[base + channel]);
+                }
+            }
+        }
+        if (neutralChannels[0].size() < 9) return false;
+    } else {
+        constexpr size_t kMaximumSamples = 262144;
+        const size_t step = std::max<size_t>(
+            1, (pixelCount - 1) / kMaximumSamples + 1);
+        std::vector<size_t> candidateIndices;
+        std::vector<uint16_t> candidateLuminance;
+        candidateIndices.reserve(std::min(pixelCount, kMaximumSamples + 1));
+        candidateLuminance.reserve(candidateIndices.capacity());
 
-    // Without a sky mask, omit the lowest quarter of a conventional
-    // nightscape. Mountains, buildings and vegetation are poor gray-card
-    // substitutes and otherwise dominate a wide-angle frame.
-    const int samplingHeight = skyMask ? h : std::max(1, h * 3 / 4);
-    for (int y = 0; y < samplingHeight; ++y) {
-        for (int x = 0; x < w; ++x) {
-            const size_t pixel = static_cast<size_t>(y) * w + x;
-            if (pixel % step != 0 ||
-                (skyMask && (*skyMask)[pixel] < 160)) {
+        // Without a sky mask, omit the lowest quarter of a conventional
+        // nightscape. Mountains, buildings and vegetation are poor gray-card
+        // substitutes and otherwise dominate a wide-angle frame.
+        const int samplingHeight = skyMask ? h : std::max(1, h * 3 / 4);
+        for (int y = 0; y < samplingHeight; ++y) {
+            for (int x = 0; x < w; ++x) {
+                const size_t pixel = static_cast<size_t>(y) * w + x;
+                if (pixel % step != 0 ||
+                    (skyMask && (*skyMask)[pixel] < 160)) {
+                    continue;
+                }
+                candidateIndices.push_back(pixel);
+                candidateLuminance.push_back(luminanceAt(src, pixel));
+            }
+        }
+        if (candidateIndices.size() < 64) return false;
+
+        const uint16_t low = percentileValue(candidateLuminance, 12, 100);
+        const uint16_t high = percentileValue(candidateLuminance, 58, 100);
+        for (auto& channel : neutralChannels) {
+            channel.reserve(candidateIndices.size() / 2);
+        }
+        for (size_t sample = 0; sample < candidateIndices.size(); ++sample) {
+            const uint16_t luminance = candidateLuminance[sample];
+            if (luminance < low || luminance > high || luminance < 16) continue;
+            const size_t base = candidateIndices[sample] * 3;
+            // Exclude clipped stars and artificial lights even when a dense
+            // field pushes them below the global luminance cutoff.
+            if (std::max({src[base], src[base + 1], src[base + 2]}) >= 64500) {
                 continue;
             }
-            candidateIndices.push_back(pixel);
-            candidateLuminance.push_back(luminanceAt(src, pixel));
+            for (size_t channel = 0; channel < 3; ++channel) {
+                neutralChannels[channel].push_back(src[base + channel]);
+            }
         }
+        if (neutralChannels[0].size() < 64) return false;
     }
-    if (candidateIndices.size() < 64) return false;
-
-    const uint16_t low = percentileValue(candidateLuminance, 12, 100);
-    const uint16_t high = percentileValue(candidateLuminance, 58, 100);
-    std::array<std::vector<uint16_t>, 3> neutralChannels;
-    for (auto& channel : neutralChannels) {
-        channel.reserve(candidateIndices.size() / 2);
-    }
-    for (size_t sample = 0; sample < candidateIndices.size(); ++sample) {
-        const uint16_t luminance = candidateLuminance[sample];
-        if (luminance < low || luminance > high || luminance < 16) continue;
-        const size_t base = candidateIndices[sample] * 3;
-        // Exclude clipped stars and artificial lights even when a dense field
-        // pushes them below the global luminance cutoff.
-        if (std::max({src[base], src[base + 1], src[base + 2]}) >= 64500) {
-            continue;
-        }
-        for (size_t channel = 0; channel < 3; ++channel) {
-            neutralChannels[channel].push_back(src[base + channel]);
-        }
-    }
-    if (neutralChannels[0].size() < 64) return false;
 
     stats.sampleCount = neutralChannels[0].size();
     for (size_t channel = 0; channel < 3; ++channel) {
@@ -345,10 +396,12 @@ bool AutoOptimizeEngine::restoreModifiedCameraColorRgb(
     }
     constexpr double kMinimumGain = 0.35;
     constexpr double kMaximumGain = 2.80;
+    const double mix = options.strength / 100.0;
     for (size_t channel = 0; channel < 3; ++channel) {
-        stats.gains[channel] = std::clamp(
+        const double targetGain = std::clamp(
             neutralLuminance / stats.neutralSample[channel],
             kMinimumGain, kMaximumGain);
+        stats.gains[channel] = 1.0 + (targetGain - 1.0) * mix;
     }
 
     std::vector<uint16_t> output(src.size());

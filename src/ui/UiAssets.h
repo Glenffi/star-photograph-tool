@@ -26,6 +26,7 @@ enum class Glyph {
     DeepSky,
     SkyGround,
     Timelapse,
+    Eyedropper,
     ChevronRight
 };
 

@@ -631,6 +631,73 @@ void testRgbAutoOptimize() {
     check(static_cast<int>(restored[nebula]) - restored[nebula + 1] >= 2000,
           "BCF restoration should retain localized H-alpha contrast");
 
+    ModifiedCameraColorOptions manualColor;
+    manualColor.neutralMode = ModifiedCameraNeutralMode::ManualPoint;
+    manualColor.manualPointX = 0.1;
+    manualColor.manualPointY = 0.1;
+    manualColor.strength = 50;
+    std::vector<uint16_t> halfRestored;
+    check(AutoOptimizeEngine::restoreModifiedCameraColorRgb(
+              modified, modifiedWidth, modifiedHeight,
+              halfRestored, &colorStats, nullptr, manualColor) &&
+              colorStats.usedManualPoint && colorStats.sampleCount >= 9 &&
+              colorStats.gains[0] > 0.5 && colorStats.gains[0] < 1.0 &&
+              colorStats.gains[2] > 1.0 && colorStats.gains[2] < 2.0,
+          "Manual gray point should use a robust patch and interpolate strength");
+    const int originalSpread = 6000 - 1200;
+    const int halfMaximum = std::max({
+        static_cast<int>(halfRestored[background]),
+        static_cast<int>(halfRestored[background + 1]),
+        static_cast<int>(halfRestored[background + 2])});
+    const int halfMinimum = std::min({
+        static_cast<int>(halfRestored[background]),
+        static_cast<int>(halfRestored[background + 1]),
+        static_cast<int>(halfRestored[background + 2])});
+    check(halfMaximum - halfMinimum > 2 &&
+              halfMaximum - halfMinimum < originalSpread,
+          "Half-strength gray-point correction should be continuous");
+
+    ModifiedCameraColorOptions disabledColor = manualColor;
+    disabledColor.strength = 0;
+    check(AutoOptimizeEngine::restoreModifiedCameraColorRgb(
+              modified, modifiedWidth, modifiedHeight,
+              halfRestored, &colorStats, nullptr, disabledColor) &&
+              halfRestored == modified && !colorStats.applied,
+          "Zero-strength modified-camera correction should be bit exact");
+
+    ModifiedCameraColorOptions invalidManual = manualColor;
+    invalidManual.manualPointX = 1.1;
+    check(!AutoOptimizeEngine::restoreModifiedCameraColorRgb(
+              modified, modifiedWidth, modifiedHeight,
+              halfRestored, &colorStats, nullptr, invalidManual),
+          "Manual gray point should reject out-of-range coordinates");
+
+    std::vector<uint16_t> splitColor(
+        modifiedWidth * modifiedHeight * 3);
+    for (int y = 0; y < modifiedHeight; ++y) {
+        for (int x = 0; x < modifiedWidth; ++x) {
+            const size_t base =
+                (static_cast<size_t>(y) * modifiedWidth + x) * 3;
+            const bool left = x < modifiedWidth / 2;
+            splitColor[base] = left ? 6000 : 1000;
+            splitColor[base + 1] = 2200;
+            splitColor[base + 2] = left ? 1000 : 6000;
+        }
+    }
+    manualColor.strength = 100;
+    manualColor.manualPointX = 0.0;
+    check(AutoOptimizeEngine::restoreModifiedCameraColorRgb(
+              splitColor, modifiedWidth, modifiedHeight,
+              halfRestored, &colorStats, nullptr, manualColor) &&
+              colorStats.neutralSample[0] > colorStats.neutralSample[2],
+          "Manual gray point 0 should sample the first image column");
+    manualColor.manualPointX = 1.0;
+    check(AutoOptimizeEngine::restoreModifiedCameraColorRgb(
+              splitColor, modifiedWidth, modifiedHeight,
+              halfRestored, &colorStats, nullptr, manualColor) &&
+              colorStats.neutralSample[2] > colorStats.neutralSample[0],
+          "Manual gray point 1 should clamp to the final image column");
+
     std::vector<uint16_t> neutralInput(
         modifiedWidth * modifiedHeight * 3, 4000);
     check(AutoOptimizeEngine::restoreModifiedCameraColorRgb(

@@ -36,6 +36,9 @@ public:
 
     void setInfo(const QString& info);           // 底部信息栏文字
     void setResultLabel(const QString& label);   // 持久显示结果/快速预览状态
+    void setPointSelectionActive(bool active);
+    void setSelectedPoint(double normalizedX, double normalizedY);
+    void clearSelectedPoint();
     void setBeforeAfterMode(bool enabled);
     void setBeforeImage(const QImage& image);
     void setAfterImage(const QImage& image);
@@ -57,6 +60,7 @@ signals:
     void comparisonAvailabilityChanged(bool available);
     void beforeAfterModeChanged(bool enabled);
     void resultRequested();
+    void imagePointSelected(double normalizedX, double normalizedY);
     void sourcePreviewReady(const QString& filePath, const QImage& image,
                             int iso, double exposureTime, double aperture,
                             int focalLength);
@@ -135,6 +139,9 @@ private:
     bool m_beforeAfterMode = false;
     bool m_showInfo = true;
     bool m_showingResult = false;
+    bool m_pointSelectionActive = false;
+    double m_selectedPointX = -1.0;
+    double m_selectedPointY = -1.0;
     int m_viewMode = 1; // 0=处理前，1=处理后，2=分屏
     QString m_currentFilePath;
     int m_imageIso = 0;

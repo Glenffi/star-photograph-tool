@@ -2009,6 +2009,7 @@ bool ProcessingWorker::finishResult(std::vector<uint16_t>& resultRgb,
         m_params.noiseReductionStrength;
     finishingOptions.modifiedCameraColorEnabled =
         m_params.modifiedCameraColorEnabled;
+    finishingOptions.modifiedCameraColor = m_params.modifiedCameraColor;
     finishingOptions.dehazeEnabled = m_params.dewarpEnabled;
     finishingOptions.dehazeStrength = m_params.dewarpStrength;
     finishingOptions.stretchEnabled = m_params.stretchEnabled;
@@ -2055,9 +2056,14 @@ bool ProcessingWorker::finishResult(std::vector<uint16_t>& resultRgb,
     }
     m_modifiedCameraColorStats = finishingResult.modifiedCameraColorStats;
     m_starReductionStats = finishingResult.starReductionStats;
-    if (m_params.modifiedCameraColorEnabled) {
+    if (m_params.modifiedCameraColorEnabled &&
+        m_params.modifiedCameraColor.strength > 0) {
         emit stageMessage(QString(
-            "改机色彩已还原：RGB 增益 %1 / %2 / %3")
+            "改机色彩已还原：%1 · %2% · RGB 增益 %3 / %4 / %5")
+            .arg(m_modifiedCameraColorStats.usedManualPoint
+                     ? QString::fromUtf8("手动灰点")
+                     : QString::fromUtf8("自动灰点"))
+            .arg(m_params.modifiedCameraColor.strength)
             .arg(m_modifiedCameraColorStats.gains[0], 0, 'f', 3)
             .arg(m_modifiedCameraColorStats.gains[1], 0, 'f', 3)
             .arg(m_modifiedCameraColorStats.gains[2], 0, 'f', 3));

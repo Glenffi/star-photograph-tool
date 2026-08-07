@@ -58,6 +58,7 @@ void PresetManager::savePreset(const Preset& preset, const QString& path) {
     obj["noiseReductionEnabled"] = preset.noiseReductionEnabled;
     obj["noiseReductionStrength"] = preset.noiseReductionStrength;
     obj["modifiedCameraColorEnabled"] = preset.modifiedCameraColorEnabled;
+    obj["modifiedCameraColorStrength"] = preset.modifiedCameraColorStrength;
     obj["stretchEnabled"] = preset.stretchEnabled;
     obj["starReduceEnabled"] = preset.starReduceEnabled;
     obj["starReduceStrength"] = preset.starReduceStrength;
@@ -94,6 +95,8 @@ Preset PresetManager::loadPreset(const QString& path) {
     preset.noiseReductionStrength = obj["noiseReductionStrength"].toInt(30);
     preset.modifiedCameraColorEnabled =
         obj["modifiedCameraColorEnabled"].toBool(false);
+    preset.modifiedCameraColorStrength =
+        obj["modifiedCameraColorStrength"].toInt(100);
     preset.stretchEnabled = obj["stretchEnabled"].toBool(false);
     preset.starReduceEnabled = obj["starReduceEnabled"].toBool(false);
     preset.starReduceStrength = obj["starReduceStrength"].toInt(70);

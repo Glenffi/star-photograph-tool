@@ -5,11 +5,29 @@
 #include <cstdint>
 #include <vector>
 
+enum class ModifiedCameraNeutralMode {
+    Automatic,
+    ManualPoint
+};
+
+struct ModifiedCameraColorOptions {
+    int strength = 100;
+    ModifiedCameraNeutralMode neutralMode =
+        ModifiedCameraNeutralMode::Automatic;
+    // Normalized image coordinates keep a picked point stable between the
+    // bounded quick preview and the full-resolution finishing pass.
+    double manualPointX = 0.5;
+    double manualPointY = 0.5;
+};
+
 struct ModifiedCameraColorStats {
     std::array<uint16_t, 3> neutralSample = {};
     std::array<double, 3> gains = {1.0, 1.0, 1.0};
     size_t sampleCount = 0;
     size_t clippedChannelValues = 0;
+    bool usedManualPoint = false;
+    double samplePointX = 0.5;
+    double samplePointY = 0.5;
     bool applied = false;
 };
 
@@ -43,7 +61,8 @@ public:
         const std::vector<uint16_t>& src, int w, int h,
         std::vector<uint16_t>& dst,
         ModifiedCameraColorStats* stats = nullptr,
-        const std::vector<uint8_t>* skyMask = nullptr);
+        const std::vector<uint8_t>* skyMask = nullptr,
+        const ModifiedCameraColorOptions& options = {});
 
     // Restores fine texture and medium-scale clarity only where skyMask
     // approaches zero. The clarity layer favors distant ground near the

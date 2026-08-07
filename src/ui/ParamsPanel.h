@@ -2,6 +2,7 @@
 
 #include <QStringList>
 #include <QWidget>
+#include "core/AutoOptimizeEngine.h"
 #include "core/PresetManager.h"
 #include "core/SkyGroundMask.h"
 
@@ -33,6 +34,13 @@ public:
     bool noiseReductionEnabled() const;
     int noiseReductionStrength() const;
     bool modifiedCameraColorEnabled() const;
+    int modifiedCameraColorStrength() const;
+    ModifiedCameraNeutralMode modifiedCameraColorMode() const;
+    bool hasModifiedCameraGrayPoint() const;
+    double modifiedCameraGrayPointX() const;
+    double modifiedCameraGrayPointY() const;
+    void setModifiedCameraGrayPoint(double normalizedX, double normalizedY);
+    void clearModifiedCameraGrayPoint();
     bool stretchEnabled() const;
     bool starReduceEnabled() const;
     int starReduceStrength() const;
@@ -68,6 +76,7 @@ public:
 signals:
     void paramsChanged();  // 参数发生任何变化时触发
     void maskPreviewRequested(); // 用户点击"检测地景"时发射
+    void modifiedCameraGrayPointRequested();
 
 private slots:
     void onGroupToggled(bool checked);
@@ -89,6 +98,7 @@ private:
     QSlider* createSlider(int min, int max, int value, const QString& suffix = QString());
 
     void updateSkyGroundControls();
+    void updateModifiedCameraColorControls();
     void updateStackMethodDescription();
     void markPresetCustom();
     void importCalibrationFrames(QStringList& paths, QLabel* countLabel,
@@ -150,6 +160,13 @@ private:
     QSlider* m_noiseReductionSlider = nullptr;
     QLabel* m_noiseReductionLabel = nullptr;
     QCheckBox* m_modifiedCameraColorCheck = nullptr;
+    QSlider* m_modifiedCameraColorStrengthSlider = nullptr;
+    QLabel* m_modifiedCameraColorStrengthLabel = nullptr;
+    QComboBox* m_modifiedCameraColorMode = nullptr;
+    QPushButton* m_modifiedCameraGrayPointButton = nullptr;
+    QLabel* m_modifiedCameraGrayPointStatus = nullptr;
+    double m_modifiedCameraGrayPointX = -1.0;
+    double m_modifiedCameraGrayPointY = -1.0;
     QCheckBox* m_stretchCheck = nullptr;
 
     // 缩星组

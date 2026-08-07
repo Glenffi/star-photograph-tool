@@ -21,6 +21,7 @@ struct FinishingOptions {
     bool noiseReductionEnabled = false;
     int noiseReductionStrength = 30;
     bool modifiedCameraColorEnabled = false;
+    ModifiedCameraColorOptions modifiedCameraColor;
     bool dehazeEnabled = false;
     int dehazeStrength = 30;
     bool stretchEnabled = false;

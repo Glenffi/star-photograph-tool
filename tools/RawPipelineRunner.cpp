@@ -196,6 +196,14 @@ int main(int argc, char* argv[]) {
     const QCommandLineOption modifiedCameraColorOption(
         "restore-modified-camera-color",
         "Restore a neutral color response for BCF/astronomy-modified cameras.");
+    const QCommandLineOption modifiedCameraColorStrengthOption(
+        "modified-camera-color-strength",
+        "Modified-camera color correction strength (0-100).",
+        "value", "100");
+    const QCommandLineOption modifiedCameraGrayPointOption(
+        "modified-camera-gray-point",
+        "Manual normalized gray point as x,y; implies color restoration.",
+        "x,y");
     const QCommandLineOption stretchOption(
         "stretch",
         "Apply background neutralization and linked RGB Arcsinh stretch.");
@@ -219,7 +227,9 @@ int main(int argc, char* argv[]) {
                        skyGroundFeatherOption, groundMethodOption,
                        groundDetailOption,
                        denoiseOption, dehazeOption,
-                       modifiedCameraColorOption, stretchOption,
+                       modifiedCameraColorOption,
+                       modifiedCameraColorStrengthOption,
+                       modifiedCameraGrayPointOption, stretchOption,
                        starReduceOption});
     parser.process(application);
 
@@ -257,8 +267,33 @@ int main(int argc, char* argv[]) {
     const int starReduceStrength =
         parser.value(starReduceOption).toInt(&starReduceOk);
     const bool stretchEnabled = parser.isSet(stretchOption);
+    bool modifiedCameraColorStrengthOk = false;
+    const int modifiedCameraColorStrength =
+        parser.value(modifiedCameraColorStrengthOption).toInt(
+            &modifiedCameraColorStrengthOk);
+    const QString modifiedCameraGrayPointText =
+        parser.value(modifiedCameraGrayPointOption).trimmed();
+    double modifiedCameraGrayPointX = 0.5;
+    double modifiedCameraGrayPointY = 0.5;
+    bool modifiedCameraGrayPointOk = true;
+    if (!modifiedCameraGrayPointText.isEmpty()) {
+        const QStringList components =
+            modifiedCameraGrayPointText.split(',');
+        bool xOk = false;
+        bool yOk = false;
+        if (components.size() == 2) {
+            modifiedCameraGrayPointX = components[0].toDouble(&xOk);
+            modifiedCameraGrayPointY = components[1].toDouble(&yOk);
+        }
+        modifiedCameraGrayPointOk = xOk && yOk &&
+            modifiedCameraGrayPointX >= 0.0 &&
+            modifiedCameraGrayPointX <= 1.0 &&
+            modifiedCameraGrayPointY >= 0.0 &&
+            modifiedCameraGrayPointY <= 1.0;
+    }
     const bool modifiedCameraColorEnabled =
-        parser.isSet(modifiedCameraColorOption);
+        parser.isSet(modifiedCameraColorOption) ||
+        !modifiedCameraGrayPointText.isEmpty();
     const bool singleFrameMode = parser.isSet(singleOption);
     const bool timelapseMode = parser.isSet(timelapseOption);
     const QString darkDirectory = parser.value(darkDirectoryOption);
@@ -318,6 +353,10 @@ int main(int argc, char* argv[]) {
         !kappaOk || kappa <= 0.0 || !memoryBudgetOk ||
         !denoiseOk || denoiseStrength < 0 || denoiseStrength > 70 ||
         !dehazeOk || dehazeStrength < 0 || dehazeStrength > 100 ||
+        !modifiedCameraColorStrengthOk ||
+        modifiedCameraColorStrength < 0 ||
+        modifiedCameraColorStrength > 100 ||
+        !modifiedCameraGrayPointOk ||
         !starReduceOk || starReduceStrength < 0 ||
         starReduceStrength > 100 ||
         !skyGroundFeatherOk || skyGroundFeather < 0 ||
@@ -341,7 +380,7 @@ int main(int argc, char* argv[]) {
                      "--reference-index, "
                      "--method, --kappa, "
                      "--memory-budget-mib, --denoise-strength, "
-                     "--dehaze-strength, or "
+                     "--dehaze-strength, modified-camera color, or "
                      "--star-reduce-strength/timelapse/sky-ground options.\n";
         return 2;
     }
@@ -446,6 +485,13 @@ int main(int argc, char* argv[]) {
     params.noiseReductionEnabled = denoiseStrength > 0;
     params.noiseReductionStrength = denoiseStrength;
     params.modifiedCameraColorEnabled = modifiedCameraColorEnabled;
+    params.modifiedCameraColor.strength = modifiedCameraColorStrength;
+    if (!modifiedCameraGrayPointText.isEmpty()) {
+        params.modifiedCameraColor.neutralMode =
+            ModifiedCameraNeutralMode::ManualPoint;
+        params.modifiedCameraColor.manualPointX = modifiedCameraGrayPointX;
+        params.modifiedCameraColor.manualPointY = modifiedCameraGrayPointY;
+    }
     params.dewarpEnabled = dehazeStrength > 0;
     params.dewarpStrength = dehazeStrength;
     params.stretchEnabled = stretchEnabled;
@@ -492,7 +538,7 @@ int main(int argc, char* argv[]) {
     worker.wait();
 
     QJsonObject report;
-    report["schemaVersion"] = 14;
+    report["schemaVersion"] = 15;
     report["toolVersion"] = QCoreApplication::applicationVersion();
     report["generatedAt"] = QDateTime::currentDateTimeUtc().toString(Qt::ISODate);
     report["input"] = input;
@@ -636,6 +682,9 @@ int main(int argc, char* argv[]) {
         worker.photometricOutputAnchorOffset();
     report["denoiseStrength"] = denoiseStrength;
     report["modifiedCameraColorEnabled"] = modifiedCameraColorEnabled;
+    report["modifiedCameraColorStrength"] = modifiedCameraColorStrength;
+    report["modifiedCameraColorMode"] =
+        modifiedCameraGrayPointText.isEmpty() ? "automatic" : "manual";
     const ModifiedCameraColorStats& colorStats =
         worker.modifiedCameraColorStats();
     report["modifiedCameraColorApplied"] = colorStats.applied;
@@ -651,6 +700,12 @@ int main(int argc, char* argv[]) {
     report["modifiedCameraColorGains"] = colorGains;
     report["modifiedCameraColorClippedChannelValues"] = QString::number(
         colorStats.clippedChannelValues);
+    report["modifiedCameraColorUsedManualPoint"] =
+        colorStats.usedManualPoint;
+    QJsonArray colorSamplePoint;
+    colorSamplePoint.append(colorStats.samplePointX);
+    colorSamplePoint.append(colorStats.samplePointY);
+    report["modifiedCameraColorSamplePoint"] = colorSamplePoint;
     report["dehazeStrength"] = dehazeStrength;
     report["stretchEnabled"] = stretchEnabled;
     report["starReduceStrength"] = starReduceStrength;

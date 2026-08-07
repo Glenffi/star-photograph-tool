@@ -113,6 +113,38 @@ void testQuickPreviewNoOpAndCancellation() {
     check(cancelled.wasCancelled() && cancelled.errorString().isEmpty() &&
               cancelled.takeResult().empty(),
           "Cancelled quick preview should expose no stale result");
+
+    constexpr int colorWidth = 32;
+    constexpr int colorHeight = 32;
+    std::vector<uint16_t> colorSource(
+        static_cast<size_t>(colorWidth) * colorHeight * 3);
+    for (size_t pixel = 0; pixel < colorSource.size() / 3; ++pixel) {
+        colorSource[pixel * 3] = 6000;
+        colorSource[pixel * 3 + 1] = 2200;
+        colorSource[pixel * 3 + 2] = 1200;
+    }
+    auto sharedColor =
+        std::make_shared<const std::vector<uint16_t>>(colorSource);
+    FinishingOptions colorOptions;
+    colorOptions.modifiedCameraColorEnabled = true;
+    colorOptions.modifiedCameraColor.neutralMode =
+        ModifiedCameraNeutralMode::ManualPoint;
+    colorOptions.modifiedCameraColor.manualPointX = 0.25;
+    colorOptions.modifiedCameraColor.manualPointY = 0.25;
+    colorOptions.modifiedCameraColor.strength = 60;
+    std::vector<uint16_t> expected = colorSource;
+    FinishingResult expectedResult;
+    check(FinishingPipeline::process(
+              expected, colorWidth, colorHeight, nullptr,
+              colorOptions, expectedResult),
+          "Direct manual gray-point finishing should succeed");
+    QuickPreviewWorker colorWorker(
+        sharedColor, colorWidth, colorHeight, nullptr,
+        colorOptions, 19);
+    colorWorker.start();
+    check(colorWorker.wait(3000) && colorWorker.errorString().isEmpty() &&
+              colorWorker.takeResult() == expected,
+          "Quick preview should match the shared finishing pipeline exactly");
 }
 
 } // namespace
