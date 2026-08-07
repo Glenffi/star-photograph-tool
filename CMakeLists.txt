@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(StarProcessor VERSION 0.6.2 LANGUAGES CXX)
+project(StarProcessor VERSION 0.6.3 LANGUAGES CXX)
 
 include(CTest)
 option(BUILD_SAMPLE_TOOLS "Build local RAW sample regression tools" ON)
@@ -100,6 +100,7 @@ set(CORE_SOURCES
     src/core/ImageExporter.cpp
     src/core/AutoOptimizeEngine.cpp
     src/core/FrameQualityEvaluator.cpp
+    src/core/FinishingPipeline.cpp
     src/core/PresetManager.cpp
     src/core/RawCalibrationEngine.cpp
     src/core/StarReducer.cpp
@@ -132,6 +133,7 @@ set(CORE_HEADERS
     src/core/ImageExporter.h
     src/core/AutoOptimizeEngine.h
     src/core/FrameQualityEvaluator.h
+    src/core/FinishingPipeline.h
     src/core/PresetManager.h
     src/core/RawCalibrationEngine.h
     src/core/StarReducer.h
@@ -175,6 +177,8 @@ add_library(StarProcessorWorkers STATIC
     src/workers/ProcessingWorker.h
     src/workers/MaskPreviewWorker.cpp
     src/workers/MaskPreviewWorker.h
+    src/workers/QuickPreviewWorker.cpp
+    src/workers/QuickPreviewWorker.h
 )
 target_include_directories(StarProcessorWorkers PUBLIC ${CMAKE_SOURCE_DIR}/src)
 target_link_libraries(StarProcessorWorkers PUBLIC StarProcessorCore Qt6::Core Qt6::Gui)
@@ -196,6 +200,13 @@ if(BUILD_TESTING)
     add_executable(StarProcessorWorkerTests tests/WorkerTests.cpp)
     target_link_libraries(StarProcessorWorkerTests PRIVATE StarProcessorWorkers)
     add_test(NAME worker_lifecycle COMMAND StarProcessorWorkerTests)
+
+    add_executable(StarProcessorFinishingPipelineTests
+        tests/FinishingPipelineTests.cpp)
+    target_link_libraries(StarProcessorFinishingPipelineTests
+        PRIVATE StarProcessorCore)
+    add_test(NAME finishing_pipeline
+        COMMAND StarProcessorFinishingPipelineTests)
 endif()
 
 if(BUILD_SAMPLE_TOOLS)

@@ -568,6 +568,12 @@ void PreviewPanel::setInfo(const QString& info) {
     m_bottomInfo->setText(info);
 }
 
+void PreviewPanel::setResultLabel(const QString& label) {
+    if (!m_showingResult) return;
+    m_imageFileName = label;
+    updateZoomDisplay();
+}
+
 void PreviewPanel::onFitView() {
     if (m_currentImage.isNull()) return;
 

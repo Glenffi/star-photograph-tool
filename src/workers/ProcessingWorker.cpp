@@ -1,11 +1,10 @@
 #include "ProcessingWorker.h"
 
-#include "core/AutoOptimizeEngine.h"
 #include "core/FrameQualityEvaluator.h"
+#include "core/FinishingPipeline.h"
 #include "core/ImageAligner.h"
 #include "core/ImageBufferUtils.h"
 #include "core/ImageExporter.h"
-#include "core/NoiseReductionEngine.h"
 #include "core/PhotometricNormalizer.h"
 #include "core/ProcessingMemoryEstimator.h"
 #include "core/PreviewToneMapper.h"
@@ -13,7 +12,6 @@
 #include "core/RawImageLoader.h"
 #include "core/StackingEngine.h"
 #include "core/StarDetector.h"
-#include "core/StarReducer.h"
 #include "core/TemporalPhotometricSmoother.h"
 #include "core/TimelapseEngine.h"
 
@@ -439,6 +437,14 @@ std::vector<uint16_t> ProcessingWorker::takeStackedData() {
     return std::move(m_stackedData);
 }
 
+std::vector<uint16_t> ProcessingWorker::takeQuickPreviewSource() {
+    return std::move(m_quickPreviewSource);
+}
+
+std::vector<uint8_t> ProcessingWorker::takeQuickPreviewMask() {
+    return std::move(m_quickPreviewMask);
+}
+
 QImage ProcessingWorker::takeBeforePreview() {
     return std::move(m_beforePreview);
 }
@@ -667,6 +673,10 @@ void ProcessingWorker::run() {
     m_beforePreview = QImage();
     m_beforePreviewBlackPoint = 0;
     m_beforePreviewWhitePoint = 65535;
+    m_quickPreviewSource.clear();
+    m_quickPreviewMask.clear();
+    m_quickPreviewWidth = 0;
+    m_quickPreviewHeight = 0;
     m_width = 0;
     m_height = 0;
     m_cropOffsetX = 0;
@@ -1369,7 +1379,7 @@ void ProcessingWorker::run() {
         m_height = height;
     }
 
-    finishResult(resultRgb, width, height, mask);
+    if (!finishResult(resultRgb, width, height, mask)) return;
 }
 
 void ProcessingWorker::runTimelapse() {
@@ -1941,12 +1951,33 @@ void ProcessingWorker::runSingleFrame() {
 
     std::vector<uint16_t> resultRgb = std::move(image.data);
     std::vector<uint8_t> noMask;
-    finishResult(resultRgb, m_width, m_height, noMask);
+    if (!finishResult(resultRgb, m_width, m_height, noMask)) return;
 }
 
 bool ProcessingWorker::finishResult(std::vector<uint16_t>& resultRgb,
                                     int width, int height,
                                     std::vector<uint8_t>& mask) {
+    constexpr int kQuickPreviewLongSide = 2400;
+    if (!ImageBufferUtils::resizeRgb16ToLongSide(
+            resultRgb, width, height, kQuickPreviewLongSide,
+            m_quickPreviewSource,
+            m_quickPreviewWidth, m_quickPreviewHeight)) {
+        qWarning() << "无法建立快速预览 RGB 缓存";
+        m_quickPreviewSource.clear();
+        m_quickPreviewWidth = 0;
+        m_quickPreviewHeight = 0;
+    } else if (m_params.skyGroundSepEnabled &&
+               !ImageBufferUtils::resizeMask8(
+                   mask, width, height,
+                   m_quickPreviewWidth, m_quickPreviewHeight,
+                   m_quickPreviewMask)) {
+        qWarning() << "无法建立快速预览天地蒙版缓存";
+        m_quickPreviewSource.clear();
+        m_quickPreviewMask.clear();
+        m_quickPreviewWidth = 0;
+        m_quickPreviewHeight = 0;
+    }
+
     const bool hasFinishingStage =
         (m_params.noiseReductionEnabled && m_params.noiseReductionStrength > 0)
         || m_params.modifiedCameraColorEnabled
@@ -1971,101 +2002,72 @@ bool ProcessingWorker::finishResult(std::vector<uint16_t>& resultRgb,
         }
     }
 
+    FinishingOptions finishingOptions;
+    finishingOptions.noiseReductionEnabled =
+        m_params.noiseReductionEnabled;
+    finishingOptions.noiseReductionStrength =
+        m_params.noiseReductionStrength;
+    finishingOptions.modifiedCameraColorEnabled =
+        m_params.modifiedCameraColorEnabled;
+    finishingOptions.dehazeEnabled = m_params.dewarpEnabled;
+    finishingOptions.dehazeStrength = m_params.dewarpStrength;
+    finishingOptions.stretchEnabled = m_params.stretchEnabled;
+    finishingOptions.skyGroundSeparation = m_params.skyGroundSepEnabled;
+    finishingOptions.groundDetailStrength = m_params.groundDetailStrength;
+    finishingOptions.starReductionEnabled = m_params.starReduceEnabled;
+    finishingOptions.starReductionStrength = m_params.starReduceStrength;
+
+    FinishingResult finishingResult;
+    const bool finished = FinishingPipeline::process(
+        resultRgb, width, height,
+        m_params.skyGroundSepEnabled ? &mask : nullptr,
+        finishingOptions, finishingResult,
+        [this](FinishingStage stage) {
+            switch (stage) {
+            case FinishingStage::ModifiedCameraColor:
+                emit stageMessage("改机色彩还原...");
+                emit progress(82);
+                break;
+            case FinishingStage::NoiseReduction:
+                emit stageMessage("多尺度降噪...");
+                emit progress(85);
+                break;
+            case FinishingStage::Dehaze:
+            case FinishingStage::Stretch:
+                emit stageMessage("自动优化...");
+                emit progress(90);
+                break;
+            case FinishingStage::GroundDetail:
+                emit stageMessage("恢复地景细节...");
+                break;
+            case FinishingStage::StarReduction:
+                emit stageMessage("缩星处理...");
+                emit progress(95);
+                break;
+            }
+        },
+        [this]() { return stopIfCancelled(); });
+    if (!finished) {
+        if (finishingResult.cancelled || m_wasCancelled) return false;
+        m_errorString = QString::fromUtf8("收尾处理失败：%1")
+            .arg(QString::fromStdString(finishingResult.error));
+        return false;
+    }
+    m_modifiedCameraColorStats = finishingResult.modifiedCameraColorStats;
+    m_starReductionStats = finishingResult.starReductionStats;
     if (m_params.modifiedCameraColorEnabled) {
-        emit stageMessage("改机色彩还原...");
-        std::vector<uint16_t> restored;
-        const std::vector<uint8_t>* samplingMask =
-            m_params.skyGroundSepEnabled ? &mask : nullptr;
-        if (!AutoOptimizeEngine::restoreModifiedCameraColorRgb(
-                resultRgb, width, height, restored,
-                &m_modifiedCameraColorStats, samplingMask)) {
-            m_errorString = "无法从当前图像估计改机色彩校正";
-            return false;
-        }
-        resultRgb = std::move(restored);
         emit stageMessage(QString(
             "改机色彩已还原：RGB 增益 %1 / %2 / %3")
             .arg(m_modifiedCameraColorStats.gains[0], 0, 'f', 3)
             .arg(m_modifiedCameraColorStats.gains[1], 0, 'f', 3)
             .arg(m_modifiedCameraColorStats.gains[2], 0, 'f', 3));
-        emit progress(82);
     }
-
-    if (m_params.noiseReductionEnabled &&
-        m_params.noiseReductionStrength > 0) {
-        emit stageMessage("多尺度降噪...");
-        std::vector<uint16_t> denoised;
-        if (!NoiseReductionEngine::denoiseRgb(
-                resultRgb, width, height,
-                m_params.noiseReductionStrength, denoised)) {
-            m_errorString = "RGB 多尺度降噪失败";
-            return false;
-        }
-        // Fixed-tripod ground has already gained noise reduction from averaging
-        // unaligned source frames. Running the spatial denoiser over it again
-        // softens distant ridges and buildings, so retain the pre-denoise ground
-        // while feathering the denoised sky across the horizon mask.
-        if (m_params.skyGroundSepEnabled &&
-            !ImageBufferUtils::blendSkyGroundInPlace(
-                denoised, resultRgb, mask, width, height)) {
-            m_errorString = "天地分离降噪融合失败";
-            return false;
-        }
-        resultRgb = std::move(denoised);
-        emit progress(85);
-    }
-
-    if (m_params.dewarpEnabled || m_params.stretchEnabled) {
-        emit stageMessage("自动优化...");
-        if (m_params.dewarpEnabled) {
-            std::vector<uint16_t> output;
-            if (!AutoOptimizeEngine::dehazeRgb(
-                    resultRgb, width, height, m_params.dewarpStrength, output)) {
-                m_errorString = "RGB 去雾失败";
-                return false;
-            }
-            resultRgb = std::move(output);
-        }
-        if (m_params.stretchEnabled) {
-            std::vector<uint16_t> output;
-            if (!AutoOptimizeEngine::stretchRgb(
-                    resultRgb, width, height, output)) {
-                m_errorString = "RGB 曲线拉伸失败";
-                return false;
-            }
-            resultRgb = std::move(output);
-        }
-        emit progress(90);
-    }
-
-    if (stopIfCancelled()) return false;
-    if (m_params.skyGroundSepEnabled &&
-        m_params.groundDetailStrength > 0) {
-        emit stageMessage("恢复地景细节...");
-        if (!AutoOptimizeEngine::enhanceGroundDetail(
-                resultRgb, width, height, mask,
-                m_params.groundDetailStrength)) {
-            m_errorString = "地景细节恢复失败";
-            return false;
-        }
-    }
-
-    if (stopIfCancelled()) return false;
     if (m_params.starReduceEnabled && m_params.starReduceStrength > 0) {
-        emit stageMessage("缩星处理...");
-        if (!StarReducer::reduce(resultRgb, width, height,
-                                 m_params.starReduceStrength,
-                                 &m_starReductionStats,
-                                 m_params.skyGroundSepEnabled ? &mask : nullptr)) {
-            qWarning() << "缩星处理失败，继续导出未缩星结果";
-        } else {
-            emit stageMessage(QString(
-                "缩星完成：处理 %1 颗星，其中 %2 颗弱小星被清除或显著缩小，%3 个星缘像素去色边")
-                .arg(m_starReductionStats.processedStars)
-                .arg(m_starReductionStats.stronglySuppressedStars)
-                .arg(m_starReductionStats.defringedPixels));
-        }
-        emit progress(95);
+        emit stageMessage(QString(
+            "缩星完成：处理 %1 颗星，其中 %2 颗弱小星被清除或显著缩小，%3 个星缘像素去色边")
+            .arg(m_starReductionStats.processedStars)
+            .arg(m_starReductionStats.stronglySuppressedStars)
+            .arg(m_starReductionStats.defringedPixels));
     }
 
     m_stackedData = std::move(resultRgb);

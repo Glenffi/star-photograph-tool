@@ -492,7 +492,7 @@ int main(int argc, char* argv[]) {
     worker.wait();
 
     QJsonObject report;
-    report["schemaVersion"] = 13;
+    report["schemaVersion"] = 14;
     report["toolVersion"] = QCoreApplication::applicationVersion();
     report["generatedAt"] = QDateTime::currentDateTimeUtc().toString(Qt::ISODate);
     report["input"] = input;
@@ -697,6 +697,11 @@ int main(int argc, char* argv[]) {
         worker.minimumAlignmentGridCoverage();
     report["width"] = worker.stackedWidth();
     report["height"] = worker.stackedHeight();
+    report["quickPreviewAvailable"] = worker.quickPreviewAvailable();
+    report["quickPreviewMaskAvailable"] =
+        worker.quickPreviewMaskAvailable();
+    report["quickPreviewWidth"] = worker.quickPreviewWidth();
+    report["quickPreviewHeight"] = worker.quickPreviewHeight();
     report["cropOffsetX"] = worker.cropOffsetX();
     report["cropOffsetY"] = worker.cropOffsetY();
     report["outputFile"] = worker.outputFile();

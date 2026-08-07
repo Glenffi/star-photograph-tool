@@ -1,10 +1,9 @@
 #pragma once
 
-#include "core/AutoOptimizeEngine.h"
+#include "core/FinishingPipeline.h"
 #include "core/FrameQualityEvaluator.h"
 #include "core/RawCalibrationEngine.h"
 #include "core/SkyGroundMask.h"
-#include "core/StarReducer.h"
 
 #include <QThread>
 #include <QImage>
@@ -87,6 +86,16 @@ public:
     // These accessors are called by the GUI only after QThread::finished.
     std::vector<uint16_t> takeStackedData();
     QImage takeBeforePreview();
+    std::vector<uint16_t> takeQuickPreviewSource();
+    std::vector<uint8_t> takeQuickPreviewMask();
+    int quickPreviewWidth() const { return m_quickPreviewWidth; }
+    int quickPreviewHeight() const { return m_quickPreviewHeight; }
+    bool quickPreviewAvailable() const {
+        return !m_quickPreviewSource.empty();
+    }
+    bool quickPreviewMaskAvailable() const {
+        return !m_quickPreviewMask.empty();
+    }
     uint16_t beforePreviewBlackPoint() const { return m_beforePreviewBlackPoint; }
     uint16_t beforePreviewWhitePoint() const { return m_beforePreviewWhitePoint; }
     int stackedWidth() const { return m_width; }
@@ -195,6 +204,12 @@ private:
     QImage m_beforePreview;
     uint16_t m_beforePreviewBlackPoint = 0;
     uint16_t m_beforePreviewWhitePoint = 65535;
+    // Bounded linear data before finishing. It lets the UI re-run only visual
+    // adjustments after a full alignment/stack pass.
+    std::vector<uint16_t> m_quickPreviewSource;
+    std::vector<uint8_t> m_quickPreviewMask;
+    int m_quickPreviewWidth = 0;
+    int m_quickPreviewHeight = 0;
     int m_width = 0;
     int m_height = 0;
     int m_cropOffsetX = 0;

@@ -523,6 +523,33 @@ void testImageBufferUtils() {
     check(processed[3] == 2193 && processed[4] == 2741 &&
               processed[5] == 3289,
           "Sky/ground RGB blending should feather the horizon with integer rounding");
+
+    const std::vector<uint16_t> resizeSource = {
+        0, 1000, 2000,       10000, 11000, 12000,
+        20000, 21000, 22000, 30000, 31000, 32000
+    };
+    std::vector<uint16_t> resizedRgb;
+    int resizedWidth = 0;
+    int resizedHeight = 0;
+    check(ImageBufferUtils::resizeRgb16ToLongSide(
+              resizeSource, 2, 2, 1,
+              resizedRgb, resizedWidth, resizedHeight) &&
+              resizedWidth == 1 && resizedHeight == 1 &&
+              resizedRgb == std::vector<uint16_t>({15000, 16000, 17000}),
+          "Bounded RGB16 resize should use center-aligned bilinear sampling");
+    const std::vector<uint8_t> resizeMask = {0, 64, 192, 255};
+    std::vector<uint8_t> resizedMask;
+    check(ImageBufferUtils::resizeMask8(
+              resizeMask, 2, 2, 1, 1, resizedMask) &&
+              resizedMask == std::vector<uint8_t>({128}),
+          "Mask resize should preserve feather values with bilinear sampling");
+    const std::vector<uint16_t> preservedResize = {7};
+    resizedRgb = preservedResize;
+    check(!ImageBufferUtils::resizeRgb16ToLongSide(
+              resizeSource, 3, 2, 1,
+              resizedRgb, resizedWidth, resizedHeight) &&
+              resizedRgb == preservedResize,
+          "Failed RGB16 resize should leave the output unchanged");
 }
 
 void testRgbAutoOptimize() {

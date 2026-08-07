@@ -30,6 +30,7 @@
 #include <QSignalBlocker>
 #include <QStackedWidget>
 #include <algorithm>
+#include <memory>
 #include "ui/ProjectPanel.h"
 #include "ui/PreviewPanel.h"
 #include "ui/ParamsPanel.h"
@@ -41,6 +42,7 @@
 #include "core/ImageExporter.h"
 #include "workers/MaskPreviewWorker.h"
 #include "workers/ProcessingWorker.h"
+#include "workers/QuickPreviewWorker.h"
 
 class MainWindow : public QMainWindow {
     Q_OBJECT
@@ -79,6 +81,10 @@ public:
     }
 
     ~MainWindow() {
+        if (m_quickPreviewWorker && m_quickPreviewWorker->isRunning()) {
+            m_quickPreviewWorker->requestCancel();
+            m_quickPreviewWorker->wait();
+        }
         // 等待 ProcessingWorker 真正结束（无超时，避免销毁运行中的线程）
         if (m_worker && m_worker->isRunning()) {
             m_worker->requestCancel();
@@ -463,6 +469,12 @@ private:
     }
 
     void setupConnections() {
+        m_quickPreviewTimer = new QTimer(this);
+        m_quickPreviewTimer->setSingleShot(true);
+        m_quickPreviewTimer->setInterval(400);
+        connect(m_quickPreviewTimer, &QTimer::timeout,
+                this, &MainWindow::startQuickPreview);
+
         connect(m_sceneLauncher, &SceneLauncher::sceneSelected,
                 this, &MainWindow::activateScene);
 
@@ -527,17 +539,7 @@ private:
         // 预览区空状态导入按钮
         connect(m_previewPanel, &PreviewPanel::importRequested, this, &MainWindow::onImportClicked);
         connect(m_previewPanel, &PreviewPanel::resultRequested, this, [this]() {
-            if (m_cachedStackedData.empty()) return;
-            if (!m_cachedBeforePreview.isNull()) {
-                m_previewPanel->loadRgb16BitComparison(
-                    m_cachedBeforePreview, m_cachedStackedData,
-                    m_cachedWidth, m_cachedHeight,
-                    m_cachedBeforeBlackPoint, m_cachedBeforeWhitePoint);
-            } else {
-                m_previewPanel->loadRgb16BitImage(
-                    m_cachedStackedData, m_cachedWidth, m_cachedHeight);
-            }
-            m_previewPanel->setResultAvailable(true, true);
+            showBestAvailableResult();
         });
 
         // 项目面板拖放导入
@@ -567,6 +569,7 @@ private:
         // 参考帧变化
         connect(m_projectPanel, &ProjectPanel::referenceFrameChanged, this, [this]() {
             statusBar()->showMessage("参考帧已更新", 2000);
+            handleProcessingParametersChanged();
         });
 
         connect(m_previewPanel, &PreviewPanel::comparisonAvailabilityChanged,
@@ -584,20 +587,7 @@ private:
 
         // 参数变化
         connect(m_paramsPanel, &ParamsPanel::paramsChanged, this, [this]() {
-            updateProjectReadiness();
-            if (m_cachedStackedData.empty()) return;
-            const bool current =
-                m_paramsPanel->processingSignature() == m_lastProcessedSignature;
-            m_toolbar->enableExport(current);
-            if (current) {
-                setWorkflowStage(3,
-                    QString::fromUtf8("当前结果 · %1 帧 · %2×%3")
-                        .arg(m_cachedFrameCount).arg(m_cachedWidth).arg(m_cachedHeight),
-                    true);
-            } else {
-                setWorkflowStage(1,
-                    QString::fromUtf8("参数已修改，重新处理后生效"));
-            }
+            handleProcessingParametersChanged();
         });
 
         // 天地分离蒙版预览请求 -> 使用 MaskPreviewWorker
@@ -668,7 +658,208 @@ private:
         return m_worker && m_worker->isRunning();
     }
 
+    QString effectiveReferenceFrame() const {
+        const QStringList files = m_projectPanel->includedFilePaths();
+        QString reference = m_paramsPanel->selectedReferenceFrame();
+        if (reference.isEmpty() || !files.contains(reference)) {
+            reference = m_projectPanel->referenceFramePath();
+        }
+        return files.contains(reference) ? reference : QString();
+    }
+
+    QString currentUpstreamSignature() const {
+        // ParamsPanel owns the algorithm settings, while ProjectPanel owns the
+        // context-menu reference choice. Sign the effective value used by the
+        // worker so cache/export validity follows both controls.
+        return m_paramsPanel->upstreamSignature() +
+            QStringLiteral("|effective-reference=") + effectiveReferenceFrame();
+    }
+
+    QString currentProcessingSignature() const {
+        return currentUpstreamSignature() + QStringLiteral("||") +
+            m_paramsPanel->finishingSignature();
+    }
+
+    void handleProcessingParametersChanged() {
+        updateProjectReadiness();
+        if (m_cachedStackedData.empty()) return;
+        const bool current =
+            currentProcessingSignature() == m_lastProcessedSignature;
+        m_toolbar->enableExport(current);
+        if (current) {
+            cancelQuickPreview(false);
+            setWorkflowStage(3,
+                QString::fromUtf8("当前结果 · %1 帧 · %2×%3")
+                    .arg(m_cachedFrameCount).arg(m_cachedWidth).arg(m_cachedHeight),
+                true);
+            if (m_previewPanel->isShowingResult()) {
+                showBestAvailableResult();
+            }
+        } else if (quickPreviewEligible()) {
+            if (currentQuickPreviewAvailable()) {
+                setWorkflowStage(3, QString::fromUtf8(
+                    "快速预览已更新 · 完整导出需重新处理"));
+            } else {
+                scheduleQuickPreview();
+            }
+        } else {
+            cancelQuickPreview(false);
+            setWorkflowStage(1,
+                QString::fromUtf8("参数已修改，重新处理后生效"));
+        }
+    }
+
+    FinishingOptions currentFinishingOptions() const {
+        FinishingOptions options;
+        options.noiseReductionEnabled =
+            m_paramsPanel->noiseReductionEnabled();
+        options.noiseReductionStrength =
+            m_paramsPanel->noiseReductionStrength();
+        options.modifiedCameraColorEnabled =
+            m_paramsPanel->modifiedCameraColorEnabled();
+        options.dehazeEnabled = m_paramsPanel->dewarpEnabled();
+        options.dehazeStrength = m_paramsPanel->dewarpStrength();
+        options.stretchEnabled = m_paramsPanel->stretchEnabled();
+        options.skyGroundSeparation =
+            m_scene == ProcessingScene::SkyGround &&
+            m_paramsPanel->skyGroundSeparationEnabled();
+        options.groundDetailStrength =
+            options.skyGroundSeparation
+                ? m_paramsPanel->groundDetailStrength() : 0;
+        options.starReductionEnabled =
+            m_paramsPanel->starReduceEnabled();
+        options.starReductionStrength =
+            m_paramsPanel->starReduceStrength();
+        return options;
+    }
+
+    bool quickPreviewEligible() const {
+        return m_scene != ProcessingScene::Timelapse &&
+            m_quickPreviewSource && !m_quickPreviewSource->empty() &&
+            currentUpstreamSignature() ==
+                m_lastProcessedUpstreamSignature;
+    }
+
+    bool currentQuickPreviewAvailable() const {
+        return quickPreviewEligible() &&
+            !m_cachedQuickPreviewResult.empty() &&
+            m_quickPreviewSignature == m_paramsPanel->finishingSignature();
+    }
+
+    void showBestAvailableResult() {
+        if (currentQuickPreviewAvailable()) {
+            if (!m_cachedBeforePreview.isNull()) {
+                m_previewPanel->loadRgb16BitComparison(
+                    m_cachedBeforePreview, m_cachedQuickPreviewResult,
+                    m_quickPreviewWidth, m_quickPreviewHeight,
+                    m_cachedBeforeBlackPoint, m_cachedBeforeWhitePoint);
+            } else {
+                m_previewPanel->loadRgb16BitImage(
+                    m_cachedQuickPreviewResult,
+                    m_quickPreviewWidth, m_quickPreviewHeight);
+            }
+            m_previewPanel->setResultLabel(QString::fromUtf8(
+                "快速预览 %1×%2 · 完整导出需重新处理")
+                .arg(m_quickPreviewWidth).arg(m_quickPreviewHeight));
+            m_previewPanel->setResultAvailable(true, true);
+            return;
+        }
+        if (m_cachedStackedData.empty()) return;
+        if (!m_cachedBeforePreview.isNull()) {
+            m_previewPanel->loadRgb16BitComparison(
+                m_cachedBeforePreview, m_cachedStackedData,
+                m_cachedWidth, m_cachedHeight,
+                m_cachedBeforeBlackPoint, m_cachedBeforeWhitePoint);
+        } else {
+            m_previewPanel->loadRgb16BitImage(
+                m_cachedStackedData, m_cachedWidth, m_cachedHeight);
+        }
+        m_previewPanel->setResultAvailable(true, true);
+    }
+
+    void cancelQuickPreview(bool waitForDone) {
+        if (m_quickPreviewTimer) m_quickPreviewTimer->stop();
+        m_quickPreviewPending = false;
+        ++m_quickPreviewGeneration;
+        if (m_quickPreviewWorker && m_quickPreviewWorker->isRunning()) {
+            m_quickPreviewWorker->requestCancel();
+            if (waitForDone) m_quickPreviewWorker->wait();
+        }
+    }
+
+    void scheduleQuickPreview() {
+        if (!quickPreviewEligible() || processingActive()) return;
+        ++m_quickPreviewGeneration;
+        if (m_quickPreviewWorker && m_quickPreviewWorker->isRunning()) {
+            m_quickPreviewWorker->requestCancel();
+        }
+        if (m_quickPreviewTimer) m_quickPreviewTimer->start();
+        setWorkflowStage(3, QString::fromUtf8("参数已修改 · 准备快速预览"));
+    }
+
+    void startQuickPreview() {
+        if (!quickPreviewEligible() || processingActive()) return;
+        if (m_quickPreviewWorker && m_quickPreviewWorker->isRunning()) {
+            m_quickPreviewPending = true;
+            m_quickPreviewWorker->requestCancel();
+            return;
+        }
+
+        m_quickPreviewPending = false;
+        const uint64_t generation = m_quickPreviewGeneration;
+        const QString finishingSignature =
+            m_paramsPanel->finishingSignature();
+        auto* worker = new QuickPreviewWorker(
+            m_quickPreviewSource,
+            m_quickPreviewWidth, m_quickPreviewHeight,
+            m_quickPreviewMask,
+            currentFinishingOptions(), generation, this);
+        m_quickPreviewWorker = worker;
+        connect(worker, &QuickPreviewWorker::stageMessage, this,
+                [this, generation](const QString& message) {
+                    if (generation != m_quickPreviewGeneration) return;
+                    setWorkflowStage(3, message);
+                });
+        connect(worker, &QuickPreviewWorker::finished, this,
+                [this, worker, generation, finishingSignature]() {
+                    const bool isLatest =
+                        generation == m_quickPreviewGeneration &&
+                        finishingSignature ==
+                            m_paramsPanel->finishingSignature() &&
+                        quickPreviewEligible();
+                    if (isLatest && !worker->wasCancelled() &&
+                        worker->errorString().isEmpty()) {
+                        std::vector<uint16_t> result = worker->takeResult();
+                        if (!result.empty()) {
+                            m_cachedQuickPreviewResult = std::move(result);
+                            m_quickPreviewSignature = finishingSignature;
+                            showBestAvailableResult();
+                            m_toolbar->enableExport(false);
+                            setWorkflowStage(3, QString::fromUtf8(
+                                "快速预览已更新 · 完整导出需重新处理"));
+                            statusBar()->showMessage(
+                                QString::fromUtf8("快速预览已更新"), 2500);
+                        }
+                    } else if (isLatest && !worker->wasCancelled()) {
+                        statusBar()->showMessage(
+                            QString::fromUtf8("快速预览失败：%1")
+                                .arg(worker->errorString()),
+                            4000);
+                    }
+                    if (m_quickPreviewWorker == worker) {
+                        m_quickPreviewWorker = nullptr;
+                    }
+                    worker->deleteLater();
+                    if (m_quickPreviewPending && quickPreviewEligible()) {
+                        m_quickPreviewPending = false;
+                        m_quickPreviewTimer->start(0);
+                    }
+                });
+        worker->start();
+    }
+
     void invalidateCachedResult() {
+        cancelQuickPreview(false);
         m_cachedStackedData.clear();
         m_cachedStackedData.shrink_to_fit();
         m_cachedBeforePreview = QImage();
@@ -677,8 +868,17 @@ private:
         m_cachedWidth = 0;
         m_cachedHeight = 0;
         m_cachedFrameCount = 0;
+        m_quickPreviewSource.reset();
+        m_quickPreviewMask.reset();
+        m_cachedQuickPreviewResult.clear();
+        m_cachedQuickPreviewResult.shrink_to_fit();
+        m_quickPreviewWidth = 0;
+        m_quickPreviewHeight = 0;
+        m_quickPreviewSignature.clear();
         m_lastProcessedSignature.clear();
+        m_lastProcessedUpstreamSignature.clear();
         m_runningParamsSignature.clear();
+        m_runningUpstreamSignature.clear();
         if (m_toolbar) m_toolbar->enableExport(false);
         if (m_previewPanel) {
             m_previewPanel->setResultAvailable(false);
@@ -847,6 +1047,11 @@ private slots:
             }
         }
 
+        // Do not let a bounded preview and a full RAW task compete for memory.
+        // Wait only after validation, so a rejected run leaves the useful
+        // preview on screen.
+        cancelQuickPreview(true);
+
         // 保存当前参数设置
         m_paramsPanel->saveCurrentSettings();
 
@@ -901,7 +1106,8 @@ private slots:
         // A new run invalidates the previous export immediately. A cancelled or
         // failed run must never leave an old result looking current.
         invalidateCachedResult();
-        m_runningParamsSignature = m_paramsPanel->processingSignature();
+        m_runningParamsSignature = currentProcessingSignature();
+        m_runningUpstreamSignature = currentUpstreamSignature();
         m_toolbar->setProcessing(true);
         // Worker parameters and source paths are immutable once captured.
         // Disable their editors so the visible project always describes the
@@ -1008,7 +1214,25 @@ private slots:
                 m_cachedWidth = worker->stackedWidth();
                 m_cachedHeight = worker->stackedHeight();
                 m_cachedFrameCount = worker->stackedFrameCount();
+                std::vector<uint16_t> quickSource =
+                    worker->takeQuickPreviewSource();
+                std::vector<uint8_t> quickMask =
+                    worker->takeQuickPreviewMask();
+                m_quickPreviewWidth = worker->quickPreviewWidth();
+                m_quickPreviewHeight = worker->quickPreviewHeight();
+                if (!quickSource.empty()) {
+                    m_quickPreviewSource =
+                        std::make_shared<const std::vector<uint16_t>>(
+                            std::move(quickSource));
+                }
+                if (!quickMask.empty()) {
+                    m_quickPreviewMask =
+                        std::make_shared<const std::vector<uint8_t>>(
+                            std::move(quickMask));
+                }
                 m_lastProcessedSignature = m_runningParamsSignature;
+                m_lastProcessedUpstreamSignature =
+                    m_runningUpstreamSignature;
 
                 // 自动保存到缓存目录
                 QSettings settings("StarProcessor", "App");
@@ -1020,16 +1244,7 @@ private slots:
                     qWarning() << "缓存 TIFF 写入失败:" << cacheFile;
                 }
 
-                if (!m_cachedBeforePreview.isNull()) {
-                    m_previewPanel->loadRgb16BitComparison(
-                        m_cachedBeforePreview, m_cachedStackedData,
-                        m_cachedWidth, m_cachedHeight,
-                        m_cachedBeforeBlackPoint, m_cachedBeforeWhitePoint);
-                } else {
-                    m_previewPanel->loadRgb16BitImage(
-                        m_cachedStackedData, m_cachedWidth, m_cachedHeight);
-                }
-                m_previewPanel->setResultAvailable(true, true);
+                showBestAvailableResult();
                 m_toolbar->enableExport(
                     m_scene != ProcessingScene::Timelapse);
                 int frameCount = m_cachedFrameCount;
@@ -1042,7 +1257,7 @@ private slots:
                     QString::fromUtf8("处理完成 · %1 帧 · %2×%3")
                         .arg(frameCount).arg(m_cachedWidth).arg(m_cachedHeight),
                     true);
-                if (m_paramsPanel->processingSignature() !=
+                if (currentProcessingSignature() !=
                     m_lastProcessedSignature) {
                     setWorkflowStage(1,
                         QString::fromUtf8("处理完成，但参数已变化，请重新处理"));
@@ -1099,7 +1314,7 @@ private slots:
             QMessageBox::warning(this, "导出", "没有可用的堆栈结果，请先完成处理");
             return;
         }
-        if (m_paramsPanel->processingSignature() != m_lastProcessedSignature) {
+        if (currentProcessingSignature() != m_lastProcessedSignature) {
             QMessageBox::information(
                 this, QString::fromUtf8("结果需要更新"),
                 QString::fromUtf8("处理参数已经改变。请重新处理后再导出，避免把旧结果误认为当前参数的结果。"));
@@ -1245,6 +1460,10 @@ private:
     ProcessingWorker* m_worker = nullptr;
     MaskPreviewWorker* m_maskPreviewWorker = nullptr;
     QSet<MaskPreviewWorker*> m_activeMaskPreviewWorkers;
+    QuickPreviewWorker* m_quickPreviewWorker = nullptr;
+    QTimer* m_quickPreviewTimer = nullptr;
+    uint64_t m_quickPreviewGeneration = 0;
+    bool m_quickPreviewPending = false;
 
     // 缓存最后一次堆栈结果（用于导出）
     std::vector<uint16_t> m_cachedStackedData;
@@ -1254,8 +1473,16 @@ private:
     int m_cachedWidth = 0;
     int m_cachedHeight = 0;
     int m_cachedFrameCount = 0;
+    std::shared_ptr<const std::vector<uint16_t>> m_quickPreviewSource;
+    std::shared_ptr<const std::vector<uint8_t>> m_quickPreviewMask;
+    std::vector<uint16_t> m_cachedQuickPreviewResult;
+    int m_quickPreviewWidth = 0;
+    int m_quickPreviewHeight = 0;
+    QString m_quickPreviewSignature;
     QString m_lastProcessedSignature;
+    QString m_lastProcessedUpstreamSignature;
     QString m_runningParamsSignature;
+    QString m_runningUpstreamSignature;
 };
 
 int main(int argc, char* argv[]) {

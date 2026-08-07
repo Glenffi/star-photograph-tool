@@ -20,6 +20,20 @@ bool splitRgb(const std::vector<uint16_t>& rgb, int width, int height,
 bool mergeRgb(const RgbChannels& channels, int width, int height,
               std::vector<uint16_t>& rgb);
 
+// Builds a bounded linear 16-bit preview with bilinear sampling. Dimensions
+// are preserved when the image already fits within maxLongSide.
+bool resizeRgb16ToLongSide(const std::vector<uint16_t>& rgb,
+                           int width, int height, int maxLongSide,
+                           std::vector<uint16_t>& resized,
+                           int& resizedWidth, int& resizedHeight);
+
+// Resizes a grayscale mask to an explicit size using the same center-aligned
+// bilinear mapping as resizeRgb16ToLongSide.
+bool resizeMask8(const std::vector<uint8_t>& mask,
+                 int width, int height,
+                 int resizedWidth, int resizedHeight,
+                 std::vector<uint8_t>& resized);
+
 // Replaces the ground portion of processedSky in place with protectedGround.
 // skyMask uses 255 for sky and 0 for ground; feather values blend continuously.
 bool blendSkyGroundInPlace(std::vector<uint16_t>& processedSky,

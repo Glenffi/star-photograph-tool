@@ -1,8 +1,10 @@
 #include "workers/ProcessingWorker.h"
+#include "workers/QuickPreviewWorker.h"
 
 #include <QCoreApplication>
 
 #include <iostream>
+#include <memory>
 
 namespace {
 
@@ -86,6 +88,33 @@ void testDeepSkyRequiresCalibrationSets() {
           "Rejected deep-sky input should not report calibrated lights");
 }
 
+void testQuickPreviewNoOpAndCancellation() {
+    auto source = std::make_shared<const std::vector<uint16_t>>(
+        std::vector<uint16_t>{
+            100, 200, 300, 400, 500, 600,
+            700, 800, 900, 1000, 1100, 1200});
+    FinishingOptions options;
+    QuickPreviewWorker worker(
+        source, 2, 2, nullptr, options, 17);
+    worker.start();
+    check(worker.wait(3000),
+          "No-op quick preview should finish promptly");
+    check(worker.errorString().isEmpty() && !worker.wasCancelled(),
+          "No-op quick preview should succeed");
+    check(worker.generation() == 17 && worker.takeResult() == *source,
+          "No-op quick preview should preserve pixels and generation");
+
+    QuickPreviewWorker cancelled(
+        source, 2, 2, nullptr, options, 18);
+    cancelled.requestCancel();
+    cancelled.start();
+    check(cancelled.wait(3000),
+          "Pre-cancelled quick preview should finish promptly");
+    check(cancelled.wasCancelled() && cancelled.errorString().isEmpty() &&
+              cancelled.takeResult().empty(),
+          "Cancelled quick preview should expose no stale result");
+}
+
 } // namespace
 
 int main(int argc, char* argv[]) {
@@ -96,6 +125,7 @@ int main(int argc, char* argv[]) {
     testSingleFrameFailureUsesDedicatedPath();
     testTimelapseRejectsTooFewFrames();
     testDeepSkyRequiresCalibrationSets();
+    testQuickPreviewNoOpAndCancellation();
     if (failures == 0) {
         std::cout << "All worker tests passed.\n";
         return 0;

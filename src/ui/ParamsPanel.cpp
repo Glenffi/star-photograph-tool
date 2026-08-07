@@ -1803,24 +1803,15 @@ void ParamsPanel::updateCalibrationCount(QLabel* label,
     if (clearButton) clearButton->setEnabled(count > 0);
 }
 
-QString ParamsPanel::processingSignature() const {
-    // Output path/format are intentionally excluded: changing only where or
-    // how a cached result is written does not make its pixels stale.
+QString ParamsPanel::upstreamSignature() const {
     return QStringList{
         alignMethod(), selectedReferenceFrame(), stackMethod(),
         QString::number(kappaValue(), 'f', 1),
         QString::number(autoRejectLowQualityFrames()),
         QString::number(photometricNormalizationEnabled()),
-        QString::number(noiseReductionEnabled()),
-        QString::number(noiseReductionStrength()),
-        QString::number(modifiedCameraColorEnabled()),
-        QString::number(dewarpEnabled()), QString::number(dewarpStrength()),
-        QString::number(stretchEnabled()), QString::number(starReduceEnabled()),
-        QString::number(starReduceStrength()),
         QString::number(skyGroundSeparationEnabled()),
         QString::number(static_cast<int>(skyGroundMode())), userMaskPath(),
         QString::number(featherRadius()), groundStackMethod(),
-        QString::number(groundDetailStrength()),
         QString::number(timelapseWindowSize()),
         QString::number(timelapseStrength()),
         QString::number(timelapseMotionProtection()),
@@ -1829,6 +1820,24 @@ QString ParamsPanel::processingSignature() const {
         QStringLiteral("flat=") + m_flatFramePaths.join(QChar(0x1e)),
         QStringLiteral("bias=") + m_biasFramePaths.join(QChar(0x1e))
     }.join('|');
+}
+
+QString ParamsPanel::finishingSignature() const {
+    return QStringList{
+        QString::number(noiseReductionEnabled()),
+        QString::number(noiseReductionStrength()),
+        QString::number(modifiedCameraColorEnabled()),
+        QString::number(dewarpEnabled()), QString::number(dewarpStrength()),
+        QString::number(stretchEnabled()), QString::number(starReduceEnabled()),
+        QString::number(starReduceStrength()),
+        QString::number(groundDetailStrength())
+    }.join('|');
+}
+
+QString ParamsPanel::processingSignature() const {
+    // Output path/format are intentionally excluded: changing only where or
+    // how a cached result is written does not make its pixels stale.
+    return upstreamSignature() + QStringLiteral("||") + finishingSignature();
 }
 
 void ParamsPanel::setMaskPreview(const std::vector<uint8_t>& mask, int w, int h) {

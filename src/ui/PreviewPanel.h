@@ -35,6 +35,7 @@ public:
     void resetZoom();
 
     void setInfo(const QString& info);           // 底部信息栏文字
+    void setResultLabel(const QString& label);   // 持久显示结果/快速预览状态
     void setBeforeAfterMode(bool enabled);
     void setBeforeImage(const QImage& image);
     void setAfterImage(const QImage& image);

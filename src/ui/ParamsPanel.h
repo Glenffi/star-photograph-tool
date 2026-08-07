@@ -58,6 +58,8 @@ public:
     QStringList darkFramePaths() const;
     QStringList flatFramePaths() const;
     QStringList biasFramePaths() const;
+    QString upstreamSignature() const;
+    QString finishingSignature() const;
     QString processingSignature() const;
     void setMaskPreview(const std::vector<uint8_t>& mask, int w, int h);
     void setDetectMaskEnabled(bool enabled);
