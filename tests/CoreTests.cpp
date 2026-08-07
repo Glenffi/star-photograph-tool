@@ -558,7 +558,10 @@ void testRgbAutoOptimize() {
           "Linked RGB stretch should process a valid image");
     check(stretched[3 * 3] > stretched[3 * 3 + 1] &&
               stretched[3 * 3 + 1] > stretched[3 * 3 + 2],
-          "Linked RGB stretch should preserve strong star color ordering");
+          "Linked RGB stretch should preserve strong star color ordering: " +
+              std::to_string(stretched[3 * 3]) + "/" +
+              std::to_string(stretched[3 * 3 + 1]) + "/" +
+              std::to_string(stretched[3 * 3 + 2]));
 
     constexpr int modifiedWidth = 32;
     constexpr int modifiedHeight = 32;
@@ -634,6 +637,37 @@ void testRgbAutoOptimize() {
                   stretched[i + 1] == stretched[i + 2],
               "Linked RGB stretch should keep neutral pixels neutral");
     }
+
+    constexpr int nightWidth = 100;
+    constexpr int nightHeight = 100;
+    std::vector<uint16_t> nightscape(nightWidth * nightHeight * 3);
+    for (int pixel = 0; pixel < nightWidth * nightHeight; ++pixel) {
+        const uint16_t value = static_cast<uint16_t>(950 + pixel % 101);
+        nightscape[pixel * 3] = value;
+        nightscape[pixel * 3 + 1] = value;
+        nightscape[pixel * 3 + 2] = value;
+    }
+    for (int star = 0; star < 10; ++star) {
+        const size_t base = static_cast<size_t>(star * 997) * 3;
+        nightscape[base] = nightscape[base + 1] =
+            nightscape[base + 2] = 30000;
+    }
+    check(AutoOptimizeEngine::stretchRgb(
+              nightscape, nightWidth, nightHeight, stretched),
+          "Linked RGB stretch should process a sparse synthetic star field");
+    std::vector<uint16_t> stretchedBackground;
+    stretchedBackground.reserve(nightWidth * nightHeight - 10);
+    for (int pixel = 10; pixel < nightWidth * nightHeight; ++pixel) {
+        stretchedBackground.push_back(stretched[pixel * 3]);
+    }
+    const auto middle = stretchedBackground.begin() +
+        static_cast<ptrdiff_t>(stretchedBackground.size() / 2);
+    std::nth_element(stretchedBackground.begin(), middle,
+                     stretchedBackground.end());
+    check(*middle >= 9000 && *middle <= 12000,
+          "Automatic stretch should keep a typical background near 16 percent");
+    check(stretched[0] >= 52000,
+          "Automatic stretch should retain bright-star highlight headroom");
 
     std::vector<uint16_t> dehazed;
     check(AutoOptimizeEngine::dehazeRgb(castRgb, width, height, 0, dehazed) &&
@@ -1177,16 +1211,151 @@ void testStarDetectionAndReduction() {
 
     std::vector<uint16_t> reduced40 = rgbInput;
     std::vector<uint16_t> reduced70 = rgbInput;
+    std::vector<uint16_t> reduced1 = rgbInput;
     std::vector<uint16_t> zeroStrength = rgbInput;
-    check(StarReducer::reduce(reduced40, width, height, 40) &&
+    check(StarReducer::reduce(reduced1, width, height, 1) &&
+              StarReducer::reduce(reduced40, width, height, 40) &&
               StarReducer::reduce(reduced70, width, height, 70),
           "Intermediate star-reduction strengths should process successfully");
     check(reduced40[faintCenterIndex] >= reduced70[faintCenterIndex] &&
               reduced70[faintCenterIndex] >= rgb[faintCenterIndex],
           "Increasing star-reduction strength should monotonically suppress faint stars");
+    const auto totalDifference = [](const std::vector<uint16_t>& first,
+                                    const std::vector<uint16_t>& second) {
+        uint64_t difference = 0;
+        for (size_t index = 0; index < first.size(); ++index) {
+            difference += static_cast<uint64_t>(std::abs(
+                static_cast<int>(first[index]) -
+                static_cast<int>(second[index])));
+        }
+        return difference;
+    };
+    check(totalDifference(reduced1, rgbInput) <
+              totalDifference(reduced40, rgbInput),
+          "Strength 1 should remain a small continuous change rather than "
+          "jumping to a fixed defringe amount");
     check(StarReducer::reduce(zeroStrength, width, height, 0) &&
               zeroStrength == rgbInput,
           "Zero star-reduction strength should be an exact no-op");
+
+    // A neutral synthetic star with a saturated blue outer ring approximates
+    // longitudinal chromatic aberration in a fast wide-angle lens. Reduction
+    // should keep the neutral core while pulling only the fringe toward the
+    // core chromaticity.
+    constexpr int fringeX = 24;
+    constexpr int fringeY = 48;
+    const std::array<int, 3> fringeBackground = {1800, 2200, 2800};
+    std::vector<uint16_t> fringedRgb(
+        static_cast<size_t>(width) * height * 3);
+    for (int y = 0; y < height; ++y) {
+        for (int x = 0; x < width; ++x) {
+            const double distance = std::hypot(x - fringeX, y - fringeY);
+            const double neutralCore = 30000.0 *
+                std::exp(-(distance * distance) / (2.0 * 1.25 * 1.25));
+            const double blueRing = 9000.0 *
+                std::exp(-((distance - 3.0) * (distance - 3.0)) /
+                         (2.0 * 0.55 * 0.55));
+            const size_t pixel = static_cast<size_t>(y) * width + x;
+            const std::array<double, 3> additions = {
+                neutralCore + blueRing * 0.05,
+                neutralCore + blueRing * 0.15,
+                neutralCore + blueRing
+            };
+            for (int channel = 0; channel < 3; ++channel) {
+                fringedRgb[pixel * 3 + channel] = static_cast<uint16_t>(
+                    std::clamp(std::lround(
+                        fringeBackground[channel] + additions[channel]),
+                        0L, 65535L));
+            }
+        }
+    }
+    const size_t fringeCore =
+        static_cast<size_t>(fringeY * width + fringeX) * 3;
+    const size_t fringeRing =
+        static_cast<size_t>(fringeY * width + fringeX + 3) * 3;
+    const auto fringeBlueExcess = [&](const std::vector<uint16_t>& values,
+                                      size_t index) {
+        const double red = values[index] - fringeBackground[0];
+        const double green = values[index + 1] - fringeBackground[1];
+        const double blue = values[index + 2] - fringeBackground[2];
+        return blue - (red + green) * 0.5;
+    };
+    const double fringeBefore = fringeBlueExcess(fringedRgb, fringeRing);
+    const int coreRedGreenBefore =
+        (fringedRgb[fringeCore] - fringeBackground[0]) -
+        (fringedRgb[fringeCore + 1] - fringeBackground[1]);
+    StarReductionStats fringeStats;
+    check(StarReducer::reduce(
+              fringedRgb, width, height, 55, &fringeStats),
+          "Star reduction should process a chromatic-fringe fixture");
+    const double fringeAfter = fringeBlueExcess(fringedRgb, fringeRing);
+    const int coreRedGreenAfter =
+        (fringedRgb[fringeCore] - fringeBackground[0]) -
+        (fringedRgb[fringeCore + 1] - fringeBackground[1]);
+    check(fringeStats.defringedPixels > 0 &&
+              fringeAfter < fringeBefore * 0.7,
+          "Star-edge defringing should reduce blue halo chroma without relying "
+          "on global desaturation (before=" + std::to_string(fringeBefore) +
+          ", after=" + std::to_string(fringeAfter) +
+          ", pixels=" + std::to_string(fringeStats.defringedPixels) + ")");
+    check(std::abs(coreRedGreenAfter - coreRedGreenBefore) < 400,
+          "Star-edge defringing should preserve the measured core color");
+
+    std::vector<uint16_t> blueStarRgb(
+        static_cast<size_t>(width) * height * 3, 2000);
+    for (int y = 0; y < height; ++y) {
+        for (int x = 0; x < width; ++x) {
+            const double dx = x - 72.0;
+            const double dy = y - 50.0;
+            const double signal = 28000.0 *
+                std::exp(-(dx * dx + dy * dy) / (2.0 * 1.5 * 1.5));
+            const size_t pixel = static_cast<size_t>(y) * width + x;
+            blueStarRgb[pixel * 3] = static_cast<uint16_t>(2000 + signal * 0.65);
+            blueStarRgb[pixel * 3 + 1] =
+                static_cast<uint16_t>(2000 + signal * 0.82);
+            blueStarRgb[pixel * 3 + 2] =
+                static_cast<uint16_t>(2000 + signal * 1.15);
+        }
+    }
+    const size_t blueStarWing = static_cast<size_t>(50 * width + 74) * 3;
+    const auto blueRedRatio = [&](const std::vector<uint16_t>& values) {
+        const double red = std::max(1, static_cast<int>(
+            values[blueStarWing]) - 2000);
+        const double blue = std::max(1, static_cast<int>(
+            values[blueStarWing + 2]) - 2000);
+        return blue / red;
+    };
+    const double nativeBlueRatioBefore = blueRedRatio(blueStarRgb);
+    StarReductionStats blueStarStats;
+    check(StarReducer::reduce(
+              blueStarRgb, width, height, 55, &blueStarStats),
+          "Star reduction should process a native-blue star fixture");
+    check(std::abs(blueRedRatio(blueStarRgb) - nativeBlueRatioBefore) < 0.08,
+          "A consistently blue star should retain its chromaticity because "
+          "its wing is not more saturated than its core");
+
+    std::vector<uint16_t> saturatedLargeStar(
+        static_cast<size_t>(width) * height * 3, 1500);
+    for (int y = 0; y < height; ++y) {
+        for (int x = 0; x < width; ++x) {
+            const double dx = x - 48.0;
+            const double dy = y - 36.0;
+            const double signal = 90000.0 *
+                std::exp(-(dx * dx + dy * dy) / (2.0 * 4.0 * 4.0));
+            const uint16_t value = static_cast<uint16_t>(
+                std::clamp(std::lround(1500.0 + signal), 0L, 65535L));
+            const size_t pixel = static_cast<size_t>(y) * width + x;
+            saturatedLargeStar[pixel * 3] = value;
+            saturatedLargeStar[pixel * 3 + 1] = value;
+            saturatedLargeStar[pixel * 3 + 2] = value;
+        }
+    }
+    StarReductionStats saturatedStats;
+    check(StarReducer::reduce(
+              saturatedLargeStar, width, height, 70, &saturatedStats),
+          "Star reduction should safely inspect a saturated large star");
+    check(saturatedStats.defringedPixels == 0,
+          "Automatic defringing should skip saturated large stars");
 
     std::vector<uint16_t> overlapLuminance(width * height, 1200);
     addGaussianStar(overlapLuminance, width, height,

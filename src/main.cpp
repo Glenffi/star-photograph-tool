@@ -1036,6 +1036,8 @@ private slots:
                 const QString referenceName = QFileInfo(
                     worker->selectedReferenceFrame()).fileName();
                 const int rejectedCount = worker->qualityRejectedFiles().size();
+                const int skippedCount = static_cast<int>(
+                    worker->skippedFrames().size());
                 setWorkflowStage(3,
                     QString::fromUtf8("处理完成 · %1 帧 · %2×%3")
                         .arg(frameCount).arg(m_cachedWidth).arg(m_cachedHeight),
@@ -1056,9 +1058,10 @@ private slots:
                                   .arg(frameCount).arg(m_cachedWidth).arg(m_cachedHeight)
                                   .arg(worker->outputFile())
                             : QString::fromUtf8(
-                              "处理完成 — %1×%2 已堆栈 %3 帧 | 参考 %4 | 排除 %5 帧")
+                              "处理完成 — %1×%2 已堆栈 %3 帧 | 参考 %4 | 质量排除 %5 帧 | 跳过 %6 帧")
                               .arg(m_cachedWidth).arg(m_cachedHeight)
-                              .arg(frameCount).arg(referenceName).arg(rejectedCount),
+                              .arg(frameCount).arg(referenceName)
+                              .arg(rejectedCount).arg(skippedCount),
                     5000);
             } else {
                 QMessageBox::warning(this, "处理失败", worker->errorString());

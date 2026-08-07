@@ -19,6 +19,29 @@ class ProcessingWorker : public QThread {
     Q_OBJECT
 
 public:
+    struct SkippedFrameInfo {
+        QString filePath;
+        QString stage;
+        QString reason;
+        int detectedStars = 0;
+        bool affineEvaluated = false;
+        int affineMatchedStars = 0;
+        double affineRms = 0.0;
+        double affineP95 = 0.0;
+        int affineEligibleCells = 0;
+        int affineCoveredCells = 0;
+        double affineGridCoverage = 0.0;
+        QStringList affineFailureReasons;
+        bool homographyEvaluated = false;
+        int homographyMatchedStars = 0;
+        double homographyRms = 0.0;
+        double homographyP95 = 0.0;
+        int homographyEligibleCells = 0;
+        int homographyCoveredCells = 0;
+        double homographyGridCoverage = 0.0;
+        QStringList homographyFailureReasons;
+    };
+
     struct Params {
         // Single-frame refinement bypasses quality selection, alignment and
         // stacking while retaining the same finishing and export stages.
@@ -77,6 +100,9 @@ public:
         return m_frameQualityMetrics;
     }
     QStringList qualityRejectedFiles() const { return m_qualityRejectedFiles; }
+    const std::vector<SkippedFrameInfo>& skippedFrames() const {
+        return m_skippedFrames;
+    }
     QString errorString() const { return m_errorString; }
     QString outputFile() const { return m_outputFile; }
     int affineFrameCount() const { return m_affineFrameCount; }
@@ -178,6 +204,7 @@ private:
     QString m_selectedReferenceFrame;
     std::vector<FrameQualityMetrics> m_frameQualityMetrics;
     QStringList m_qualityRejectedFiles;
+    std::vector<SkippedFrameInfo> m_skippedFrames;
     QString m_errorString;
     QString m_outputFile;
     int m_affineFrameCount = 0;

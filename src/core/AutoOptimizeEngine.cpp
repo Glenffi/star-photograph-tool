@@ -494,15 +494,44 @@ bool AutoOptimizeEngine::stretchRgb(const std::vector<uint16_t>& src,
     }
 
     const uint16_t black = percentileValue(samples, 1, 1000);
-    const uint16_t white = percentileValue(samples, 9995, 10000);
-    if (white <= black + 32) {
+    const uint16_t background = percentileValue(samples, 1, 2);
+    const uint16_t highlight = percentileValue(samples, 9999, 10000);
+    if (highlight <= black + 32 || background <= black) {
         dst = std::move(neutralized);
         return true;
     }
 
-    constexpr double kStretch = 3.0;
-    const double denominator = std::asinh(kStretch);
-    const double range = static_cast<double>(white) - black;
+    // Solve an asinh curve whose robust background maps near 16% while the
+    // 99.99th percentile retains highlight headroom. The previous fixed curve
+    // mapped a typical 25% input percentile to roughly 39%, washing out normal
+    // nightscapes and clipping too many stars at the 99.95th percentile.
+    constexpr double kTargetBackground = 0.16;
+    constexpr double kTargetHighlight = 0.85;
+    const double backgroundSignal =
+        static_cast<double>(background) - black;
+    const double highlightSignal =
+        static_cast<double>(highlight) - black;
+    const double whiteSignal = std::max(
+        highlightSignal,
+        backgroundSignal / kTargetBackground * 1.05);
+    const double normalizedBackgroundTarget =
+        kTargetBackground / kTargetHighlight;
+    auto mappedBackground = [&](double softening) {
+        return std::asinh(backgroundSignal / softening) /
+            std::asinh(whiteSignal / softening);
+    };
+    double lowSoftening = std::max(1e-6, whiteSignal * 1e-9);
+    double highSoftening = whiteSignal * 1e6;
+    for (int iteration = 0; iteration < 64; ++iteration) {
+        const double middle = std::sqrt(lowSoftening * highSoftening);
+        if (mappedBackground(middle) > normalizedBackgroundTarget) {
+            lowSoftening = middle;
+        } else {
+            highSoftening = middle;
+        }
+    }
+    const double softening = std::sqrt(lowSoftening * highSoftening);
+    const double denominator = std::asinh(whiteSignal / softening);
     std::vector<uint16_t> output(neutralized.size());
 
     for (size_t pixel = 0; pixel < pixelCount; ++pixel) {
@@ -521,9 +550,11 @@ bool AutoOptimizeEngine::stretchRgb(const std::vector<uint16_t>& src,
         }
 
         const double normalized =
-            std::clamp(inputLuminance / range, 0.0, 1.0);
+            std::clamp(inputLuminance / whiteSignal, 0.0, 1.0);
         const double outputLuminance =
-            std::asinh(normalized * kStretch) / denominator * 65535.0;
+            std::min(1.0, std::asinh(inputLuminance / softening) /
+                              denominator) *
+            (65535.0 * kTargetHighlight);
         const double ratio = outputLuminance / inputLuminance;
 
         // Suppress unstable chroma in the deepest shadows while retaining full

@@ -10,6 +10,7 @@ struct StarReductionStats {
     size_t detectedStars = 0;
     size_t processedStars = 0;
     size_t stronglySuppressedStars = 0;
+    size_t defringedPixels = 0;
     size_t affectedPixels = 0;
     double averageInputFwhm = 0.0;
     double radiusScale = 1.0;
@@ -19,8 +20,9 @@ struct StarReductionStats {
  * @brief 缩星处理器
  *
  * 先用局部 RGB 背景建立无星层，再从原图分离出有符号星层。圆形
- * Minimum（形态学腐蚀）只作用于星层，随后与无星层重新合成。
- * 这让小于腐蚀核的暗弱星点真正消失，同时保护银河和地景纹理。
+ * Minimum（形态学腐蚀）只作用于星层。腐蚀前还会比较星核与外缘
+ * 的色度，只校正外缘突增的蓝/紫/绿色边，最后与无星层重新合成。
+ * 这让小于腐蚀核的暗弱星点真正消失，同时保护银河、地景和星核颜色。
  */
 class StarReducer {
 public:

@@ -107,16 +107,202 @@ double smoothstep01(double value) {
     return clamped * clamped * (3.0 - 2.0 * clamped);
 }
 
-void erodeRound(const std::vector<int32_t>& layer,
-                const std::vector<uint16_t>& luminance,
-                int width, int height, int radius,
-                std::vector<int32_t>& eroded) {
-    eroded.resize(layer.size());
+double positiveRgbLuminance(const std::array<double, 3>& rgb) {
+    return rgb[0] * (13933.0 / 65536.0) +
+           rgb[1] * (46871.0 / 65536.0) +
+           rgb[2] * (4732.0 / 65536.0);
+}
+
+double medianDouble(std::vector<double>& values) {
+    if (values.empty()) return 0.0;
+    const size_t middle = values.size() / 2;
+    std::nth_element(values.begin(), values.begin() + middle, values.end());
+    if (values.size() % 2 != 0) return values[middle];
+    const double upper = values[middle];
+    std::nth_element(values.begin(), values.begin() + middle - 1,
+                     values.begin() + middle);
+    return (values[middle - 1] + upper) * 0.5;
+}
+
+int32_t blendLayerSample(int32_t first, int32_t second, double amount);
+
+size_t reduceStarColorFringes(
+        const std::vector<uint16_t>& source,
+        const std::vector<uint16_t>& starless,
+        std::vector<int32_t>& starLayer,
+        int width, int height,
+        const std::vector<StarPoint>& stars,
+        int strength,
+        const std::vector<uint8_t>* processingMask) {
+    const size_t pixelCount = static_cast<size_t>(width) * height;
+    std::vector<uint8_t> appliedWeights(pixelCount, 0);
+    size_t affectedPixels = 0;
+    const double maximumCorrection =
+        0.85 * smoothstep01(strength / 100.0);
+
+    // Every proposal is derived from the immutable source/starless pair. When
+    // footprints overlap, the strongest proposal wins, so traversal order does
+    // not repeatedly desaturate the same pixel.
+    for (const StarPoint& star : stars) {
+        if (star.fwhm < 1.0 || star.fwhm > 8.0 ||
+            star.ellipticity > 0.60) {
+            continue;
+        }
+        const double coreRadius = std::clamp(star.fwhm * 0.35, 1.25, 2.5);
+        const double outerRadius = std::clamp(star.fwhm * 1.5, 2.0, 12.0);
+        if (outerRadius <= coreRadius + 0.5) continue;
+
+        const int centerX = static_cast<int>(std::lround(star.x));
+        const int centerY = static_cast<int>(std::lround(star.y));
+        const int radius = static_cast<int>(std::ceil(outerRadius));
+        const int x0 = std::max(0, centerX - radius);
+        const int x1 = std::min(width - 1, centerX + radius);
+        const int y0 = std::max(0, centerY - radius);
+        const int y1 = std::min(height - 1, centerY + radius);
+
+        std::array<std::vector<double>, 3> coreShares;
+        for (int y = y0; y <= y1; ++y) {
+            for (int x = x0; x <= x1; ++x) {
+                if (std::hypot(x - star.x, y - star.y) > coreRadius) continue;
+                const size_t pixel = static_cast<size_t>(y) * width + x;
+                if (processingMask && (*processingMask)[pixel] < 128) continue;
+                bool saturated = false;
+                double signalTotal = 0.0;
+                std::array<double, 3> signal = {};
+                for (int channel = 0; channel < 3; ++channel) {
+                    const size_t index = pixel * 3 + channel;
+                    saturated = saturated || source[index] >= 65000;
+                    signal[channel] = std::max(
+                        0, static_cast<int>(source[index]) -
+                               static_cast<int>(starless[index]));
+                    signalTotal += signal[channel];
+                }
+                if (saturated || signalTotal < 100.0) continue;
+                for (int channel = 0; channel < 3; ++channel) {
+                    coreShares[channel].push_back(
+                        signal[channel] / signalTotal);
+                }
+            }
+        }
+        if (coreShares[0].size() < 4) continue;
+
+        std::array<double, 3> coreShare = {};
+        double coreShareTotal = 0.0;
+        for (int channel = 0; channel < 3; ++channel) {
+            coreShare[channel] = medianDouble(coreShares[channel]);
+            coreShareTotal += coreShare[channel];
+        }
+        if (coreShareTotal <= 1e-9) continue;
+        for (double& value : coreShare) value /= coreShareTotal;
+        const double coreShareLuminance = positiveRgbLuminance(coreShare);
+        if (coreShareLuminance <= 1e-9) continue;
+        const double coreMaximum = *std::max_element(
+            coreShare.begin(), coreShare.end());
+        const double coreMinimum = *std::min_element(
+            coreShare.begin(), coreShare.end());
+        const double coreSaturation = coreMaximum > 0.0
+            ? (coreMaximum - coreMinimum) / coreMaximum : 0.0;
+        const double peakRadius = std::clamp(
+            star.fwhm * 0.85, coreRadius + 0.25, outerRadius - 0.25);
+
+        for (int y = y0; y <= y1; ++y) {
+            for (int x = x0; x <= x1; ++x) {
+                const double distance = std::hypot(x - star.x, y - star.y);
+                if (distance <= coreRadius || distance >= outerRadius) continue;
+                const size_t pixel = static_cast<size_t>(y) * width + x;
+
+                std::array<int32_t, 3> signedSignal = {};
+                std::array<double, 3> positiveSignal = {};
+                double signalTotal = 0.0;
+                for (int channel = 0; channel < 3; ++channel) {
+                    const size_t index = pixel * 3 + channel;
+                    signedSignal[channel] =
+                        static_cast<int32_t>(source[index]) -
+                        static_cast<int32_t>(starless[index]);
+                    positiveSignal[channel] =
+                        std::max(0, signedSignal[channel]);
+                    signalTotal += positiveSignal[channel];
+                }
+                if (signalTotal < 24.0) continue;
+
+                std::array<double, 3> signalShare = {};
+                double maximumShare = 0.0;
+                double minimumShare = 1.0;
+                double maximumDeviation = 0.0;
+                for (int channel = 0; channel < 3; ++channel) {
+                    signalShare[channel] =
+                        positiveSignal[channel] / signalTotal;
+                    maximumShare = std::max(maximumShare, signalShare[channel]);
+                    minimumShare = std::min(minimumShare, signalShare[channel]);
+                    maximumDeviation = std::max(
+                        maximumDeviation,
+                        std::abs(signalShare[channel] - coreShare[channel]));
+                }
+                const double saturation = maximumShare > 0.0
+                    ? (maximumShare - minimumShare) / maximumShare : 0.0;
+                const double saturationExcess = saturation - coreSaturation;
+                if (maximumDeviation <= 0.025 || saturationExcess <= 0.01) {
+                    continue;
+                }
+
+                const double rise = smoothstep01(
+                    (distance - coreRadius) /
+                    std::max(0.01, peakRadius - coreRadius));
+                const double fall = smoothstep01(
+                    (outerRadius - distance) /
+                    std::max(0.01, outerRadius - peakRadius));
+                const double chromaWeight =
+                    smoothstep01((maximumDeviation - 0.025) / 0.12) *
+                    smoothstep01((saturationExcess - 0.01) / 0.12);
+                const double maskWeight = processingMask
+                    ? (*processingMask)[pixel] / 255.0 : 1.0;
+                const double amount = maximumCorrection *
+                    std::min(rise, fall) * chromaWeight * maskWeight;
+                const uint8_t quantizedWeight = static_cast<uint8_t>(
+                    std::clamp(std::lround(amount * 255.0), 0L, 255L));
+                if (quantizedWeight <= appliedWeights[pixel]) continue;
+
+                const double signalLuminance =
+                    positiveRgbLuminance(positiveSignal);
+                std::array<int32_t, 3> proposal = {};
+                for (int channel = 0; channel < 3; ++channel) {
+                    const double target = signalLuminance *
+                        coreShare[channel] / coreShareLuminance;
+                    proposal[channel] =
+                        blendLayerSample(signedSignal[channel],
+                                         static_cast<int32_t>(std::lround(target)),
+                                         amount);
+                }
+                std::array<double, 3> proposalPositive = {};
+                for (int channel = 0; channel < 3; ++channel) {
+                    proposalPositive[channel] =
+                        std::max(0, proposal[channel]);
+                }
+                const double proposalLuminance =
+                    positiveRgbLuminance(proposalPositive);
+                const double luminanceScale = proposalLuminance > 1e-9
+                    ? signalLuminance / proposalLuminance : 0.0;
+                for (int channel = 0; channel < 3; ++channel) {
+                    starLayer[pixel * 3 + channel] =
+                        static_cast<int32_t>(std::lround(
+                            proposal[channel] * luminanceScale));
+                }
+                if (appliedWeights[pixel] == 0) ++affectedPixels;
+                appliedWeights[pixel] = quantizedWeight;
+            }
+        }
+    }
+    return affectedPixels;
+}
+
+void erodeRoundLuminance(const std::vector<uint16_t>& luminance,
+                         int width, int height, int radius,
+                         std::vector<uint16_t>& eroded) {
+    eroded.resize(luminance.size());
     const int radiusSquared = radius * radius;
     for (int y = 0; y < height; ++y) {
         for (int x = 0; x < width; ++x) {
             const size_t pixel = static_cast<size_t>(y) * width + x;
-            size_t darkestPixel = pixel;
             uint16_t darkest = luminance[pixel];
             for (int dy = -radius; dy <= radius; ++dy) {
                 for (int dx = -radius; dx <= radius; ++dx) {
@@ -131,14 +317,10 @@ void erodeRound(const std::vector<int32_t>& layer,
                         static_cast<size_t>(sampleY) * width + sampleX;
                     if (luminance[sample] < darkest) {
                         darkest = luminance[sample];
-                        darkestPixel = sample;
                     }
                 }
             }
-            for (int channel = 0; channel < 3; ++channel) {
-                eroded[pixel * 3 + channel] =
-                    layer[darkestPixel * 3 + channel];
-            }
+            eroded[pixel] = darkest;
         }
     }
 }
@@ -296,9 +478,20 @@ bool StarReducer::reduce(std::vector<uint16_t>& image, int width, int height,
             positiveLayerLuminance(&starLayer[pixel * 3]);
     }
 
-    std::vector<int32_t> erodedRadiusOne;
-    erodeRound(starLayer, starLayerLuminance,
-               width, height, 1, erodedRadiusOne);
+    const size_t defringedPixels = reduceStarColorFringes(
+        image, starless, starLayer, width, height, filteredStars,
+        strength, processingMask);
+    if (stats) stats->defringedPixels = defringedPixels;
+    if (defringedPixels > 0) {
+        for (size_t pixel = 0; pixel < pixelCount; ++pixel) {
+            starLayerLuminance[pixel] =
+                positiveLayerLuminance(&starLayer[pixel * 3]);
+        }
+    }
+
+    std::vector<uint16_t> erodedRadiusOne;
+    erodeRoundLuminance(starLayerLuminance,
+                        width, height, 1, erodedRadiusOne);
 
     const double normalizedStrength = strength / 100.0;
     // Values around 0.3-1.2 px cover normal photographic reduction. The upper
@@ -326,38 +519,29 @@ bool StarReducer::reduce(std::vector<uint16_t>& image, int width, int height,
     const double residualFloor =
         typicalStarPeak * 0.75 * clearProgress;
 
+    std::vector<uint16_t> erodedRadiusTwo;
     if (useSecondRadius) {
-        for (size_t pixel = 0; pixel < pixelCount; ++pixel) {
-            starLayerLuminance[pixel] =
-                positiveLayerLuminance(&erodedRadiusOne[pixel * 3]);
-        }
-        // Reuse the original layer buffer for radius 2. Applying the radius-1
-        // disk twice produces the same round diamond footprint at this scale.
-        erodeRound(erodedRadiusOne, starLayerLuminance,
-                   width, height, 1, starLayer);
+        // Applying the radius-1 disk twice produces a compact round diamond
+        // footprint at this scale without copying a neighbouring pixel's RGB.
+        erodeRoundLuminance(erodedRadiusOne,
+                            width, height, 1, erodedRadiusTwo);
     }
 
     for (size_t pixel = 0; pixel < pixelCount; ++pixel) {
-        std::array<int32_t, 3> blended = {};
-        for (int channel = 0; channel < 3; ++channel) {
-            const size_t index = pixel * 3 + channel;
-            if (useSecondRadius) {
-                blended[channel] = blendLayerSample(
-                    erodedRadiusOne[index], starLayer[index], interpolation);
-            } else {
-                blended[channel] = blendLayerSample(
-                    starLayer[index], erodedRadiusOne[index], interpolation);
-            }
-        }
-        const uint16_t blendedLuminance =
-            positiveLayerLuminance(blended.data());
-        const double retainedFraction = blendedLuminance <= residualFloor
+        const double blendedLuminance = useSecondRadius
+            ? erodedRadiusOne[pixel] * (1.0 - interpolation) +
+                  erodedRadiusTwo[pixel] * interpolation
+            : starLayerLuminance[pixel] * (1.0 - interpolation) +
+                  erodedRadiusOne[pixel] * interpolation;
+        const double retainedLuminance = blendedLuminance <= residualFloor
             ? 0.0
-            : (blendedLuminance - residualFloor) / blendedLuminance;
+            : blendedLuminance - residualFloor;
+        const double retainedFraction = starLayerLuminance[pixel] > 0
+            ? retainedLuminance / starLayerLuminance[pixel] : 0.0;
         for (int channel = 0; channel < 3; ++channel) {
             starLayer[pixel * 3 + channel] =
                 static_cast<int32_t>(std::lround(
-                    blended[channel] * retainedFraction));
+                    starLayer[pixel * 3 + channel] * retainedFraction));
         }
     }
 

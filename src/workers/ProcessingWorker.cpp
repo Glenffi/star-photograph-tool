@@ -676,6 +676,7 @@ void ProcessingWorker::run() {
     m_selectedReferenceFrame.clear();
     m_frameQualityMetrics.clear();
     m_qualityRejectedFiles.clear();
+    m_skippedFrames.clear();
     m_wasCancelled = false;
     m_outputFile.clear();
     m_affineFrameCount = 0;
@@ -1033,6 +1034,11 @@ void ProcessingWorker::run() {
             : loader.loadRaw(m_files[i].toStdString(), sourceImage);
         if (!sourceLoaded) {
             if (m_params.deepSkyMode) return;
+            SkippedFrameInfo skipped;
+            skipped.filePath = m_files[i];
+            skipped.stage = "raw-load";
+            skipped.reason = "RAW 解码失败";
+            m_skippedFrames.push_back(std::move(skipped));
             qWarning() << "RAW 加载失败，跳过:" << m_files[i];
             continue;
         }
@@ -1052,6 +1058,11 @@ void ProcessingWorker::run() {
         std::vector<StarPoint> sourceDetectedStars;
         if (!detector.detect(sourceLuminance, width, height,
                              sourceDetectedStars, evaluationDetectionOptions)) {
+            SkippedFrameInfo skipped;
+            skipped.filePath = m_files[i];
+            skipped.stage = "star-detection";
+            skipped.reason = "未检测到可用于对齐的星点";
+            m_skippedFrames.push_back(std::move(skipped));
             qWarning() << "星点检测失败，跳过:" << m_files[i];
             continue;
         }
@@ -1077,7 +1088,66 @@ void ProcessingWorker::run() {
         alignmentModelOptions.evaluationSourceStars = &sourceEvaluationStars;
         if (!aligner.align(referenceStars, sourceStars, transform,
                            &alignmentQuality, alignmentModelOptions)) {
-            qWarning() << "对齐失败，跳过:" << m_files[i];
+            SkippedFrameInfo skipped;
+            skipped.filePath = m_files[i];
+            skipped.stage = "alignment";
+            skipped.detectedStars = static_cast<int>(sourceDetectedStars.size());
+            skipped.affineEvaluated = alignmentQuality.affineEvaluated;
+            skipped.affineMatchedStars =
+                alignmentQuality.affineCandidate.matchedStars;
+            skipped.affineRms = alignmentQuality.affineCandidate.rmsError;
+            skipped.affineP95 = alignmentQuality.affineCandidate.p95Error;
+            skipped.affineEligibleCells =
+                alignmentQuality.affineCandidate.eligibleCells;
+            skipped.affineCoveredCells =
+                alignmentQuality.affineCandidate.coveredCells;
+            skipped.affineGridCoverage =
+                alignmentQuality.affineCandidate.gridCoverage;
+            for (const std::string& reason :
+                 alignmentQuality.affineCandidate.failureReasons) {
+                skipped.affineFailureReasons.append(
+                    QString::fromStdString(reason));
+            }
+            skipped.homographyEvaluated =
+                alignmentQuality.homographyEvaluated;
+            skipped.homographyMatchedStars =
+                alignmentQuality.homographyCandidate.matchedStars;
+            skipped.homographyRms =
+                alignmentQuality.homographyCandidate.rmsError;
+            skipped.homographyP95 =
+                alignmentQuality.homographyCandidate.p95Error;
+            skipped.homographyEligibleCells =
+                alignmentQuality.homographyCandidate.eligibleCells;
+            skipped.homographyCoveredCells =
+                alignmentQuality.homographyCandidate.coveredCells;
+            skipped.homographyGridCoverage =
+                alignmentQuality.homographyCandidate.gridCoverage;
+            for (const std::string& reason :
+                 alignmentQuality.homographyCandidate.failureReasons) {
+                skipped.homographyFailureReasons.append(
+                    QString::fromStdString(reason));
+            }
+            if (!skipped.affineEvaluated && !skipped.homographyEvaluated) {
+                skipped.reason = "星点匹配未形成可拟合模型";
+            } else {
+                QStringList failedModels;
+                if (skipped.affineEvaluated) {
+                    failedModels.append(QString("Affine: %1")
+                        .arg(skipped.affineFailureReasons.isEmpty()
+                            ? QStringLiteral("未通过质量门限")
+                            : skipped.affineFailureReasons.join(", ")));
+                }
+                if (skipped.homographyEvaluated) {
+                    failedModels.append(QString("Homography: %1")
+                        .arg(skipped.homographyFailureReasons.isEmpty()
+                            ? QStringLiteral("未通过质量门限")
+                            : skipped.homographyFailureReasons.join(", ")));
+                }
+                skipped.reason = failedModels.join("; ");
+            }
+            qWarning() << "对齐失败，跳过:" << m_files[i]
+                       << skipped.reason;
+            m_skippedFrames.push_back(std::move(skipped));
             continue;
         }
         sourceLuminance.clear();
@@ -1086,6 +1156,11 @@ void ProcessingWorker::run() {
         std::vector<uint16_t> alignedFrame;
         if (!aligner.applyTransformRgb(sourceImage.data, width, height, transform,
                                        alignedFrame)) {
+            SkippedFrameInfo skipped;
+            skipped.filePath = m_files[i];
+            skipped.stage = "resampling";
+            skipped.reason = "变换重采样失败";
+            m_skippedFrames.push_back(std::move(skipped));
             qWarning() << "变换应用失败，跳过:" << m_files[i];
             continue;
         }
@@ -1985,9 +2060,10 @@ bool ProcessingWorker::finishResult(std::vector<uint16_t>& resultRgb,
             qWarning() << "缩星处理失败，继续导出未缩星结果";
         } else {
             emit stageMessage(QString(
-                "缩星完成：处理 %1 颗星，其中 %2 颗弱小星被清除或显著缩小")
+                "缩星完成：处理 %1 颗星，其中 %2 颗弱小星被清除或显著缩小，%3 个星缘像素去色边")
                 .arg(m_starReductionStats.processedStars)
-                .arg(m_starReductionStats.stronglySuppressedStars));
+                .arg(m_starReductionStats.stronglySuppressedStars)
+                .arg(m_starReductionStats.defringedPixels));
         }
         emit progress(95);
     }

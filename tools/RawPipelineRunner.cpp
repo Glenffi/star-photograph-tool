@@ -1,4 +1,5 @@
 #include "core/ProcessingMemoryEstimator.h"
+#include "core/PreviewToneMapper.h"
 #include "core/RawImageLoader.h"
 #include "workers/ProcessingWorker.h"
 
@@ -13,9 +14,11 @@
 #include <QJsonDocument>
 #include <QJsonArray>
 #include <QJsonObject>
+#include <QImage>
 #include <QSet>
 
 #include <algorithm>
+#include <array>
 #include <iostream>
 #include <limits>
 
@@ -44,6 +47,61 @@ bool validGroundMethod(const QString& method) {
     return method == "reference" || method == "median" || method == "average";
 }
 
+uint16_t histogramPercentile(const std::vector<uint64_t>& histogram,
+                             uint64_t total, uint64_t numerator,
+                             uint64_t denominator) {
+    if (total == 0 || denominator == 0) return 0;
+    const uint64_t target = std::min(
+        total - 1, ((total - 1) / denominator) * numerator +
+                       (((total - 1) % denominator) * numerator) / denominator);
+    uint64_t cumulative = 0;
+    for (size_t value = 0; value < histogram.size(); ++value) {
+        cumulative += histogram[value];
+        if (cumulative > target) return static_cast<uint16_t>(value);
+    }
+    return 65535;
+}
+
+QJsonObject resultStatistics(const std::vector<uint16_t>& rgb) {
+    QJsonObject result;
+    if (rgb.empty() || rgb.size() % 3 != 0) return result;
+    const uint64_t pixels = rgb.size() / 3;
+    std::array<std::vector<uint64_t>, 3> channels;
+    for (auto& histogram : channels) histogram.resize(65536);
+    std::vector<uint64_t> luminance(65536);
+    for (size_t pixel = 0; pixel < pixels; ++pixel) {
+        const size_t base = pixel * 3;
+        for (size_t channel = 0; channel < 3; ++channel) {
+            ++channels[channel][rgb[base + channel]];
+        }
+        const uint32_t value =
+            13933U * rgb[base] + 46871U * rgb[base + 1] +
+            4732U * rgb[base + 2];
+        ++luminance[value >> 16];
+    }
+
+    QJsonArray medians;
+    for (const auto& histogram : channels) {
+        medians.append(histogramPercentile(histogram, pixels, 1, 2));
+    }
+    result["channelMedians"] = medians;
+    const std::array<std::pair<const char*, std::pair<uint64_t, uint64_t>>, 9>
+        requested = {{
+            {"p0_1", {1, 1000}}, {"p1", {1, 100}},
+            {"p10", {1, 10}}, {"p50", {1, 2}},
+            {"p90", {9, 10}}, {"p99", {99, 100}},
+            {"p99_5", {995, 1000}}, {"p99_95", {9995, 10000}},
+            {"p99_99", {9999, 10000}}
+        }};
+    QJsonObject luminancePercentiles;
+    for (const auto& [name, fraction] : requested) {
+        luminancePercentiles[name] = histogramPercentile(
+            luminance, pixels, fraction.first, fraction.second);
+    }
+    result["luminancePercentiles"] = luminancePercentiles;
+    return result;
+}
+
 } // namespace
 
 int main(int argc, char* argv[]) {
@@ -62,6 +120,10 @@ int main(int argc, char* argv[]) {
         "Directory for the TIFF and pipeline-report.json.", "directory");
     const QCommandLineOption limitOption("limit",
         "Use at most this many sorted RAW files.", "count", "0");
+    const QCommandLineOption startIndexOption(
+        "start-index",
+        "Skip this many sorted RAW files before applying --limit.",
+        "index", "0");
     const QCommandLineOption singleOption(
         "single", "Refine the first RAW without alignment or stacking.");
     const QCommandLineOption timelapseOption(
@@ -141,7 +203,8 @@ int main(int argc, char* argv[]) {
         "star-reduce-strength",
         "Enable star reduction at strength 1-100; 0 disables it.",
         "value", "0");
-    parser.addOptions({inputOption, outputOption, limitOption, singleOption,
+    parser.addOptions({inputOption, outputOption, limitOption,
+                       startIndexOption, singleOption,
                        timelapseOption, darkDirectoryOption,
                        flatDirectoryOption, biasDirectoryOption,
                        timelapseWindowOption,
@@ -175,6 +238,9 @@ int main(int argc, char* argv[]) {
 
     bool limitOk = false;
     const int limit = parser.value(limitOption).toInt(&limitOk);
+    bool startIndexOk = false;
+    const int startIndex =
+        parser.value(startIndexOption).toInt(&startIndexOk);
     bool referenceOk = false;
     int referenceIndex = parser.value(referenceOption).toInt(&referenceOk);
     bool kappaOk = false;
@@ -247,7 +313,8 @@ int main(int argc, char* argv[]) {
                      "for timelapse sequence output.\n";
         return 2;
     }
-    if (!limitOk || limit < 0 || !referenceOk || referenceIndex < -1 ||
+    if (!limitOk || limit < 0 || !startIndexOk || startIndex < 0 ||
+        !referenceOk || referenceIndex < -1 ||
         !kappaOk || kappa <= 0.0 || !memoryBudgetOk ||
         !denoiseOk || denoiseStrength < 0 || denoiseStrength > 70 ||
         !dehazeOk || dehazeStrength < 0 || dehazeStrength > 100 ||
@@ -270,7 +337,8 @@ int main(int argc, char* argv[]) {
         timelapseStrength > 100 ||
         !timelapseMotionProtectionOk || timelapseMotionProtection < 0 ||
         timelapseMotionProtection > 100) {
-        std::cerr << "Invalid or incompatible --limit, --reference-index, "
+        std::cerr << "Invalid or incompatible --start-index, --limit, "
+                     "--reference-index, "
                      "--method, --kappa, "
                      "--memory-budget-mib, --denoise-strength, "
                      "--dehaze-strength, or "
@@ -281,6 +349,11 @@ int main(int argc, char* argv[]) {
         static_cast<uint64_t>(memoryBudgetMiB) * 1024ULL * 1024ULL;
 
     QStringList files = rawFiles(input);
+    if (startIndex >= files.size()) {
+        std::cerr << "--start-index is outside the input sequence.\n";
+        return 2;
+    }
+    if (startIndex > 0) files = files.mid(startIndex);
     if (limit > 0 && files.size() > limit) files = files.mid(0, limit);
     if (singleFrameMode && files.size() > 1) files = files.mid(0, 1);
     const int minimumFrames = singleFrameMode ? 1 : (timelapseMode ? 3 : 2);
@@ -419,10 +492,11 @@ int main(int argc, char* argv[]) {
     worker.wait();
 
     QJsonObject report;
-    report["schemaVersion"] = 11;
+    report["schemaVersion"] = 13;
     report["toolVersion"] = QCoreApplication::applicationVersion();
     report["generatedAt"] = QDateTime::currentDateTimeUtc().toString(Qt::ISODate);
     report["input"] = input;
+    report["startIndex"] = startIndex;
     report["selectedFrames"] = files.size();
     report["singleFrameMode"] = singleFrameMode;
     report["timelapseMode"] = timelapseMode;
@@ -499,6 +573,50 @@ int main(int argc, char* argv[]) {
         qualityFrames.append(quality);
     }
     report["frameQuality"] = qualityFrames;
+    QJsonArray skippedFrames;
+    for (const ProcessingWorker::SkippedFrameInfo& skipped :
+         worker.skippedFrames()) {
+        QJsonObject item;
+        item["file"] = QFileInfo(skipped.filePath).fileName();
+        item["stage"] = skipped.stage;
+        item["reason"] = skipped.reason;
+        item["detectedStars"] = skipped.detectedStars;
+        auto appendAlignmentCandidate = [](bool evaluated, int matchedStars,
+                                           double rms, double p95,
+                                           int eligibleCells, int coveredCells,
+                                           double gridCoverage,
+                                           const QStringList& reasons) {
+            QJsonObject candidate;
+            candidate["evaluated"] = evaluated;
+            candidate["matchedStars"] = matchedStars;
+            candidate["rms"] = rms;
+            candidate["p95"] = p95;
+            candidate["eligibleCells"] = eligibleCells;
+            candidate["coveredCells"] = coveredCells;
+            candidate["gridCoverage"] = gridCoverage;
+            QJsonArray failureReasons;
+            for (const QString& reason : reasons) {
+                failureReasons.append(reason);
+            }
+            candidate["failureReasons"] = failureReasons;
+            return candidate;
+        };
+        item["affine"] = appendAlignmentCandidate(
+            skipped.affineEvaluated, skipped.affineMatchedStars,
+            skipped.affineRms, skipped.affineP95,
+            skipped.affineEligibleCells, skipped.affineCoveredCells,
+            skipped.affineGridCoverage, skipped.affineFailureReasons);
+        item["homography"] = appendAlignmentCandidate(
+            skipped.homographyEvaluated, skipped.homographyMatchedStars,
+            skipped.homographyRms, skipped.homographyP95,
+            skipped.homographyEligibleCells,
+            skipped.homographyCoveredCells,
+            skipped.homographyGridCoverage,
+            skipped.homographyFailureReasons);
+        skippedFrames.append(item);
+    }
+    report["skippedFrames"] = skippedFrames;
+    report["skippedFrameCount"] = skippedFrames.size();
     report["method"] = effectiveMethod;
     report["kappa"] = kappa;
     report["photometricNormalizationEnabled"] =
@@ -543,6 +661,8 @@ int main(int argc, char* argv[]) {
         QString::number(reductionStats.processedStars);
     report["starReductionStronglySuppressedStars"] =
         QString::number(reductionStats.stronglySuppressedStars);
+    report["starReductionDefringedPixels"] =
+        QString::number(reductionStats.defringedPixels);
     report["starReductionAffectedPixels"] =
         QString::number(reductionStats.affectedPixels);
     report["starReductionAverageInputFwhm"] =
@@ -583,6 +703,35 @@ int main(int argc, char* argv[]) {
     report["error"] = worker.errorString();
     report["success"] = worker.errorString().isEmpty() && !worker.outputFile().isEmpty();
 
+    std::vector<uint16_t> resultRgb = worker.takeStackedData();
+    const bool hasFinishingStage =
+        (params.noiseReductionEnabled && params.noiseReductionStrength > 0) ||
+        params.modifiedCameraColorEnabled || params.dewarpEnabled ||
+        params.stretchEnabled ||
+        (params.skyGroundSepEnabled && params.groundDetailStrength > 0) ||
+        (params.starReduceEnabled && params.starReduceStrength > 0);
+    const PreviewImage8 preview = hasFinishingStage
+        ? PreviewToneMapper::mapRgb16WithRange(
+              resultRgb, worker.stackedWidth(), worker.stackedHeight(),
+              0, 65535, 2400)
+        : PreviewToneMapper::mapRgb16(
+              resultRgb, worker.stackedWidth(), worker.stackedHeight(), 2400);
+    const QString previewPath = QDir(output).filePath("result-preview.png");
+    bool previewSaved = false;
+    if (!preview.rgb.empty()) {
+        const QImage borrowed(
+            preview.rgb.data(), preview.width, preview.height,
+            preview.width * 3, QImage::Format_RGB888);
+        previewSaved = borrowed.copy().save(previewPath, "PNG");
+    }
+    report["previewSaved"] = previewSaved;
+    report["previewFile"] = previewSaved ? previewPath : QString();
+    report["previewBlackPoint"] = preview.blackPoint;
+    report["previewWhitePoint"] = preview.whitePoint;
+    report["previewMode"] = hasFinishingStage
+        ? "fixed-full-range" : "automatic-range";
+    report["resultStatistics"] = resultStatistics(resultRgb);
+
     const QString reportPath = QDir(output).filePath("pipeline-report.json");
     QFile reportFile(reportPath);
     if (!reportFile.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
@@ -591,9 +740,9 @@ int main(int argc, char* argv[]) {
     }
     reportFile.write(QJsonDocument(report).toJson(QJsonDocument::Indented));
 
-    // Release the full-resolution result before reporting completion. The TIFF
-    // remains the durable artifact; the CLI does not need to retain another copy.
-    worker.takeStackedData().clear();
+    // The owned result is released here; the TIFF and bounded PNG remain as
+    // durable artifacts for numeric and visual regression checks.
+    resultRgb.clear();
     if (!worker.errorString().isEmpty()) {
         std::cerr << "Pipeline failed: " << worker.errorString().toStdString() << '\n';
         return 5;
