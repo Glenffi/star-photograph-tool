@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(StarProcessor VERSION 0.6.7 LANGUAGES CXX)
+project(StarProcessor VERSION 0.6.8 LANGUAGES CXX)
 
 include(CTest)
 option(BUILD_SAMPLE_TOOLS "Build local RAW sample regression tools" ON)
@@ -87,6 +87,7 @@ endif()
 
 # 核心算法单独成库：GUI 与测试复用同一份实现，避免测试只覆盖复制代码。
 set(CORE_SOURCES
+    src/core/DeepSkyCalibrationPreflight.cpp
     src/core/ImageBufferUtils.cpp
     src/core/NoiseReductionEngine.cpp
     src/core/PhotometricNormalizer.cpp
@@ -121,6 +122,7 @@ set(APP_SOURCES
 )
 
 set(CORE_HEADERS
+    src/core/DeepSkyCalibrationPreflight.h
     src/core/ImageBufferUtils.h
     src/core/NoiseReductionEngine.h
     src/core/PhotometricNormalizer.h

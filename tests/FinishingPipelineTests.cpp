@@ -167,6 +167,7 @@ void testStretchReceivesSkyMask() {
     FinishingOptions options;
     options.skyGroundSeparation = true;
     options.stretchEnabled = true;
+    options.groundDetailStrength = 0;
     FinishingResult result;
     expect(FinishingPipeline::process(
                actual, width, height, &allGroundMask, options, result),

@@ -111,6 +111,7 @@ private:
                                 QPushButton* clearButton);
     void updateCalibrationCount(QLabel* label, QPushButton* clearButton,
                                 int count);
+    void updateCalibrationStatus();
 
     // 预设
     QWidget* m_presetBar = nullptr;
@@ -154,6 +155,7 @@ private:
     QLabel* m_darkFrameCount = nullptr;
     QLabel* m_flatFrameCount = nullptr;
     QLabel* m_biasFrameCount = nullptr;
+    QLabel* m_calibrationStatus = nullptr;
     QPushButton* m_darkFrameClear = nullptr;
     QPushButton* m_flatFrameClear = nullptr;
     QPushButton* m_biasFrameClear = nullptr;

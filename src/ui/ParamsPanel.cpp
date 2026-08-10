@@ -125,7 +125,8 @@ void ParamsPanel::setupUI() {
     auto* calibrationNote = new QLabel(
         QString::fromUtf8(
             "Light 主帧在左侧素材栏导入。\n"
-            "处理顺序：Bias → Dark → Flat → 对齐 → 堆栈。\n"
+            "Dark：同相机、ISO 和曝光；Flat：同相机和 ISO；"
+            "Bias：同相机、ISO，并使用最短曝光。\n"
             "每类至少 3 张，建议 10–20 张。"),
         m_calibrationGroup);
     calibrationNote->setWordWrap(true);
@@ -214,6 +215,11 @@ void ParamsPanel::setupUI() {
         QString::fromUtf8("偏置场"),
         QString::fromUtf8("校正传感器读出偏置，并为平场标定零点"),
         m_biasFramePaths, m_biasFrameCount, m_biasFrameClear);
+
+    m_calibrationStatus = new QLabel(m_calibrationGroup);
+    m_calibrationStatus->setWordWrap(true);
+    calibrationLayout->addWidget(m_calibrationStatus);
+    updateCalibrationStatus();
 
     stackPageLayout->addWidget(m_calibrationGroup);
 
@@ -2113,6 +2119,29 @@ void ParamsPanel::updateCalibrationCount(QLabel* label,
     if (!label) return;
     label->setText(QString::fromUtf8("%1 张").arg(count));
     if (clearButton) clearButton->setEnabled(count > 0);
+    updateCalibrationStatus();
+}
+
+void ParamsPanel::updateCalibrationStatus() {
+    if (!m_calibrationStatus) return;
+    const bool enough = m_darkFramePaths.size() >= 3 &&
+        m_flatFramePaths.size() >= 3 && m_biasFramePaths.size() >= 3;
+    if (enough) {
+        m_calibrationStatus->setText(QString::fromUtf8(
+            "数量门槛已满足。开始处理后会先检查相机、尺寸、ISO 和曝光，"
+            "同类问题会一次列出。"));
+        m_calibrationStatus->setStyleSheet(
+            "color: #9FD9C8; background-color: #142821; "
+            "border: 1px solid #285746; border-radius: 4px; "
+            "padding: 6px 8px; font-size: 11px;");
+    } else {
+        m_calibrationStatus->setText(QString::fromUtf8(
+            "请为 Dark、Flat 和 Bias 各导入至少 3 张 RAW。"));
+        m_calibrationStatus->setStyleSheet(
+            "color: #C4B99A; background-color: #272316; "
+            "border: 1px solid #554B2C; border-radius: 4px; "
+            "padding: 6px 8px; font-size: 11px;");
+    }
 }
 
 QString ParamsPanel::upstreamSignature() const {

@@ -2,7 +2,7 @@
 
 跨平台 RAW 图像处理软件，专注于星空摄影领域。
 
-> **当前版本**：v0.6.7。核心闭环、Bayer 域深空校准、带自动/手动灰点和连续强度的 BCF 改机色彩还原、天地分离、星轨合成、延时图片序列降噪、自适应 Arcsinh 拉伸、天空约束的背景校正、线性多尺度降噪、带中小星去色边的亚像素 Starless/Stars 缩星、低分辨率参数快速预览、轻量 RAW 浏览预览和核心自动化测试已经接入；Windows 仍需实机验证。
+> **当前版本**：v0.6.8。核心闭环、带聚合预检的 Bayer 域深空校准、带自动/手动灰点和连续强度的 BCF 改机色彩还原、天地分离、星轨合成、延时图片序列降噪、带保色高光肩部的自适应 Arcsinh 拉伸、天空约束的背景校正、线性多尺度降噪、带中小星去色边的亚像素 Starless/Stars 缩星、低分辨率参数快速预览、轻量 RAW 浏览预览和核心自动化测试已经接入；Windows 仍需实机验证。
 
 ## 当前已实现
 
@@ -11,6 +11,7 @@
 - 轻量预览帧质量评分、自动参考帧选择与严重失焦/拖星/云层帧保守剔除
 - Average / Median / Kappa-Sigma / Winsorized 堆栈
 - 深空标准校准：批量生成 Master Bias / Dark / Flat，在 Bayer CFA 域校准 Light 后再 AHD 去马赛克
+- 深空素材聚合预检：处理前一次检查数量、重复路径、RAW 头可读性、相机、尺寸、ISO、Light/Dark 曝光和 Bias 最短曝光，并按问题类型汇总受影响文件
 - 帧间光度匹配：稳健估计共享曝光增益与 RGB 背景偏移，并回到序列中位光度
 - 天空对齐、地景固定的天地分离堆栈；每帧天空有效区随对齐变换，避免移动地景在山脊上方形成重影；地景支持平均降噪、参考单帧和中值三种策略
 - 延时 RAW 序列滑动窗口降噪：逐帧星空对齐、MAD 异常值抑制、动态内容保护、跨帧亮度/色偏平滑和固定地景双路处理，并按原顺序批量输出图片
@@ -18,7 +19,7 @@
 - 连续地平线自动蒙版或用户蒙版；多尺度降噪、缩星和细节恢复均受天空/地景区域约束
 - 线性 RGB 多尺度降噪，亮度与色度分离处理并保护强结构
 - BCF/天文改机色彩还原：在线性域自动采样中性天空，或从结果预览吸取手动灰点；校正强度可在 0–100% 连续调整
-- 亮度引导去雾、低频背景色偏校正与 RGB 联动 Arcsinh 拉伸；天地模式仅使用可靠天空估计背景，保守羽化到地平线并保护地景
+- 亮度引导去雾、低频背景色偏校正与 RGB 联动 Arcsinh 拉伸；高光保留 85% 以上亮度层次，并通过 90% 起始的混合保色肩部避免高饱和星云或亮星单通道硬截断；天地模式仅使用可靠天空估计背景，保守羽化到地平线并保护地景
 - 局部 RGB 背景重建的 Starless/Stars 分离、亚像素圆形 Minimum 和弱残留清理
 - 线性 sRGB 16-bit TIFF（嵌入 ICC）和 sRGB 8-bit PNG 导出
 - 内嵌 RAW 缩略图优先、half-size 快速回退的浏览预览
@@ -249,9 +250,9 @@ cmake --build . --config Release
   --star-trail-comet-strength 65 --stretch
 ```
 
-深空校准通过 `--dark-dir`、`--flat-dir`、`--bias-dir` 同时启用。三类素材必须与 Light 来自同一机身、ISO、传感器尺寸和 Bayer 布局；Dark 还必须匹配 Light 曝光，Bias 必须为短曝光。报告会记录主校准帧数量、已校准 Light 数量及高低端截断统计。
+深空校准通过 `--dark-dir`、`--flat-dir`、`--bias-dir` 同时启用。三类素材必须与 Light 来自同一机身、ISO、传感器尺寸和 Bayer 布局；Dark 还必须匹配 Light 曝光，Bias 必须为短曝光。正式解包 CFA 前会先读取全部 RAW 头，一次性聚合报告重复素材、相机/尺寸/ISO/曝光不匹配；错误时 `pipeline-report.json` 的 `error` 保留完整诊断，成功时 `calibrationPreflightWarnings` 记录帧数偏少或长曝光 Flat 等建议。像素相关的 Flat 欠曝、接近饱和和 CFA 布局仍在正式校准阶段继续检查。
 
-工具会生成完整分辨率 TIFF、固定全范围的 `result-preview.png` 和 `pipeline-report.json`。报告分别记录全流程耗时、纯堆栈耗时、每帧质量评分、结构化跳帧原因、光度模型、自动裁切偏移、输出直方图和画质选项；当整组素材的中位星点椭率达到 0.22 时，还会写入 `starShapeWarning`，提示检查单帧曝光拖线或镜头像差。`--start-index` 先跳过指定数量的已排序 RAW，再由 `--limit` 限制数量，`--reference-index` 始终相对于最终选中的片段。`--restore-modified-camera-color` 在线性 RGB 阶段自动估计并校正 BCF/天文改机的通道响应，`--modified-camera-color-strength` 接受 `0–100`，`--modified-camera-gray-point x,y` 以归一化坐标改用手动稳健邻域；报告会记录模式、强度、中性样本、RGB 增益和高光截断数量。普通相机不应默认启用。天地分离模式还会保存本次实际使用的 `sky-ground-mask.png`，并记录蒙版来源与天空占比，便于检查自动检测是否可靠；`--sky-ground-mask /path/to/mask.png` 可改用白色天空、黑色地景的用户蒙版。`--ground-method` 接受 `average`、`reference` 或 `median`，默认 `average`；`--ground-detail-strength` 接受 `0–70`，默认 40。天地模式下，多尺度降噪和缩星只作用于天空，地景由原坐标多帧合成及可选细节恢复处理。延时模式为每张输入生成一张同名序号输出；`--timelapse-window` 接受 `3` 或 `5`，`--timelapse-strength` 和 `--timelapse-motion-protection` 接受 `0–100`，后者默认为 75；`--timelapse-no-ground` 可关闭固定地景保护。延时管线会根据天空区域估计整段序列的亮度与色偏曲线，并以受限的 5 帧中值平滑抑制孤立闪烁，不会强行拉平日出、月升等连续曝光趋势。`--reference-index -1` 默认自动选择参考帧；`--no-quality-rejection` 保留严重质量离群帧，但仍执行自动参考帧选择。帧间光度匹配默认开启；`--no-photometric-normalization` 可关闭帧间匹配和延时防闪烁，用于 A/B 检查。`--denoise-strength` 接受 `0–70`；`--stretch` 先进行背景校正，再根据背景中值和高光端自动求解 RGB 联动 Arcsinh 曲线；`--dehaze-strength` 和 `--star-reduce-strength` 接受 `0–100`。处理期间，完整帧写入任务专属系统临时目录；任务正常、失败或取消后都会自动清理临时缓存。
+工具会生成完整分辨率 TIFF、固定全范围的 `result-preview.png` 和 `pipeline-report.json`。报告分别记录全流程耗时、纯堆栈耗时、每帧质量评分、结构化跳帧原因、光度模型、自动裁切偏移、输出直方图和画质选项；当整组素材的中位星点椭率达到 0.22 时，还会写入 `starShapeWarning`，提示检查单帧曝光拖线或镜头像差。`--start-index` 先跳过指定数量的已排序 RAW，再由 `--limit` 限制数量，`--reference-index` 始终相对于最终选中的片段。`--restore-modified-camera-color` 在线性 RGB 阶段自动估计并校正 BCF/天文改机的通道响应，`--modified-camera-color-strength` 接受 `0–100`，`--modified-camera-gray-point x,y` 以归一化坐标改用手动稳健邻域；报告会记录模式、强度、中性样本、RGB 增益和高光截断数量。普通相机不应默认启用。天地分离模式还会保存本次实际使用的 `sky-ground-mask.png`，并记录蒙版来源与天空占比，便于检查自动检测是否可靠；`--sky-ground-mask /path/to/mask.png` 可改用白色天空、黑色地景的用户蒙版。`--ground-method` 接受 `average`、`reference` 或 `median`，默认 `average`；`--ground-detail-strength` 接受 `0–70`，默认 40。天地模式下，多尺度降噪和缩星只作用于天空，地景由原坐标多帧合成及可选细节恢复处理。延时模式为每张输入生成一张同名序号输出；`--timelapse-window` 接受 `3` 或 `5`，`--timelapse-strength` 和 `--timelapse-motion-protection` 接受 `0–100`，后者默认为 75；`--timelapse-no-ground` 可关闭固定地景保护。延时管线会根据天空区域估计整段序列的亮度与色偏曲线，并以受限的 5 帧中值平滑抑制孤立闪烁，不会强行拉平日出、月升等连续曝光趋势。`--reference-index -1` 默认自动选择参考帧；`--no-quality-rejection` 保留严重质量离群帧，但仍执行自动参考帧选择。帧间光度匹配默认开启；`--no-photometric-normalization` 可关闭帧间匹配和延时防闪烁，用于 A/B 检查。`--denoise-strength` 接受 `0–70`；`--stretch` 先进行背景校正，再根据背景中值和高光端自动求解 RGB 联动 Arcsinh 曲线，亮度高光继续使用剩余输出空间，高饱和像素在 90% 以上通过保色与最低亮度约束的混合肩部收敛到 99.5%，避免直接夹到 65535；`--dehaze-strength` 和 `--star-reduce-strength` 接受 `0–100`。处理期间，完整帧写入任务专属系统临时目录；任务正常、失败或取消后都会自动清理临时缓存。
 
 `--memory-budget-mib` 可为测试或受控运行设置更低的内存上限。该值只能收紧平台安全预算，不能绕过实时内存门禁；传 `0` 或省略参数时使用自动预算。
 

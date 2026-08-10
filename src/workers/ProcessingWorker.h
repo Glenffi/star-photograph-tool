@@ -174,6 +174,9 @@ public:
     uint64_t calibrationInvalidFlatPixels() const {
         return m_calibrationInvalidFlatPixels;
     }
+    QStringList calibrationPreflightWarnings() const {
+        return m_calibrationPreflightWarnings;
+    }
 
     void requestCancel();
 
@@ -256,4 +259,5 @@ private:
     uint64_t m_calibrationClippedLowPixels = 0;
     uint64_t m_calibrationClippedHighPixels = 0;
     uint64_t m_calibrationInvalidFlatPixels = 0;
+    QStringList m_calibrationPreflightWarnings;
 };

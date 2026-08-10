@@ -1,7 +1,8 @@
 #include "ProcessingWorker.h"
 
-#include "core/FrameQualityEvaluator.h"
+#include "core/DeepSkyCalibrationPreflight.h"
 #include "core/FinishingPipeline.h"
+#include "core/FrameQualityEvaluator.h"
 #include "core/ImageAligner.h"
 #include "core/ImageBufferUtils.h"
 #include "core/ImageExporter.h"
@@ -415,16 +416,6 @@ StackingEngine::GroundMethod groundMethodFromName(const QString& name) {
     return StackingEngine::GroundAverage;
 }
 
-bool exposureMatches(double first, double second) {
-    if (!std::isfinite(first) || !std::isfinite(second) ||
-        first <= 0.0 || second <= 0.0) {
-        return false;
-    }
-    const double tolerance = std::max(
-        0.01, std::max(first, second) * 0.01);
-    return std::abs(first - second) <= tolerance;
-}
-
 } // namespace
 
 ProcessingWorker::ProcessingWorker(const QStringList& files,
@@ -584,8 +575,8 @@ bool ProcessingWorker::buildDeepSkyCalibration(
             if (stopIfCancelled()) return false;
             RawImageLoader::CfaImageData frame;
             if (!loadCompatible(path, "Dark", frame)) return false;
-            if (!exposureMatches(frame.exposureTime,
-                                 referenceLight.exposureTime)) {
+            if (!DeepSkyCalibrationPreflight::exposureMatches(
+                    frame.exposureTime, referenceLight.exposureTime)) {
                 m_errorString = QString(
                     "Dark 曝光必须与 Light 匹配: %1（Dark %2 s，Light %3 s）")
                     .arg(QFileInfo(path).fileName())
@@ -647,7 +638,8 @@ bool ProcessingWorker::loadCalibratedRaw(
             .arg(QFileInfo(path).fileName());
         return false;
     }
-    if (!exposureMatches(light.exposureTime, masters.lightExposureTime)) {
+    if (!DeepSkyCalibrationPreflight::exposureMatches(
+            light.exposureTime, masters.lightExposureTime)) {
         m_errorString = QString("Light 曝光与 Master Dark 不匹配: %1")
             .arg(QFileInfo(path).fileName());
         return false;
@@ -717,6 +709,7 @@ void ProcessingWorker::run() {
     m_calibrationClippedLowPixels = 0;
     m_calibrationClippedHighPixels = 0;
     m_calibrationInvalidFlatPixels = 0;
+    m_calibrationPreflightWarnings.clear();
     emit progress(0);
 
     if (m_files.isEmpty()) {
@@ -759,6 +752,23 @@ void ProcessingWorker::run() {
 
     emit stageMessage("检查图像与内存预算...");
     RawImageLoader loader;
+    if (m_params.deepSkyMode) {
+        emit stageMessage("预检 Light、Dark、Flat 和 Bias...");
+        const DeepSkyCalibrationPreflight::Report preflight =
+            DeepSkyCalibrationPreflight::inspect(
+                loader, m_files, m_params.darkFramePaths,
+                m_params.flatFramePaths, m_params.biasFramePaths);
+        m_calibrationPreflightWarnings = preflight.warningMessages();
+        if (preflight.hasErrors()) {
+            m_errorString = preflight.userMessage();
+            return;
+        }
+        emit stageMessage(
+            m_calibrationPreflightWarnings.isEmpty()
+                ? QString::fromUtf8("校准素材预检通过")
+                : QString::fromUtf8("校准素材预检通过 · %1 项建议")
+                      .arg(m_calibrationPreflightWarnings.size()));
+    }
     std::vector<RawImageLoader::Metadata> metadata;
     metadata.reserve(static_cast<size_t>(m_files.size()));
     size_t explicitReferenceIndex = std::numeric_limits<size_t>::max();
@@ -781,7 +791,8 @@ void ProcessingWorker::run() {
         for (int i = 1; i < static_cast<int>(metadata.size()); ++i) {
             const RawImageLoader::Metadata& item = metadata[static_cast<size_t>(i)];
             if (item.cameraModel != first.cameraModel || item.iso != first.iso ||
-                !exposureMatches(item.exposureTime, first.exposureTime)) {
+                !DeepSkyCalibrationPreflight::exposureMatches(
+                    item.exposureTime, first.exposureTime)) {
                 m_errorString = QString(
                     "深空 Light 必须来自同一相机、ISO 和曝光时间: %1")
                     .arg(QFileInfo(m_files[i]).fileName());

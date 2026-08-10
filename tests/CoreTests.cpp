@@ -2,6 +2,7 @@
 #include "core/ImageBufferUtils.h"
 #include "core/ImageExporter.h"
 #include "core/AutoOptimizeEngine.h"
+#include "core/DeepSkyCalibrationPreflight.h"
 #include "core/FrameQualityEvaluator.h"
 #include "core/NoiseReductionEngine.h"
 #include "core/PhotometricNormalizer.h"
@@ -327,6 +328,84 @@ void testRawCalibration() {
     check(!RawCalibrationEngine::compatible(light, incompatible, reason) &&
               reason == "ISO/gain differs",
           "Calibration frames with a different ISO/gain should be rejected");
+}
+
+void testDeepSkyCalibrationPreflight() {
+    using Preflight = DeepSkyCalibrationPreflight;
+    auto metadata = [](int iso, double exposure) {
+        RawImageLoader::Metadata value;
+        value.width = 3888;
+        value.height = 2592;
+        value.iso = iso;
+        value.exposureTime = exposure;
+        value.cameraModel = "Canon EOS 40D";
+        return value;
+    };
+    auto frame = [&](const QString& path, Preflight::Role role,
+                     int iso, double exposure) {
+        Preflight::FrameRecord value;
+        value.path = path;
+        value.role = role;
+        value.readable = true;
+        value.metadata = metadata(iso, exposure);
+        return value;
+    };
+
+    std::vector<Preflight::FrameRecord> valid = {
+        frame("/tmp/light-1.cr2", Preflight::Role::Light, 1600, 30.0),
+        frame("/tmp/light-2.cr2", Preflight::Role::Light, 1600, 30.0)
+    };
+    for (int i = 0; i < 3; ++i) {
+        valid.push_back(frame(
+            QString("/tmp/dark-%1.cr2").arg(i),
+            Preflight::Role::Dark, 1600, 30.0));
+        valid.push_back(frame(
+            QString("/tmp/flat-%1.cr2").arg(i),
+            Preflight::Role::Flat, 1600, 0.25));
+        valid.push_back(frame(
+            QString("/tmp/bias-%1.cr2").arg(i),
+            Preflight::Role::Bias, 1600, 0.001));
+    }
+    const Preflight::Report validReport = Preflight::validate(valid);
+    check(!validReport.hasErrors(),
+          "Matched deep-sky metadata should pass calibration preflight");
+    check(validReport.warningMessages().size() == 3,
+          "Small calibration sets should produce one recommendation per role");
+
+    std::vector<Preflight::FrameRecord> incompatible = valid;
+    for (Preflight::FrameRecord& item : incompatible) {
+        if (item.role == Preflight::Role::Flat) {
+            item.metadata.iso = 100;
+            item.metadata.exposureTime = 2.5;
+        } else if (item.role == Preflight::Role::Bias) {
+            item.metadata.exposureTime = 30.0;
+        }
+    }
+    const Preflight::Report incompatibleReport =
+        Preflight::validate(incompatible);
+    const QString incompatibleMessage = incompatibleReport.userMessage();
+    check(incompatibleReport.hasErrors() &&
+              incompatibleMessage.contains(QString::fromUtf8("Flat ISO 不匹配")) &&
+              incompatibleMessage.contains(QString::fromUtf8("Bias 曝光过长")),
+          "Preflight should aggregate mismatched flats and mislabeled biases");
+    check(incompatibleMessage.contains(QString::fromUtf8("3 张")),
+          "Grouped preflight diagnostics should report affected frame counts");
+
+    std::vector<Preflight::FrameRecord> duplicate = valid;
+    duplicate.back().path = duplicate.front().path;
+    const Preflight::Report duplicateReport = Preflight::validate(duplicate);
+    check(duplicateReport.hasErrors() &&
+              duplicateReport.userMessage().contains(
+                  QString::fromUtf8("重复导入")),
+          "A RAW assigned to more than one role should fail preflight");
+
+    std::vector<Preflight::FrameRecord> unreadable = valid;
+    unreadable.front().readable = false;
+    const Preflight::Report unreadableReport = Preflight::validate(unreadable);
+    check(unreadableReport.hasErrors() &&
+              unreadableReport.userMessage().contains(
+                  QString::fromUtf8("无法读取 RAW 头信息")),
+          "Unreadable RAW headers should be listed before CFA decoding");
 }
 
 void testTimelapseDenoise() {
@@ -789,6 +868,40 @@ void testRgbAutoOptimize() {
           "Automatic stretch should keep a typical background near 16 percent");
     check(stretched[0] >= 52000,
           "Automatic stretch should retain bright-star highlight headroom");
+
+    std::vector<uint16_t> emissionField(
+        static_cast<size_t>(nightWidth) * nightHeight * 3);
+    for (int pixel = 0; pixel < nightWidth * nightHeight; ++pixel) {
+        const uint16_t value = static_cast<uint16_t>(950 + pixel % 101);
+        emissionField[pixel * 3] = value;
+        emissionField[pixel * 3 + 1] = value;
+        emissionField[pixel * 3 + 2] = value;
+    }
+    emissionField[0] = 60000;
+    emissionField[1] = 10000;
+    emissionField[2] = 5000;
+    emissionField[3] = 45000;
+    emissionField[4] = 9000;
+    emissionField[5] = 4000;
+    check(AutoOptimizeEngine::stretchRgb(
+              emissionField, nightWidth, nightHeight, stretched),
+          "Automatic stretch should process a high-chroma emission core");
+    const uint16_t brightestChannel = *std::max_element(
+        stretched.begin(), stretched.end());
+    check(brightestChannel <= 65210,
+          "Linked stretch should gamut-compress chroma instead of clipping "
+          "a dominant channel (maximum=" +
+              std::to_string(brightestChannel) + ")");
+    check(stretched[0] > stretched[1] && stretched[1] > stretched[2],
+          "Highlight gamut compression should retain emission color ordering");
+    const auto outputLuminance = [&](size_t pixel) {
+        const size_t base = pixel * 3;
+        return (13933ULL * stretched[base] +
+                46871ULL * stretched[base + 1] +
+                4732ULL * stretched[base + 2]) >> 16;
+    };
+    check(outputLuminance(0) > outputLuminance(1),
+          "Samples above the robust white point should keep highlight detail");
 
     std::vector<uint16_t> dehazed;
     check(AutoOptimizeEngine::dehazeRgb(castRgb, width, height, 0, dehazed) &&
@@ -2245,6 +2358,7 @@ int main(int argc, char* argv[]) {
     QCoreApplication application(argc, argv);
     testStacking();
     testRawCalibration();
+    testDeepSkyCalibrationPreflight();
     testTimelapseDenoise();
     testTemporalPhotometricSmoothing();
     testImageBufferUtils();

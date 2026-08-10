@@ -696,20 +696,81 @@ bool AutoOptimizeEngine::stretchRgb(const std::vector<uint16_t>& src,
 
         const double normalized =
             std::clamp(inputLuminance / whiteSignal, 0.0, 1.0);
+        // whiteSignal maps to 85%, but brighter samples continue into the
+        // remaining headroom instead of all collapsing onto one flat 85%
+        // plateau. This matters for bright nebula cores such as M42.
+        constexpr double kOutputLuminanceCeiling = 0.985;
+        const double mappedLuminance =
+            std::asinh(inputLuminance / softening) / denominator *
+            kTargetHighlight;
         const double outputLuminance =
-            std::min(1.0, std::asinh(inputLuminance / softening) /
-                              denominator) *
-            (65535.0 * kTargetHighlight);
+            std::min(kOutputLuminanceCeiling, mappedLuminance) * 65535.0;
         const double ratio = outputLuminance / inputLuminance;
 
         // Suppress unstable chroma in the deepest shadows while retaining full
         // star and Milky Way color once the signal clears roughly 5% of range.
-        const double chromaRetention = std::clamp(normalized * 20.0, 0.0, 1.0);
+        double chromaRetention = std::clamp(normalized * 20.0, 0.0, 1.0);
+        const std::array<double, 3> scaled = {
+            shifted[0] * ratio,
+            shifted[1] * ratio,
+            shifted[2] * ratio
+        };
+        // A linked luminance curve can still push one highly saturated color
+        // channel beyond 16-bit even when luminance has headroom. First form
+        // the shadow-stabilized RGB triplet, then begin with one common
+        // highlight scale. A soft shoulder above 90% preserves hue and remains
+        // monotonic; a bounded second step below handles colors that cannot fit
+        // without losing too much luminance.
+        std::array<double, 3> candidate = {};
         for (size_t channel = 0; channel < 3; ++channel) {
-            const double scaled = shifted[channel] * ratio;
-            const double value =
-                outputLuminance + (scaled - outputLuminance) * chromaRetention;
-            output[base + channel] = clampToUint16(value);
+            candidate[channel] =
+                outputLuminance +
+                (scaled[channel] - outputLuminance) * chromaRetention;
+        }
+        constexpr double kHighlightKnee = 65535.0 * 0.90;
+        constexpr double kChannelCeiling = 65535.0 * 0.995;
+        const double maximumChannel = *std::max_element(
+            candidate.begin(), candidate.end());
+        double huePreservingScale = 1.0;
+        if (maximumChannel > kHighlightKnee) {
+            const double shoulder = kChannelCeiling - kHighlightKnee;
+            const double compressedMaximum = kHighlightKnee + shoulder *
+                (1.0 - std::exp(
+                    -(maximumChannel - kHighlightKnee) / shoulder));
+            huePreservingScale = compressedMaximum / maximumChannel;
+        }
+
+        // Fully hue-preserving compression can make an extremely saturated
+        // red core darker than its neutral halo: high luminance and pure red
+        // cannot both fit inside linear sRGB. Retain at least 65% of the mapped
+        // luminance, then reduce only the remaining out-of-gamut chroma. This
+        // avoids both a dark center and the nearly white result produced by
+        // preserving 100% luminance at any cost.
+        constexpr double kMinimumLuminanceRetention = 0.65;
+        const double baseScale = std::max(
+            huePreservingScale, kMinimumLuminanceRetention);
+        for (double& channel : candidate) channel *= baseScale;
+        const double retainedLuminance = outputLuminance * baseScale;
+        double finalChromaRetention = 1.0;
+        for (double channel : candidate) {
+            const double delta = channel - retainedLuminance;
+            if (delta > 0.0) {
+                finalChromaRetention = std::min(
+                    finalChromaRetention,
+                    std::max(0.0, kChannelCeiling - retainedLuminance) /
+                        delta);
+            } else if (delta < 0.0) {
+                finalChromaRetention = std::min(
+                    finalChromaRetention, retainedLuminance / -delta);
+            }
+        }
+        finalChromaRetention = std::clamp(
+            finalChromaRetention, 0.0, 1.0);
+        for (size_t channel = 0; channel < 3; ++channel) {
+            output[base + channel] = clampToUint16(
+                retainedLuminance +
+                (candidate[channel] - retainedLuminance) *
+                    finalChromaRetention);
         }
     }
 

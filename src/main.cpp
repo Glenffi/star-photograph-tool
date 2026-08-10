@@ -1403,6 +1403,22 @@ private slots:
                                       " | 星点偏长，检查曝光拖线/像差")
                                 : QString())),
                     5000);
+                const QStringList calibrationWarnings =
+                    worker->calibrationPreflightWarnings();
+                if (m_scene == ProcessingScene::DeepSky &&
+                    !calibrationWarnings.isEmpty()) {
+                    auto* advice = new QMessageBox(
+                        QMessageBox::Information,
+                        QString::fromUtf8("校准素材建议"),
+                        QString::fromUtf8(
+                            "处理已经完成，但校准素材还有可改进之处。"),
+                        QMessageBox::Ok, this);
+                    advice->setInformativeText(
+                        QString::fromUtf8("• ") +
+                        calibrationWarnings.join(QString::fromUtf8("\n• ")));
+                    advice->setAttribute(Qt::WA_DeleteOnClose);
+                    advice->open();
+                }
             } else {
                 QMessageBox::warning(this, "处理失败", worker->errorString());
                 setWorkflowStage(1, QString::fromUtf8("处理失败，请检查素材或参数"));

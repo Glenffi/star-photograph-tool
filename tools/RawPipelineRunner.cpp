@@ -594,7 +594,7 @@ int main(int argc, char* argv[]) {
     worker.wait();
 
     QJsonObject report;
-    report["schemaVersion"] = 16;
+    report["schemaVersion"] = 17;
     report["toolVersion"] = QCoreApplication::applicationVersion();
     report["generatedAt"] = QDateTime::currentDateTimeUtc().toString(Qt::ISODate);
     report["input"] = input;
@@ -617,6 +617,12 @@ int main(int argc, char* argv[]) {
         worker.calibrationClippedHighPixels());
     report["calibrationInvalidFlatPixels"] = QString::number(
         worker.calibrationInvalidFlatPixels());
+    QJsonArray calibrationPreflightWarnings;
+    for (const QString& warning : worker.calibrationPreflightWarnings()) {
+        calibrationPreflightWarnings.append(warning);
+    }
+    report["calibrationPreflightWarnings"] =
+        calibrationPreflightWarnings;
     report["timelapseWindow"] = timelapseWindow;
     report["timelapseStrength"] = timelapseStrength;
     report["timelapseMotionProtection"] = timelapseMotionProtection;
