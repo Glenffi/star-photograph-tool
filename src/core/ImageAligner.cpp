@@ -1020,6 +1020,12 @@ AlignmentMetrics ImageAligner::evaluateTransform(
             outputCell.p95Error = percentile(cellErrors[cell], 0.95);
             outputCell.maxError =
                 *std::max_element(cellErrors[cell].begin(), cellErrors[cell].end());
+            std::vector<double> trimmedErrors = cellErrors[cell];
+            if (trimmedErrors.size() >= 3) {
+                trimmedErrors.erase(std::max_element(
+                    trimmedErrors.begin(), trimmedErrors.end()));
+            }
+            outputCell.trimmedP95Error = percentile(trimmedErrors, 0.95);
         }
         const int row = static_cast<int>(cell) / metrics.gridColumns;
         const int column = static_cast<int>(cell) % metrics.gridColumns;
@@ -1037,7 +1043,11 @@ AlignmentMetrics ImageAligner::evaluateTransform(
     const int requiredMatches = std::min(
         12, static_cast<int>(std::min(refStars.size(), srcStars.size())));
     auto fail = [&](bool condition, const char* reason) {
-        if (condition) metrics.failureReasons.emplace_back(reason);
+        if (condition && std::find(
+                metrics.failureReasons.begin(), metrics.failureReasons.end(),
+                reason) == metrics.failureReasons.end()) {
+            metrics.failureReasons.emplace_back(reason);
+        }
     };
     fail(metrics.matchedStars < requiredMatches, "insufficient-matches");
     fail(metrics.matchCoverage < 0.35, "low-match-coverage");
@@ -1057,7 +1067,8 @@ AlignmentMetrics ImageAligner::evaluateTransform(
     for (const AlignmentGridCell& cell : metrics.gridCells) {
         if (!cell.covered) continue;
         fail(cell.rmsError > 3.0, "cell-rms-above-3px");
-        fail(cell.p95Error > 4.5, "cell-p95-above-4.5px");
+        fail(cell.trimmedP95Error > 4.5,
+             "cell-trimmed-p95-above-4.5px");
     }
     metrics.qualityPassed = metrics.failureReasons.empty();
     return metrics;

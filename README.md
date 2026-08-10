@@ -2,12 +2,12 @@
 
 跨平台 RAW 图像处理软件，专注于星空摄影领域。
 
-> **当前版本**：v0.6.8。核心闭环、带聚合预检的 Bayer 域深空校准、带自动/手动灰点和连续强度的 BCF 改机色彩还原、天地分离、星轨合成、延时图片序列降噪、带保色高光肩部的自适应 Arcsinh 拉伸、天空约束的背景校正、线性多尺度降噪、带中小星去色边的亚像素 Starless/Stars 缩星、低分辨率参数快速预览、轻量 RAW 浏览预览和核心自动化测试已经接入；Windows 仍需实机验证。
+> **当前版本**：v0.6.9。核心闭环、带聚合预检的 Bayer 域深空校准、带自动/手动灰点和连续强度的 BCF 改机色彩还原、天地分离、星轨合成、延时图片序列降噪、带保色高光肩部的自适应 Arcsinh 拉伸、天空约束的背景校正、线性多尺度降噪、带中小星去色边的亚像素 Starless/Stars 缩星、低分辨率参数快速预览、轻量 RAW 浏览预览和核心自动化测试已经接入；Windows 仍需实机验证。
 
 ## 当前已实现
 
 - 多张 RAW 图片叠加堆栈降噪
-- 星点检测、Affine / Homography 自动选择、全画幅 3×3 网格质量门禁
+- 星点检测、Affine / Homography 自动选择、全画幅 3×3 网格质量门禁；稀疏网格的尾差验收允许一个孤立误匹配，但保留原始 P95，且继续受局部 RMS 与全局 RMS/P95 约束
 - 轻量预览帧质量评分、自动参考帧选择与严重失焦/拖星/云层帧保守剔除
 - Average / Median / Kappa-Sigma / Winsorized 堆栈
 - 深空标准校准：批量生成 Master Bias / Dark / Flat，在 Bayer CFA 域校准 Light 后再 AHD 去马赛克
@@ -170,7 +170,7 @@ cmake --build . --config Release
 
 ## 真实 RAW 样片回归
 
-样片默认放在代码目录旁的 `star-photograph-tool-samples`。工具优先识别约定的五类目录，也会自动发现其他包含 RAW 的一级目录。完整模式会逐张执行正式 AHD 解码、星点检测和同目录序列对齐，并在 `build/sample-regression-output` 写入 `report.json` 与检查预览。对齐使用独立于拟合星点的评估星点集，报告 Affine 与 Homography 两个候选模型的 RMS、P95、外圈 P95、匹配覆盖率和 3×3 网格指标。
+样片默认放在代码目录旁的 `star-photograph-tool-samples`。工具优先识别约定的五类目录，也会自动发现其他包含 RAW 的一级目录。完整模式会逐张执行正式 AHD 解码、星点检测和同目录序列对齐，并在 `build/sample-regression-output` 写入 `report.json` 与检查预览。对齐使用独立于拟合星点的评估星点集，报告 Affine 与 Homography 两个候选模型的 RMS、P95、外圈 P95、匹配覆盖率和 3×3 网格指标。局部网格同时保留原始 P95 与去除一个最坏样本后的稳健 P95：前者用于诊断，后者用于避免三颗星网格被一个误匹配直接否决；局部 RMS 和全局门限仍会拒绝成组残差。
 
 ```bash
 # 完整回归

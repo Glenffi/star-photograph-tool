@@ -1444,6 +1444,52 @@ void testAlignmentEstimation() {
               quality.p95Error < 0.1 && quality.gridCoverage >= 0.75,
           "Homography diagnostics should cover the field with low tail error");
 
+    std::vector<StarPoint> sparseEvaluationReference;
+    std::vector<StarPoint> sparseEvaluationSource;
+    for (int row = 0; row < 3; ++row) {
+        for (int column = 0; column < 3; ++column) {
+            for (int sample = 0; sample < 3; ++sample) {
+                StarPoint point;
+                point.x = column * (800.0 / 3.0) + 55.0 + sample * 32.0;
+                point.y = row * 200.0 + 45.0 + sample * 28.0;
+                sparseEvaluationReference.push_back(point);
+                point.x -= 12.5;
+                point.y += 7.25;
+                sparseEvaluationSource.push_back(point);
+            }
+        }
+    }
+    // One false local match used to make a three-star cell's P95 equal its
+    // maximum and veto an otherwise sub-pixel 27-star evaluation.
+    sparseEvaluationSource[0].x += 5.0;
+    AlignmentOptions sparseOptions;
+    sparseOptions.imageWidth = 800;
+    sparseOptions.imageHeight = 600;
+    sparseOptions.allowHomography = false;
+    sparseOptions.evaluationReferenceStars = &sparseEvaluationReference;
+    sparseOptions.evaluationSourceStars = &sparseEvaluationSource;
+    check(aligner.align(reference, source, transform, &quality, sparseOptions),
+          "One sparse-cell false match should not reject a precise global transform");
+    const bool retainedRawOutlier = std::any_of(
+        quality.gridCells.begin(), quality.gridCells.end(),
+        [](const AlignmentGridCell& cell) {
+            return cell.p95Error > 4.5 && cell.trimmedP95Error < 0.1;
+        });
+    check(retainedRawOutlier,
+          "Alignment diagnostics should retain raw and one-outlier-trimmed cell tails");
+
+    std::vector<StarPoint> locallyBrokenSource = sparseEvaluationSource;
+    locallyBrokenSource[1].x += 5.0;
+    sparseOptions.evaluationSourceStars = &locallyBrokenSource;
+    check(!aligner.align(reference, source, transform, &quality, sparseOptions),
+          "Two bad matches in one sparse cell should still reject the transform");
+    check(std::find(
+              quality.affineCandidate.failureReasons.begin(),
+              quality.affineCandidate.failureReasons.end(),
+              "cell-rms-above-3px") !=
+              quality.affineCandidate.failureReasons.end(),
+          "Repeated local residuals should fail the existing cell RMS gate");
+
     std::vector<StarPoint> concentratedReference;
     std::vector<StarPoint> concentratedSource;
     for (int row = 0; row < 5; ++row) {

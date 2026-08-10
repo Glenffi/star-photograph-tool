@@ -33,6 +33,10 @@ struct AlignmentGridCell {
     double rmsError = 0.0;
     double medianError = 0.0;
     double p95Error = 0.0;
+    // Local cells often contain fewer than 20 stars, where a conventional P95
+    // is simply the maximum. Ignore one worst match for the acceptance metric
+    // so one false detection cannot veto an otherwise precise full-frame fit.
+    double trimmedP95Error = 0.0;
     double maxError = 0.0;
     bool eligible = false;
     bool covered = false;
