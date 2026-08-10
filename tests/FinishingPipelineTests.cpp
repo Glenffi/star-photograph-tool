@@ -143,6 +143,38 @@ void testEnabledStagesRunInWorkerOrder() {
            "enabled stages must run in the same order as ProcessingWorker");
 }
 
+void testStretchReceivesSkyMask() {
+    constexpr int width = 32;
+    constexpr int height = 32;
+    std::vector<uint16_t> input(static_cast<size_t>(width) * height * 3);
+    for (int y = 0; y < height; ++y) {
+        for (int x = 0; x < width; ++x) {
+            const size_t base =
+                (static_cast<size_t>(y) * width + x) * 3;
+            input[base] = static_cast<uint16_t>(5000 + y * 20);
+            input[base + 1] = static_cast<uint16_t>(2600 + y * 10);
+            input[base + 2] = static_cast<uint16_t>(1400 + y * 6);
+        }
+    }
+    const std::vector<uint8_t> allGroundMask(
+        static_cast<size_t>(width) * height, 0);
+    std::vector<uint16_t> expected;
+    expect(AutoOptimizeEngine::stretchRgb(
+               input, width, height, expected, &allGroundMask),
+           "masked stretch fixture should produce a direct reference");
+
+    std::vector<uint16_t> actual = input;
+    FinishingOptions options;
+    options.skyGroundSeparation = true;
+    options.stretchEnabled = true;
+    FinishingResult result;
+    expect(FinishingPipeline::process(
+               actual, width, height, &allGroundMask, options, result),
+           "finishing pipeline should process a masked stretch");
+    expect(actual == expected,
+           "finishing pipeline must pass the sky mask to background correction");
+}
+
 } // namespace
 
 int main() {
@@ -151,6 +183,7 @@ int main() {
     testSkyMaskIsRequiredAndSizedExactly();
     testPreCancellationStopsBeforeWork();
     testEnabledStagesRunInWorkerOrder();
+    testStretchReceivesSkyMask();
 
     if (failures != 0) {
         std::cerr << failures << " finishing pipeline test(s) failed\n";

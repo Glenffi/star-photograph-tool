@@ -134,6 +134,16 @@ public:
                            std::vector<uint16_t>& dst);
 
     /**
+     * @brief Apply the same inverse-mapped transform to an 8-bit mask.
+     *
+     * This keeps per-frame sky validity in the same coordinates as an aligned
+     * RGB frame, which is required to keep shifted terrain out of a sky stack.
+     */
+    bool applyTransformMask(const std::vector<uint8_t>& src, int w, int h,
+                            const AlignmentTransform& t,
+                            std::vector<uint8_t>& dst);
+
+    /**
      * Finds a conservative axis-aligned rectangle covered by every accepted
      * source-to-reference transform. The result excludes resampling borders.
      */

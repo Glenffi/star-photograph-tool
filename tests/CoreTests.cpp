@@ -165,6 +165,14 @@ void testStacking() {
               result == std::vector<uint16_t>({110, 210, 1100, 1200}),
           "Median ground mode should reject transient foreground outliers");
 
+    const std::vector<std::vector<uint16_t>> filteredSky = {{1000}, {0}};
+    const std::vector<std::vector<uint16_t>> fixedGround = {{5000}, {5000}};
+    check(engine.stackWithMask(
+              filteredSky, fixedGround, 1, 1,
+              StackingEngine::Average, 2.5, {255}, result) &&
+              result == std::vector<uint16_t>({1000}),
+          "Sky stacking should ignore a shifted-ground sample marked as zero");
+
     const std::vector<std::vector<uint16_t>> rgbFrames = {
         {100, 200, 300, 0, 500, 600},
         {110, 210, 310, 400, 510, 610},
@@ -524,6 +532,25 @@ void testImageBufferUtils() {
               processed[5] == 3289,
           "Sky/ground RGB blending should feather the horizon with integer rounding");
 
+    std::vector<uint16_t> alignedSkySamples = {
+        100, 200, 300,
+        400, 500, 600,
+        700, 800, 900
+    };
+    const std::vector<uint8_t> alignedSourceMask = {0, 127, 255};
+    const std::vector<uint8_t> referenceMask = {255, 255, 0};
+    check(ImageBufferUtils::excludeShiftedGroundInPlace(
+              alignedSkySamples, alignedSourceMask, referenceMask, 3, 1),
+          "Aligned sky filtering should accept exact RGB and mask buffers");
+    check(alignedSkySamples == std::vector<uint16_t>({
+              0, 0, 0, 0, 0, 0, 700, 800, 900}),
+          "Only hard-valid source sky may enter a hard-valid reference sky pixel");
+    const std::vector<uint16_t> preservedAligned = alignedSkySamples;
+    check(!ImageBufferUtils::excludeShiftedGroundInPlace(
+              alignedSkySamples, {0}, referenceMask, 3, 1) &&
+              alignedSkySamples == preservedAligned,
+          "Failed aligned sky filtering should leave RGB unchanged");
+
     const std::vector<uint16_t> resizeSource = {
         0, 1000, 2000,       10000, 11000, 12000,
         20000, 21000, 22000, 30000, 31000, 32000
@@ -816,6 +843,92 @@ void testRgbAutoOptimize() {
     check(maximumAdjacentJump < 64,
           "Spatial background interpolation should remain continuous at grid edges");
 
+    // A stepped synthetic ridge used to contaminate the coarse low-percentile
+    // grid: cells containing dark land estimated a lower sky background and
+    // left a terrain-shaped residual halo. Sky-only sampling must make the
+    // correction independent of the ridge while preserving land bit-exact.
+    constexpr int ridgeWidth = 192;
+    constexpr int ridgeHeight = 128;
+    std::vector<uint16_t> ridgeRgb(
+        static_cast<size_t>(ridgeWidth) * ridgeHeight * 3);
+    std::vector<uint8_t> ridgeSkyMask(
+        static_cast<size_t>(ridgeWidth) * ridgeHeight);
+    for (int y = 0; y < ridgeHeight; ++y) {
+        for (int x = 0; x < ridgeWidth; ++x) {
+            const int ridgeY = x < ridgeWidth / 2 ? 72 : 96;
+            const bool sky = y < ridgeY;
+            const size_t pixel = static_cast<size_t>(y) * ridgeWidth + x;
+            const size_t base = pixel * 3;
+            ridgeSkyMask[pixel] = sky ? 255 : 0;
+            if (sky) {
+                ridgeRgb[base] = static_cast<uint16_t>(7600 + y * 18);
+                ridgeRgb[base + 1] = static_cast<uint16_t>(4300 + y * 10);
+                ridgeRgb[base + 2] = static_cast<uint16_t>(2700 + y * 6);
+            } else {
+                ridgeRgb[base] = static_cast<uint16_t>(900 + x % 17);
+                ridgeRgb[base + 1] = static_cast<uint16_t>(1100 + x % 13);
+                ridgeRgb[base + 2] = static_cast<uint16_t>(1300 + x % 11);
+            }
+        }
+    }
+    const std::vector<uint16_t> ridgeInput = ridgeRgb;
+    check(AutoOptimizeEngine::neutralizeBackgroundRgb(
+              ridgeRgb, ridgeWidth, ridgeHeight,
+              neutralized, &ridgeSkyMask),
+          "Sky-masked background neutralization should process a nightscape ridge");
+    const auto ridgeIndex = [&](int x, int y, int channel) {
+        return (static_cast<size_t>(y) * ridgeWidth + x) * 3 + channel;
+    };
+    int ridgeSkyDifference = 0;
+    for (int channel = 0; channel < 3; ++channel) {
+        ridgeSkyDifference = std::max(
+            ridgeSkyDifference,
+            std::abs(static_cast<int>(neutralized[
+                         ridgeIndex(48, 60, channel)]) -
+                     static_cast<int>(neutralized[
+                         ridgeIndex(144, 60, channel)])));
+    }
+    check(ridgeSkyDifference < 96,
+          "Sky correction should not inherit a stepped terrain silhouette "
+          "(difference=" + std::to_string(ridgeSkyDifference) + ")");
+    bool protectedGroundExact = true;
+    for (int y = 96; y < ridgeHeight; ++y) {
+        for (int x = 0; x < ridgeWidth; ++x) {
+            for (int channel = 0; channel < 3; ++channel) {
+                const size_t index = ridgeIndex(x, y, channel);
+                protectedGroundExact = protectedGroundExact &&
+                    neutralized[index] == ridgeInput[index];
+            }
+        }
+    }
+    check(protectedGroundExact,
+          "Sky background correction should leave fully protected ground bit-exact");
+    const std::vector<uint8_t> allGroundMask(
+        static_cast<size_t>(ridgeWidth) * ridgeHeight, 0);
+    check(AutoOptimizeEngine::neutralizeBackgroundRgb(
+              ridgeRgb, ridgeWidth, ridgeHeight,
+              neutralized, &allGroundMask) && neutralized == ridgeRgb,
+          "An all-ground mask should safely skip background correction");
+    constexpr int tinyWidth = 16;
+    constexpr int tinyHeight = 12;
+    const std::vector<uint16_t> tinyRgb(
+        static_cast<size_t>(tinyWidth) * tinyHeight * 3, 4096);
+    const std::vector<uint8_t> tinyGroundMask(
+        static_cast<size_t>(tinyWidth) * tinyHeight, 0);
+    check(AutoOptimizeEngine::neutralizeBackgroundRgb(
+              tinyRgb, tinyWidth, tinyHeight,
+              neutralized, &tinyGroundMask) && neutralized == tinyRgb,
+          "Small-image fallback should respect an all-ground mask");
+    const std::vector<uint8_t> wrongOptimizeMask(3, 255);
+    const std::vector<uint16_t> preservedNeutralized = {17, 23, 42};
+    neutralized = preservedNeutralized;
+    check(!AutoOptimizeEngine::neutralizeBackgroundRgb(
+              ridgeRgb, ridgeWidth, ridgeHeight,
+              neutralized, &wrongOptimizeMask) &&
+              neutralized == preservedNeutralized,
+          "Background neutralization should reject a mismatched sky mask "
+          "without changing output");
+
     constexpr int detailWidth = 16;
     constexpr int detailHeight = 24;
     std::vector<uint16_t> detailRgb(detailWidth * detailHeight * 3);
@@ -885,6 +998,68 @@ void testRgbTransform() {
           "Identity RGB transform should preserve valid samples and border policy");
     check(!aligner.applyTransformRgb({1, 2, 3}, width, height, identity, transformed),
           "Interleaved RGB transform should reject a truncated buffer");
+
+    const std::vector<uint8_t> mask = {0, 64, 128, 192, 224, 255};
+    std::vector<uint8_t> transformedMask;
+    check(aligner.applyTransformMask(
+              mask, width, height, identity, transformedMask) &&
+              transformedMask == std::vector<uint8_t>({0, 64, 0, 0, 0, 0}),
+          "Mask transform should match RGB inverse mapping and border policy");
+    const std::vector<uint8_t> preservedMask = {17};
+    transformedMask = preservedMask;
+    check(!aligner.applyTransformMask(
+              {1, 2, 3}, width, height, identity, transformedMask) &&
+              transformedMask == preservedMask,
+          "Failed mask transform should leave output unchanged");
+
+    constexpr int maskWidth = 5;
+    constexpr int maskHeight = 4;
+    const std::vector<uint8_t> confidenceMask = {
+        0, 0, 64, 255, 255,
+        0, 32, 128, 255, 255,
+        0, 96, 192, 255, 255,
+        0, 128, 224, 255, 255
+    };
+    std::vector<uint16_t> confidence16(confidenceMask.size());
+    std::transform(
+        confidenceMask.begin(), confidenceMask.end(), confidence16.begin(),
+        [](uint8_t value) { return static_cast<uint16_t>(value) * 257U; });
+    auto checkMaskMatchesImageTransform = [&](AlignmentTransform transform,
+                                               const std::string& label) {
+        std::vector<uint8_t> maskOutput;
+        std::vector<uint16_t> imageOutput;
+        bool matched = aligner.applyTransformMask(
+                           confidenceMask, maskWidth, maskHeight,
+                           transform, maskOutput) &&
+            aligner.applyTransform(
+                confidence16, maskWidth, maskHeight, transform, imageOutput) &&
+            maskOutput.size() == imageOutput.size();
+        for (size_t index = 0; matched && index < maskOutput.size(); ++index) {
+            const int imageValue = static_cast<int>(
+                std::lround(imageOutput[index] / 257.0));
+            matched = std::abs(imageValue - maskOutput[index]) <= 1;
+        }
+        check(matched, label);
+    };
+    AlignmentTransform translated;
+    translated.c = 0.35;
+    translated.f = -0.2;
+    checkMaskMatchesImageTransform(
+        translated,
+        "Translated mask and image transforms should sample the same coordinates");
+    AlignmentTransform projective;
+    projective.a = 0.999;
+    projective.b = 0.002;
+    projective.c = 0.2;
+    projective.d = -0.001;
+    projective.e = 1.001;
+    projective.f = 0.1;
+    projective.g = 0.0004;
+    projective.h = -0.0003;
+    projective.model = AlignmentModel::Homography;
+    checkMaskMatchesImageTransform(
+        projective,
+        "Homography mask and image transforms should sample the same coordinates");
 }
 
 void testMemoryEstimator() {

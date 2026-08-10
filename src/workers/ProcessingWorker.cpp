@@ -1025,22 +1025,75 @@ void ProcessingWorker::run() {
                   referenceDetectedStars.begin() + referenceFitCount,
                   referenceDetectedStars.end())
             : referenceDetectedStars;
+
+    // Build the reference horizon before aligning source frames. The same
+    // mask must follow every accepted star transform; otherwise terrain that
+    // moves with the sky-aligned RGB can leak above the final horizon.
+    std::vector<uint8_t> mask;
+    std::vector<uint8_t> stackSkyValidityMask;
+    std::vector<uint8_t> stackSkyEligibilityMask;
+    if (m_params.skyGroundSepEnabled) {
+        emit stageMessage("生成天地蒙版...");
+        bool maskReady = false;
+        if (m_params.skyGroundMode == SkyGroundMask::AutoDetect) {
+            QImage preview;
+            if (loadMaskPreview(m_selectedReferenceFrame, preview)) {
+                maskReady = SkyGroundMask::autoDetectPreview(
+                    preview, width, height, mask, m_params.featherRadius);
+            }
+            if (maskReady) {
+                m_skyGroundMaskSource = "embedded-preview";
+            } else {
+                maskReady = SkyGroundMask::autoDetect(
+                    referenceLuminance, width, height, mask,
+                    m_params.featherRadius);
+                if (maskReady) m_skyGroundMaskSource = "linear-fallback";
+            }
+        } else {
+            maskReady = SkyGroundMask::loadUserMask(
+                m_params.userMaskPath.toStdString(), width, height, mask,
+                m_params.featherRadius);
+            if (maskReady) m_skyGroundMaskSource = "user-mask";
+        }
+        if (!maskReady) {
+            m_errorString = m_params.skyGroundMode == SkyGroundMask::AutoDetect
+                ? "天地蒙版自动检测失败" : "无法加载用户蒙版";
+            return;
+        }
+        const double maskSum = std::accumulate(mask.begin(), mask.end(), 0.0);
+        m_skyGroundSkyFraction = maskSum / (255.0 * mask.size());
+        stackSkyValidityMask.resize(mask.size());
+        stackSkyEligibilityMask.resize(mask.size());
+        std::transform(
+            mask.begin(), mask.end(), stackSkyValidityMask.begin(),
+            [](uint8_t value) { return value >= 224 ? 255 : 0; });
+        std::transform(
+            mask.begin(), mask.end(), stackSkyEligibilityMask.begin(),
+            [](uint8_t value) { return value >= 16 ? 255 : 0; });
+        if (!m_params.skyGroundMaskOutputPath.isEmpty()) {
+            const QImage borrowedMask(mask.data(), width, height, width,
+                                      QImage::Format_Grayscale8);
+            if (!borrowedMask.copy().save(m_params.skyGroundMaskOutputPath)) {
+                m_errorString = "无法保存天地蒙版诊断图";
+                return;
+            }
+        }
+    }
     emit progress(20);
 
     // Full-resolution aligned frames are cached on disk. Keeping both decoded
     // and aligned sequences resident makes peak RAM grow linearly twice and is
     // unsafe for ordinary 30-60 MP sequences.
-    if (!alignedCache.append(referenceImage.data) ||
-        (m_params.skyGroundSepEnabled && !originalCache.append(referenceImage.data))) {
+    if ((m_params.skyGroundSepEnabled &&
+         !originalCache.append(referenceImage.data)) ||
+        !alignedCache.append(referenceImage.data)) {
         m_errorString = "无法写入参考帧临时缓存（请检查磁盘空间）";
         return;
     }
     referenceImage.data.clear();
     referenceImage.data.shrink_to_fit();
-    if (!m_params.skyGroundSepEnabled) {
-        referenceLuminance.clear();
-        referenceLuminance.shrink_to_fit();
-    }
+    referenceLuminance.clear();
+    referenceLuminance.shrink_to_fit();
 
     emit stageMessage("逐帧加载与对齐...");
     ImageAligner aligner;
@@ -1230,8 +1283,23 @@ void ProcessingWorker::run() {
         } else if (m_params.photometricNormalizationEnabled) {
             ++m_photometricSkippedFrameCount;
         }
-        if (!alignedCache.append(alignedFrame) ||
-            (m_params.skyGroundSepEnabled && !originalCache.append(sourceImage.data))) {
+        if (m_params.skyGroundSepEnabled) {
+            if (!originalCache.append(sourceImage.data)) {
+                m_errorString = "无法写入原位地景临时缓存（请检查磁盘空间）";
+                return;
+            }
+            std::vector<uint8_t> alignedSourceMask;
+            if (!aligner.applyTransformMask(
+                    stackSkyValidityMask, width, height, transform,
+                    alignedSourceMask) ||
+                !ImageBufferUtils::excludeShiftedGroundInPlace(
+                    alignedFrame, alignedSourceMask, stackSkyEligibilityMask,
+                    width, height)) {
+                m_errorString = "无法约束天空对齐中的地景样本";
+                return;
+            }
+        }
+        if (!alignedCache.append(alignedFrame)) {
             m_errorString = "无法写入对齐临时缓存（请检查磁盘空间）";
             return;
         }
@@ -1272,45 +1340,7 @@ void ProcessingWorker::run() {
     const StackingEngine::GroundMethod groundMethod =
         groundMethodFromName(m_params.groundStackMethod);
     std::vector<uint16_t> resultRgb;
-    std::vector<uint8_t> mask;
     if (m_params.skyGroundSepEnabled) {
-        emit stageMessage("生成天地蒙版...");
-        bool maskReady = false;
-        if (m_params.skyGroundMode == SkyGroundMask::AutoDetect) {
-            QImage preview;
-            if (loadMaskPreview(m_selectedReferenceFrame, preview)) {
-                maskReady = SkyGroundMask::autoDetectPreview(
-                    preview, width, height, mask, m_params.featherRadius);
-            }
-            if (maskReady) {
-                m_skyGroundMaskSource = "embedded-preview";
-            } else {
-                maskReady = SkyGroundMask::autoDetect(
-                    referenceLuminance, width, height, mask,
-                    m_params.featherRadius);
-                if (maskReady) m_skyGroundMaskSource = "linear-fallback";
-            }
-        } else {
-            maskReady = SkyGroundMask::loadUserMask(
-                m_params.userMaskPath.toStdString(), width, height, mask,
-                m_params.featherRadius);
-            if (maskReady) m_skyGroundMaskSource = "user-mask";
-        }
-        if (!maskReady) {
-            m_errorString = m_params.skyGroundMode == SkyGroundMask::AutoDetect
-                ? "天地蒙版自动检测失败" : "无法加载用户蒙版";
-            return;
-        }
-        const double maskSum = std::accumulate(mask.begin(), mask.end(), 0.0);
-        m_skyGroundSkyFraction = maskSum / (255.0 * mask.size());
-        if (!m_params.skyGroundMaskOutputPath.isEmpty()) {
-            const QImage borrowedMask(mask.data(), width, height, width,
-                                      QImage::Format_Grayscale8);
-            if (!borrowedMask.copy().save(m_params.skyGroundMaskOutputPath)) {
-                m_errorString = "无法保存天地蒙版诊断图";
-                return;
-            }
-        }
         emit stageMessage("天地分离堆栈...");
     }
     QElapsedTimer stackingTimer;

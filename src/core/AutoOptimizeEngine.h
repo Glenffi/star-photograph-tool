@@ -46,12 +46,16 @@ public:
 
     // Removes a robust additive background cast, then applies one linked
     // luminance curve to RGB so star colors and white balance remain coherent.
+    // In a nightscape, skyMask keeps dark terrain out of the coarse background
+    // model and smoothly feathers the correction away from protected land.
     static bool stretchRgb(const std::vector<uint16_t>& src, int w, int h,
-                           std::vector<uint16_t>& dst);
+                           std::vector<uint16_t>& dst,
+                           const std::vector<uint8_t>* skyMask = nullptr);
 
     static bool neutralizeBackgroundRgb(const std::vector<uint16_t>& src,
                                         int w, int h,
-                                        std::vector<uint16_t>& dst);
+                                        std::vector<uint16_t>& dst,
+                                        const std::vector<uint8_t>* skyMask = nullptr);
 
     // Restores a conventional color balance for BCF/astronomy-modified
     // cameras. A robust neutral sky sample is measured on linear RGB before

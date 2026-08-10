@@ -221,4 +221,31 @@ bool blendSkyGroundInPlace(std::vector<uint16_t>& processedSky,
     return true;
 }
 
+bool excludeShiftedGroundInPlace(
+    std::vector<uint16_t>& alignedRgb,
+    const std::vector<uint8_t>& alignedSourceSkyMask,
+    const std::vector<uint8_t>& referenceSkyMask,
+    int width, int height) {
+    size_t pixelCount = 0;
+    if (!checkedPixelCount(width, height, pixelCount) ||
+        alignedRgb.size() != pixelCount * 3 ||
+        alignedSourceSkyMask.size() != pixelCount ||
+        referenceSkyMask.size() != pixelCount) {
+        return false;
+    }
+
+    constexpr uint8_t kValidSky = 128;
+    for (size_t pixel = 0; pixel < pixelCount; ++pixel) {
+        if (referenceSkyMask[pixel] < kValidSky ||
+            alignedSourceSkyMask[pixel] >= kValidSky) {
+            continue;
+        }
+        const size_t base = pixel * 3;
+        alignedRgb[base] = 0;
+        alignedRgb[base + 1] = 0;
+        alignedRgb[base + 2] = 0;
+    }
+    return true;
+}
+
 } // namespace ImageBufferUtils

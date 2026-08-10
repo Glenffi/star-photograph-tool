@@ -41,4 +41,15 @@ bool blendSkyGroundInPlace(std::vector<uint16_t>& processedSky,
                            const std::vector<uint8_t>& skyMask,
                            int width, int height);
 
+// Sky alignment moves terrain relative to the reference horizon. These masks
+// are hard maps separate from the feathered blend mask: the source map marks
+// reliable sky samples, while the reference map marks every output pixel where
+// sky contributes visibly. Invalid source samples are zeroed so ignore-zero
+// stacking cannot build a displaced terrain silhouette.
+bool excludeShiftedGroundInPlace(
+    std::vector<uint16_t>& alignedRgb,
+    const std::vector<uint8_t>& alignedSourceSkyMask,
+    const std::vector<uint8_t>& referenceSkyMask,
+    int width, int height);
+
 } // namespace ImageBufferUtils

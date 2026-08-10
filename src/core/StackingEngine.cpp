@@ -229,8 +229,9 @@ bool StackingEngine::stackWithMask(
         }
     }
 
-    // Each output pixel is stacked independently, so masking every input frame
-    // first only duplicates memory. Stack both sources once, then blend them.
+    // The worker has already zeroed terrain samples whose transformed source
+    // mask does not cover the reference sky. Ignore those per-frame invalid
+    // samples here, then use the reference mask only for the final soft blend.
     std::vector<uint16_t> skyResult;
     if (!stack(images, width, height, method, kappa, skyResult, true)) {
         return false;

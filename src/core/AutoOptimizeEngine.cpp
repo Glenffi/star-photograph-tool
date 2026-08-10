@@ -65,9 +65,13 @@ static void convertToUint16(const std::vector<float>& src, std::vector<uint16_t>
 
 bool AutoOptimizeEngine::neutralizeBackgroundRgb(
     const std::vector<uint16_t>& src, int w, int h,
-    std::vector<uint16_t>& dst) {
+    std::vector<uint16_t>& dst,
+    const std::vector<uint8_t>* skyMask) {
     size_t pixelCount = 0;
-    if (!rgbPixelCount(src, w, h, pixelCount)) return false;
+    if (!rgbPixelCount(src, w, h, pixelCount) ||
+        (skyMask && skyMask->size() != pixelCount)) {
+        return false;
+    }
 
     if (w >= 32 && h >= 32) {
         const int gridColumns = std::clamp(w / 256, 6, 16);
@@ -76,6 +80,7 @@ bool AutoOptimizeEngine::neutralizeBackgroundRgb(
             static_cast<size_t>(gridColumns) * gridRows;
         std::array<std::vector<uint16_t>, 3> grid;
         for (auto& channel : grid) channel.resize(gridSize);
+        std::vector<uint8_t> validGridCell(gridSize, 0);
 
         // A low percentile in each cell rejects stars and most bright subject
         // detail. The resulting coarse surface follows additive sky glow and
@@ -98,8 +103,13 @@ bool AutoOptimizeEngine::neutralizeBackgroundRgb(
                 for (int y = y0; y < y1; ++y) {
                     for (int x = x0; x < x1; ++x, ++position) {
                         if (position % sampleStep != 0) continue;
-                        const size_t base =
-                            (static_cast<size_t>(y) * w + x) * 3;
+                        const size_t pixel =
+                            static_cast<size_t>(y) * w + x;
+                        // Use only the reliable interior of the sky. The
+                        // feathered boundary is reserved for blending the
+                        // resulting correction, not estimating it.
+                        if (skyMask && (*skyMask)[pixel] < 224) continue;
+                        const size_t base = pixel * 3;
                         for (size_t channel = 0; channel < 3; ++channel) {
                             samples[channel].push_back(src[base + channel]);
                         }
@@ -107,11 +117,56 @@ bool AutoOptimizeEngine::neutralizeBackgroundRgb(
                 }
                 const size_t index =
                     static_cast<size_t>(gy) * gridColumns + gx;
+                if (samples[0].size() < 16) continue;
+                validGridCell[index] = 1;
                 for (size_t channel = 0; channel < 3; ++channel) {
                     grid[channel][index] =
                         percentileValue(std::move(samples[channel]), 20, 100);
                 }
             }
+        }
+
+        if (skyMask) {
+            std::vector<size_t> validIndices;
+            validIndices.reserve(gridSize);
+            for (size_t index = 0; index < gridSize; ++index) {
+                if (validGridCell[index]) validIndices.push_back(index);
+            }
+            // A malformed all-ground mask should not make a previously valid
+            // finishing operation fail or let terrain drive a sky model.
+            // Keep the input unchanged and let the linked curve proceed.
+            if (validIndices.empty()) {
+                dst = src;
+                return true;
+            }
+            // Ground-only grid cells are never sampled. Extend the nearest
+            // valid sky estimate into them so interpolation near the horizon
+            // cannot fall toward zero or inherit a terrain-shaped low value.
+            for (size_t index = 0; index < gridSize; ++index) {
+                if (validGridCell[index]) continue;
+                const int gx = static_cast<int>(index % gridColumns);
+                const int gy = static_cast<int>(index / gridColumns);
+                size_t nearest = validIndices.front();
+                int nearestDistance = std::numeric_limits<int>::max();
+                for (size_t candidate : validIndices) {
+                    const int candidateX =
+                        static_cast<int>(candidate % gridColumns);
+                    const int candidateY =
+                        static_cast<int>(candidate / gridColumns);
+                    const int dx = gx - candidateX;
+                    const int dy = gy - candidateY;
+                    const int distance = dx * dx + dy * dy;
+                    if (distance < nearestDistance) {
+                        nearestDistance = distance;
+                        nearest = candidate;
+                    }
+                }
+                for (size_t channel = 0; channel < 3; ++channel) {
+                    grid[channel][index] = grid[channel][nearest];
+                }
+            }
+        } else {
+            std::fill(validGridCell.begin(), validGridCell.end(), 1);
         }
 
         // Median smoothing makes the surface robust to an isolated bright
@@ -141,7 +196,15 @@ bool AutoOptimizeEngine::neutralizeBackgroundRgb(
 
         std::array<uint16_t, 3> channelBackground{};
         for (size_t channel = 0; channel < 3; ++channel) {
-            channelBackground[channel] = medianValue(smoothGrid[channel]);
+            std::vector<uint16_t> validBackgrounds;
+            validBackgrounds.reserve(gridSize);
+            for (size_t index = 0; index < gridSize; ++index) {
+                if (validGridCell[index]) {
+                    validBackgrounds.push_back(smoothGrid[channel][index]);
+                }
+            }
+            channelBackground[channel] =
+                medianValue(std::move(validBackgrounds));
         }
         // Never invent signal in a weak channel. The lowest channel background
         // is the neutral residual; stronger additive casts are subtracted.
@@ -189,7 +252,19 @@ bool AutoOptimizeEngine::neutralizeBackgroundRgb(
                             xFraction;
                     const double model =
                         top * (1.0 - yFraction) + bottom * yFraction;
-                    const double correction = std::max(0.0, model - target);
+                    double correction = std::max(0.0, model - target);
+                    if (skyMask) {
+                        const double t = (*skyMask)[
+                            static_cast<size_t>(y) * w + x] / 255.0;
+                        // Ease into and out of the feathered boundary. A
+                        // smoothstep has zero slope at both ends, reducing the
+                        // chance of a visible chroma contour at the ridge. A
+                        // conservative strength retains real atmospheric glow
+                        // instead of forcing a nightscape horizon to neutral.
+                        constexpr double kNightscapeStrength = 0.6;
+                        const double opacity = t * t * (3.0 - 2.0 * t);
+                        correction *= opacity * kNightscapeStrength;
+                    }
                     output[base + channel] =
                         clampToUint16(src[base + channel] - correction);
                 }
@@ -201,9 +276,10 @@ bool AutoOptimizeEngine::neutralizeBackgroundRgb(
 
     // Prefer the upper 75% of a nightscape so a dark foreground does not drive
     // sky color estimation. This is also harmless for all-sky/deep-sky frames.
-    const size_t regionPixels =
-        static_cast<size_t>(w) *
-        std::max<size_t>(1, static_cast<size_t>(h) * 3 / 4);
+    const size_t regionPixels = skyMask
+        ? pixelCount
+        : static_cast<size_t>(w) *
+              std::max<size_t>(1, static_cast<size_t>(h) * 3 / 4);
     constexpr size_t kMaxSamples = 262144;
     const size_t step = std::max<size_t>(
         1, (regionPixels - 1) / kMaxSamples + 1);
@@ -213,10 +289,14 @@ bool AutoOptimizeEngine::neutralizeBackgroundRgb(
     indices.reserve(std::min(regionPixels, kMaxSamples + 1));
     luminanceSamples.reserve(indices.capacity());
     for (size_t pixel = 0; pixel < regionPixels; pixel += step) {
+        if (skyMask && (*skyMask)[pixel] < 224) continue;
         indices.push_back(pixel);
         luminanceSamples.push_back(luminanceAt(src, pixel));
     }
-    if (indices.empty()) return false;
+    if (indices.empty()) {
+        dst = src;
+        return true;
+    }
 
     const uint16_t low = percentileValue(luminanceSamples, 15, 100);
     const uint16_t high = percentileValue(luminanceSamples, 65, 100);
@@ -261,11 +341,16 @@ bool AutoOptimizeEngine::neutralizeBackgroundRgb(
     std::vector<uint16_t> output(src.size());
     for (size_t pixel = 0; pixel < pixelCount; ++pixel) {
         const size_t base = pixel * 3;
+        double opacity = 1.0;
+        if (skyMask) {
+            const double t = (*skyMask)[pixel] / 255.0;
+            constexpr double kNightscapeStrength = 0.6;
+            opacity = t * t * (3.0 - 2.0 * t) * kNightscapeStrength;
+        }
         for (size_t channel = 0; channel < 3; ++channel) {
-            const int32_t corrected =
-                static_cast<int32_t>(src[base + channel]) - offsets[channel];
-            output[base + channel] = static_cast<uint16_t>(
-                std::clamp(corrected, 0, 65535));
+            output[base + channel] = clampToUint16(
+                static_cast<double>(src[base + channel]) -
+                offsets[channel] * opacity);
         }
     }
     dst = std::move(output);
@@ -530,12 +615,19 @@ bool AutoOptimizeEngine::enhanceGroundDetail(
 
 bool AutoOptimizeEngine::stretchRgb(const std::vector<uint16_t>& src,
                                     int w, int h,
-                                    std::vector<uint16_t>& dst) {
+                                    std::vector<uint16_t>& dst,
+                                    const std::vector<uint8_t>* skyMask) {
     size_t pixelCount = 0;
-    if (!rgbPixelCount(src, w, h, pixelCount)) return false;
+    if (!rgbPixelCount(src, w, h, pixelCount) ||
+        (skyMask && skyMask->size() != pixelCount)) {
+        return false;
+    }
 
     std::vector<uint16_t> neutralized;
-    if (!neutralizeBackgroundRgb(src, w, h, neutralized)) return false;
+    if (!neutralizeBackgroundRgb(
+            src, w, h, neutralized, skyMask)) {
+        return false;
+    }
 
     constexpr size_t kMaxSamples = 262144;
     const size_t step =

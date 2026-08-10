@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(StarProcessor VERSION 0.6.6 LANGUAGES CXX)
+project(StarProcessor VERSION 0.6.7 LANGUAGES CXX)
 
 include(CTest)
 option(BUILD_SAMPLE_TOOLS "Build local RAW sample regression tools" ON)

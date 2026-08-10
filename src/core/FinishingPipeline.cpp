@@ -118,7 +118,8 @@ bool FinishingPipeline::process(
             if (!beginStage(FinishingStage::Stretch)) return false;
             std::vector<uint16_t> stretched;
             if (!AutoOptimizeEngine::stretchRgb(
-                    rgb, width, height, stretched)) {
+                    rgb, width, height, stretched,
+                    options.skyGroundSeparation ? skyMask : nullptr)) {
                 result.error = "RGB curve stretch failed";
                 return false;
             }

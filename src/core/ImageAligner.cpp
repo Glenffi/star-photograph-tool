@@ -1322,6 +1322,51 @@ bool ImageAligner::applyTransformRgb(const std::vector<uint16_t>& src, int w, in
     return true;
 }
 
+bool ImageAligner::applyTransformMask(const std::vector<uint8_t>& src,
+                                      int w, int h,
+                                      const AlignmentTransform& t,
+                                      std::vector<uint8_t>& dst) {
+    if (w <= 1 || h <= 1 ||
+        static_cast<size_t>(w) > std::numeric_limits<size_t>::max() /
+                                     static_cast<size_t>(h)) {
+        return false;
+    }
+    const size_t pixelCount = static_cast<size_t>(w) * h;
+    if (src.size() != pixelCount) return false;
+
+    AlignmentTransform inverse;
+    if (!invertTransform(t, inverse)) return false;
+
+    std::vector<uint8_t> output(pixelCount, 0);
+    for (int y = 0; y < h; ++y) {
+        for (int x = 0; x < w; ++x) {
+            double sx = 0.0;
+            double sy = 0.0;
+            if (!mapPoint(inverse, x, y, sx, sy) ||
+                sx < 0.0 || sx >= static_cast<double>(w - 1) ||
+                sy < 0.0 || sy >= static_cast<double>(h - 1)) {
+                continue;
+            }
+            const int ix = static_cast<int>(std::floor(sx));
+            const int iy = static_cast<int>(std::floor(sy));
+            const double fx = sx - ix;
+            const double fy = sy - iy;
+            const double top =
+                src[static_cast<size_t>(iy) * w + ix] * (1.0 - fx) +
+                src[static_cast<size_t>(iy) * w + ix + 1] * fx;
+            const double bottom =
+                src[static_cast<size_t>(iy + 1) * w + ix] * (1.0 - fx) +
+                src[static_cast<size_t>(iy + 1) * w + ix + 1] * fx;
+            output[static_cast<size_t>(y) * w + x] =
+                static_cast<uint8_t>(std::clamp(
+                    std::lround(top * (1.0 - fy) + bottom * fy),
+                    0L, 255L));
+        }
+    }
+    dst = std::move(output);
+    return true;
+}
+
 bool ImageAligner::commonValidBounds(
     const std::vector<AlignmentTransform>& transforms,
     int width, int height, AlignmentBounds& bounds) const {
