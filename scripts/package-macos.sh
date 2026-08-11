@@ -186,7 +186,11 @@ hdiutil create \
     -srcfolder "${DMG_ROOT}" \
     -format UDZO \
     -ov "${DMG_PATH}"
-shasum -a 256 "${DMG_PATH}" > "${DMG_PATH}.sha256"
+DMG_FILE="$(basename "${DMG_PATH}")"
+(
+    cd "${DIST_DIR}"
+    shasum -a 256 "${DMG_FILE}" > "${DMG_FILE}.sha256"
+)
 
 echo "macOS package: ${DMG_PATH}"
 echo "Checksum: ${DMG_PATH}.sha256"
