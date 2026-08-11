@@ -1347,7 +1347,8 @@ private slots:
                 setWorkflowStage(1, QString::fromUtf8("处理已取消，可调整参数后重试"));
                 statusBar()->showMessage("处理已取消", 3000);
             } else if (worker->errorString().isEmpty()) {
-                // 成功：缓存堆栈结果
+                // 保留结果用于预览和再次导出。ProcessingWorker 已经把正式
+                // 成片写到输出目录，这里不再额外写无上限的重复 TIFF 缓存。
                 m_cachedStackedData = worker->takeStackedData();
                 m_cachedBeforePreview = worker->takeBeforePreview();
                 m_cachedBeforeBlackPoint = worker->beforePreviewBlackPoint();
@@ -1374,16 +1375,6 @@ private slots:
                 m_lastProcessedSignature = m_runningParamsSignature;
                 m_lastProcessedUpstreamSignature =
                     m_runningUpstreamSignature;
-
-                // 自动保存到缓存目录
-                QSettings settings("StarProcessor", "App");
-                QString cacheDir = settings.value(
-                    "cacheDir", QDir::homePath() + "/StarProcessor/Cache").toString();
-                QDir().mkpath(cacheDir);
-                QString cacheFile = cacheDir + "/" + QDateTime::currentDateTime().toString("yyyyMMdd_hhmmss") + "_cached.tiff";
-                if (!ImageExporter::exportRgb16(m_cachedStackedData, m_cachedWidth, m_cachedHeight, cacheFile)) {
-                    qWarning() << "缓存 TIFF 写入失败:" << cacheFile;
-                }
 
                 showBestAvailableResult();
                 m_toolbar->enableExport(
@@ -1528,7 +1519,7 @@ private slots:
     void onSettingsClicked() {
         auto* dialog = new QDialog(this);
         dialog->setWindowTitle("设置");
-        dialog->setFixedSize(480, 240);
+        dialog->setFixedSize(480, 180);
         dialog->setStyleSheet(
             "QDialog { background-color: #171F21; color: #F3F7F6; }"
             "QLabel { color: #D2DDDA; background-color: transparent; }"
@@ -1570,26 +1561,6 @@ private slots:
         outDirRow->addWidget(outDirBtn);
         layout->addLayout(outDirRow);
 
-        // 缓存目录
-        auto* cacheRow = new QHBoxLayout();
-        auto* cacheLabel = new QLabel("缓存目录:", dialog);
-        QString defaultCacheDir = settings.value("cacheDir", QDir::homePath() + "/StarProcessor/Cache").toString();
-        auto* cacheEdit = new QLineEdit(defaultCacheDir, dialog);
-        cacheEdit->setReadOnly(true);
-        auto* cacheBtn = new QPushButton(dialog);
-        cacheBtn->setIcon(
-            UiAssets::icon(UiAssets::Glyph::Folder, QColor("#A7B8B4")));
-        cacheBtn->setToolTip(QString::fromUtf8("选择缓存目录"));
-        cacheBtn->setFixedSize(28, 28);
-        connect(cacheBtn, &QPushButton::clicked, this, [cacheEdit]() {
-            QString dir = QFileDialog::getExistingDirectory(nullptr, "选择缓存目录");
-            if (!dir.isEmpty()) cacheEdit->setText(dir);
-        });
-        cacheRow->addWidget(cacheLabel);
-        cacheRow->addWidget(cacheEdit, 1);
-        cacheRow->addWidget(cacheBtn);
-        layout->addLayout(cacheRow);
-
         layout->addStretch();
 
         // 底部按钮
@@ -1601,10 +1572,9 @@ private slots:
             "  font-weight: 700; border: none; border-radius: 5px; padding: 6px 24px; }"
             "QPushButton:hover { background-color: #67E2BE; }"
         );
-        connect(okBtn, &QPushButton::clicked, dialog, [this, dialog, outDirEdit, cacheEdit]() {
+        connect(okBtn, &QPushButton::clicked, dialog, [this, dialog, outDirEdit]() {
             QSettings s("StarProcessor", "App");
             s.setValue("outputPath", outDirEdit->text());
-            s.setValue("cacheDir", cacheEdit->text());
             // 同步更新参数面板的输出路径（无需重启即生效）
             if (m_paramsPanel) {
                 m_paramsPanel->setOutputPath(outDirEdit->text());

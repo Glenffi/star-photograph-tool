@@ -1,0 +1,146 @@
+name: Package macOS
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: macos-package-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  QT_VERSION: "6.8.3"
+  VCPKG_DEFAULT_TRIPLET: arm64-osx-dynamic
+  VCPKG_INSTALLED_DIR: ${{ github.workspace }}/vcpkg_installed
+
+jobs:
+  package:
+    name: Build macOS 14 arm64 package
+    runs-on: macos-14
+    timeout-minutes: 120
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: ${{ env.QT_VERSION }}
+          host: mac
+          target: desktop
+          arch: clang_64
+          cache: true
+
+      - name: Locate vcpkg
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -n "${VCPKG_INSTALLATION_ROOT:-}" &&
+                -x "${VCPKG_INSTALLATION_ROOT}/vcpkg" ]]; then
+            vcpkg_root="${VCPKG_INSTALLATION_ROOT}"
+          else
+            vcpkg_root="$(dirname "$(command -v vcpkg)")"
+          fi
+          echo "VCPKG_ROOT=${vcpkg_root}" >> "${GITHUB_ENV}"
+
+      - name: Build LibRaw and libtiff for macOS 14
+        shell: bash
+        env:
+          MACOSX_DEPLOYMENT_TARGET: "14.0"
+        run: |
+          set -euo pipefail
+          "${VCPKG_ROOT}/vcpkg" install \
+            "libraw:${VCPKG_DEFAULT_TRIPLET}" \
+            "tiff:${VCPKG_DEFAULT_TRIPLET}" \
+            "--overlay-triplets=${GITHUB_WORKSPACE}/cmake/triplets" \
+            "--x-install-root=${VCPKG_INSTALLED_DIR}"
+
+      - name: Verify dependency architectures
+        shell: bash
+        run: |
+          set -euo pipefail
+          qt_core="${QT_ROOT_DIR}/lib/QtCore.framework/Versions/A/QtCore"
+          libraw="$(find "${VCPKG_INSTALLED_DIR}/${VCPKG_DEFAULT_TRIPLET}/lib" -maxdepth 1 -name 'libraw*.dylib' -print -quit)"
+          libtiff="$(find "${VCPKG_INSTALLED_DIR}/${VCPKG_DEFAULT_TRIPLET}/lib" -maxdepth 1 -name 'libtiff*.dylib' -print -quit)"
+          test -n "${libraw}"
+          test -n "${libtiff}"
+          file "${qt_core}" "${libraw}" "${libtiff}"
+          file "${qt_core}" | grep -q arm64
+          file "${libraw}" | grep -q arm64
+          file "${libtiff}" | grep -q arm64
+
+      - name: Build, test and package
+        shell: bash
+        env:
+          MACOSX_DEPLOYMENT_TARGET: "14.0"
+          BUILD_DIR: ${{ github.workspace }}/build/macos-release
+          DIST_DIR: ${{ github.workspace }}/dist
+          SKIP_LAUNCH_TEST: "1"
+        run: |
+          set -euo pipefail
+          export QT_PREFIX="${QT_ROOT_DIR}"
+          export LIBRAW_PREFIX="${VCPKG_INSTALLED_DIR}/${VCPKG_DEFAULT_TRIPLET}"
+          export TIFF_PREFIX="${LIBRAW_PREFIX}"
+          export CMAKE_TOOLCHAIN_FILE="${VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake"
+          export VCPKG_OVERLAY_TRIPLETS="${GITHUB_WORKSPACE}/cmake/triplets"
+          export VCPKG_TARGET_TRIPLET="${VCPKG_DEFAULT_TRIPLET}"
+          ./scripts/package-macos.sh
+
+      - name: Verify advertised minimum version
+        shell: bash
+        run: |
+          set -euo pipefail
+          build_info="$(find dist -path '*/dmg/BUILD-INFO.txt' -print -quit)"
+          test -n "${build_info}"
+          grep -F "Actual bundled minimum: macOS 14.0" "${build_info}"
+
+      - name: Read package metadata
+        id: package
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(sed -nE 's/project\(StarProcessor VERSION ([0-9.]+).*/\1/p' CMakeLists.txt)"
+          name="StarProcessor-v${version}-macOS-arm64"
+          echo "version=${version}" >> "${GITHUB_OUTPUT}"
+          echo "name=${name}" >> "${GITHUB_OUTPUT}"
+
+      - name: Upload macOS client
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.package.outputs.name }}
+          path: |
+            dist/${{ steps.package.outputs.name }}.dmg
+            dist/${{ steps.package.outputs.name }}.dmg.sha256
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish tagged macOS client
+        if: github.ref_type == 'tag'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+          expected_tag="v${{ steps.package.outputs.version }}"
+          if [[ "${tag}" != "${expected_tag}" ]]; then
+            echo "Tag ${tag} does not match CMake project version ${expected_tag}" >&2
+            exit 1
+          fi
+          if ! gh release view "${tag}" >/dev/null 2>&1; then
+            gh release create "${tag}" \
+              --title "StarProcessor ${tag}" \
+              --generate-notes || gh release view "${tag}" >/dev/null
+          fi
+          gh release upload "${tag}" \
+            "dist/${{ steps.package.outputs.name }}.dmg" \
+            "dist/${{ steps.package.outputs.name }}.dmg.sha256" \
+            --clobber

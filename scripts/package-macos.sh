@@ -25,16 +25,23 @@ mach_o_minimum_version() {
     '
 }
 
-for tool in brew cmake ctest ditto hdiutil codesign otool file; do
+for tool in cmake ctest ditto hdiutil codesign otool file; do
     if ! command -v "${tool}" >/dev/null 2>&1; then
         echo "Required packaging tool is missing: ${tool}" >&2
         exit 2
     fi
 done
 
-QT_PREFIX="$(brew --prefix qt@6)"
-LIBRAW_PREFIX="$(brew --prefix libraw)"
-TIFF_PREFIX="$(brew --prefix libtiff)"
+if [[ -z "${QT_PREFIX:-}" || -z "${LIBRAW_PREFIX:-}" ||
+      -z "${TIFF_PREFIX:-}" ]]; then
+    if ! command -v brew >/dev/null 2>&1; then
+        echo "Set QT_PREFIX, LIBRAW_PREFIX and TIFF_PREFIX, or install Homebrew" >&2
+        exit 2
+    fi
+    QT_PREFIX="${QT_PREFIX:-$(brew --prefix qt@6)}"
+    LIBRAW_PREFIX="${LIBRAW_PREFIX:-$(brew --prefix libraw)}"
+    TIFF_PREFIX="${TIFF_PREFIX:-$(brew --prefix libtiff)}"
+fi
 MACDEPLOYQT="${QT_PREFIX}/bin/macdeployqt"
 QT_PLUGIN_DIR="$(${QT_PREFIX}/bin/qtpaths --plugin-dir)"
 
@@ -43,11 +50,30 @@ if [[ ! -x "${MACDEPLOYQT}" ]]; then
     exit 2
 fi
 
-cmake -S "${ROOT_DIR}" -B "${BUILD_DIR}" \
-    -DCMAKE_BUILD_TYPE=Release \
-    -DCMAKE_OSX_DEPLOYMENT_TARGET="${DEPLOYMENT_TARGET}" \
-    -DBUILD_TESTING=ON \
+cmake_arguments=(
+    -S "${ROOT_DIR}"
+    -B "${BUILD_DIR}"
+    -DCMAKE_BUILD_TYPE=Release
+    "-DCMAKE_OSX_DEPLOYMENT_TARGET=${DEPLOYMENT_TARGET}"
+    -DBUILD_TESTING=ON
     -DBUILD_SAMPLE_TOOLS=OFF
+)
+if [[ -n "${CMAKE_TOOLCHAIN_FILE:-}" ]]; then
+    cmake_arguments+=("-DCMAKE_TOOLCHAIN_FILE=${CMAKE_TOOLCHAIN_FILE}")
+fi
+if [[ -n "${CMAKE_PREFIX_PATH:-}" ]]; then
+    cmake_arguments+=("-DCMAKE_PREFIX_PATH=${CMAKE_PREFIX_PATH//:/;}")
+fi
+if [[ -n "${VCPKG_TARGET_TRIPLET:-}" ]]; then
+    cmake_arguments+=("-DVCPKG_TARGET_TRIPLET=${VCPKG_TARGET_TRIPLET}")
+fi
+if [[ -n "${VCPKG_OVERLAY_TRIPLETS:-}" ]]; then
+    cmake_arguments+=("-DVCPKG_OVERLAY_TRIPLETS=${VCPKG_OVERLAY_TRIPLETS}")
+fi
+if [[ -n "${VCPKG_INSTALLED_DIR:-}" ]]; then
+    cmake_arguments+=("-DVCPKG_INSTALLED_DIR=${VCPKG_INSTALLED_DIR}")
+fi
+cmake "${cmake_arguments[@]}"
 cmake --build "${BUILD_DIR}" --parallel
 ctest --test-dir "${BUILD_DIR}" --output-on-failure
 

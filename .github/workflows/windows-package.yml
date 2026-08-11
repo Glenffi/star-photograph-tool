@@ -215,6 +215,9 @@ jobs:
             gh release create $tag `
               --title "StarProcessor $tag" `
               --generate-notes
+            if ($LASTEXITCODE -ne 0) {
+              gh release view $tag
+            }
           }
           gh release upload $tag `
             "dist/${{ steps.package.outputs.name }}.zip" `

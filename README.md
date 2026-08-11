@@ -2,7 +2,7 @@
 
 跨平台 RAW 图像处理软件，专注于星空摄影领域。
 
-> **当前版本**：v0.9.0。核心闭环、带聚合预检的 Bayer 域深空校准、BCF 改机色彩还原、天地分离、星轨合成、延时序列降噪、连续低频背景校正、保色 Arcsinh 拉伸、多尺度降噪、ACR 风格基础调色与亮度锐化、Starless/Stars 缩星、可保持 100% 视图的参数快速预览、完整双画面比较，以及任务型桌面工作台已经接入。v0.9.0 在 v0.8.1 的 Windows Unicode 路径修复基础上新增 HTTPS 更新检查、受信任下载路径限制和安装包 SHA-256 校验。
+> **当前开发版本**：v0.9.1。v0.9.0 已新增 HTTPS 更新检查、受信任下载路径限制和安装包 SHA-256 校验；v0.9.1 正在移除重复成片缓存，并建立真正面向 macOS 14 arm64 的原生发行构建。
 
 ## 当前已实现
 
@@ -204,8 +204,9 @@ SHA-256 校验文件。脚本会运行 Release 构建、CTest、`macdeployqt`、
 
 Windows x64 客户端由 `.github/workflows/windows-package.yml` 在
 Windows Server 2022 上使用 MSVC 原生构建。推送与 CMake 版本一致的
-`v*` 标签后，工作流会运行测试、调用 `windeployqt`、封装 vcpkg DLL，
-并把 ZIP 与 SHA-256 文件发布到 GitHub Releases。
+`v*` 标签后，Windows 与 macOS 工作流会分别运行测试、封装依赖并把 ZIP/DMG
+及 SHA-256 文件发布到 GitHub Releases。macOS 正式包在 macOS 14 arm64 runner
+上生成，构建会拒绝任何实际最低系统版本高于 14.0 的依赖。
 
 客户端打包流程见 [`docs/release-packaging.md`](docs/release-packaging.md)，更新服务器发布流程见 [`docs/update-distribution.md`](docs/update-distribution.md)。
 

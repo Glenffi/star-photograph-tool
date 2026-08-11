@@ -13,7 +13,7 @@
 
 ## macOS
 
-依赖：CMake、Qt 6、LibRaw 和 libtiff。使用 Homebrew 安装后运行：
+依赖：CMake、Qt 6、LibRaw 和 libtiff。使用 Homebrew 安装后可生成本机测试包：
 
 ```bash
 ./scripts/package-macos.sh
@@ -32,7 +32,7 @@
 
 设置 `SKIP_LAUNCH_TEST=1` 可在没有图形会话的 CI 中跳过启动测试；设置 `SKIP_DMG_CREATE=1` 可只生成完成部署和签名的 staging 目录。当前包没有 Apple Developer ID 签名和 notarization；这不影响本机测试，但不等同于面向公众的正式签名发行。
 
-> 源码目标是 macOS 14，但客户端最终兼容范围由打包机上的预编译依赖共同决定。脚本会取 bundle 内所有 Mach-O 的最高最低版本，写入 `LSMinimumSystemVersion` 和 `BUILD-INFO.txt`。例如当前开发机的 Homebrew Qt 插件、LibRaw 和 libtiff 是面向 macOS 26 构建的，因此本机产出的 DMG 真实最低版本是 macOS 26。要发布兼容 macOS 14 的正式包，需要在 macOS 14 SDK/runner 上使用同样面向 14 构建的依赖。
+> 源码目标是 macOS 14，但客户端最终兼容范围由打包机上的预编译依赖共同决定。脚本会取 bundle 内所有 Mach-O 的最高最低版本，写入 `LSMinimumSystemVersion` 和 `BUILD-INFO.txt`。开发机 Homebrew 依赖若面向更高系统，本地 DMG 会如实提高要求。正式 arm64 包由 `.github/workflows/macos-package.yml` 在 macOS 14 runner 上构建，Qt 固定为 6.8.3，LibRaw/libtiff 使用项目内 `arm64-osx-dynamic` vcpkg triplet 从源码构建；只要任一 bundle 依赖高于 14.0，工作流就会失败而不是发布错误标记的包。
 
 ## Windows
 
@@ -52,10 +52,10 @@ Windows 包必须由 Windows runner 验证，macOS 上不使用 MinGW 交叉编�
 确认主分支干净、Release 构建通过后：
 
 ```bash
-git tag -a v0.9.0 -m "StarProcessor v0.9.0"
-git push origin v0.9.0
+git tag -a v0.9.1 -m "StarProcessor v0.9.1"
+git push origin v0.9.1
 ```
 
-标签推送后查看 GitHub Actions 的 `Package Windows` 任务。成功后 Release 页面会出现 Windows ZIP 和校验文件。macOS DMG 在本机生成并完成启动验证后交付；获得 Apple Developer 证书后再接入签名、公证和 Release 自动上传。
+标签推送后查看 GitHub Actions 的 `Package Windows` 与 `Package macOS` 任务。成功后 Release 页面会同时出现 Windows ZIP、macOS DMG 和校验文件。当前 macOS 包仍为 ad-hoc 签名；获得 Apple Developer 证书后再接入 Developer ID 签名与公证。
 
 两端安装包都准备好后，再按 [`update-distribution.md`](update-distribution.md) 发布更新清单。更新服务器只保留清单指向的当前版本，不作为历史 Release 归档；历史版本仍由 GitHub Releases 承担。
