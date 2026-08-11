@@ -183,7 +183,10 @@ jobs:
           }
 
           $hash = (Get-FileHash -Algorithm SHA256 $archive).Hash.ToLowerInvariant()
-          "$hash  $name.zip" | Set-Content -Path "$archive.sha256" -Encoding ascii
+          # Avoid CRLF in the checksum record so `shasum -c` also works when
+          # the release is verified from macOS or Linux.
+          "$hash  $name.zip" | Set-Content -Path "$archive.sha256" `
+            -Encoding ascii -NoNewline
 
       - name: Upload Windows client
         uses: actions/upload-artifact@v4
