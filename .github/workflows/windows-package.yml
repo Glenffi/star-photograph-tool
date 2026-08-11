@@ -17,7 +17,6 @@ concurrency:
 
 env:
   QT_VERSION: "6.8.3"
-  VCPKG_ROOT: "C:\\vcpkg"
   VCPKG_DEFAULT_TRIPLET: x64-windows
   VCPKG_INSTALLED_DIR: "${{ github.workspace }}\\vcpkg_installed"
 
@@ -48,10 +47,20 @@ jobs:
       - name: Install LibRaw and libtiff
         shell: pwsh
         run: |
-          $vcpkg = Join-Path $env:VCPKG_ROOT "vcpkg.exe"
-          if (-not (Test-Path $vcpkg)) {
-            throw "GitHub Windows runner does not contain vcpkg at $vcpkg"
+          $vcpkg = $null
+          if ($env:VCPKG_INSTALLATION_ROOT) {
+            $candidate = Join-Path $env:VCPKG_INSTALLATION_ROOT "vcpkg.exe"
+            if (Test-Path $candidate) {
+              $vcpkg = $candidate
+            }
           }
+          if (-not $vcpkg) {
+            $vcpkg = (Get-Command vcpkg.exe -ErrorAction Stop).Source
+          }
+
+          $vcpkgRoot = Split-Path -Parent $vcpkg
+          "VCPKG_ROOT=$vcpkgRoot" | Out-File `
+            -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
           & $vcpkg install `
             "libraw:$env:VCPKG_DEFAULT_TRIPLET" `
