@@ -1,0 +1,210 @@
+name: Package Windows
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: windows-package-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  QT_VERSION: "6.8.3"
+  VCPKG_ROOT: "C:\\vcpkg"
+  VCPKG_DEFAULT_TRIPLET: x64-windows
+  VCPKG_INSTALLED_DIR: "${{ github.workspace }}\\vcpkg_installed"
+
+jobs:
+  package:
+    name: Build and package Windows x64
+    runs-on: windows-2022
+    timeout-minutes: 90
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up MSVC x64
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: ${{ env.QT_VERSION }}
+          host: windows
+          target: desktop
+          arch: win64_msvc2022_64
+          cache: true
+
+      - name: Install LibRaw and libtiff
+        shell: pwsh
+        run: |
+          $vcpkg = Join-Path $env:VCPKG_ROOT "vcpkg.exe"
+          if (-not (Test-Path $vcpkg)) {
+            throw "GitHub Windows runner does not contain vcpkg at $vcpkg"
+          }
+
+          & $vcpkg install `
+            "libraw:$env:VCPKG_DEFAULT_TRIPLET" `
+            "tiff:$env:VCPKG_DEFAULT_TRIPLET" `
+            "--x-install-root=$env:VCPKG_INSTALLED_DIR"
+          if ($LASTEXITCODE -ne 0) {
+            throw "vcpkg dependency installation failed with exit code $LASTEXITCODE"
+          }
+
+      - name: Configure Release build
+        shell: pwsh
+        run: |
+          cmake -S . -B build/windows-release `
+            -G "Visual Studio 17 2022" `
+            -A x64 `
+            -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" `
+            -DVCPKG_TARGET_TRIPLET="$env:VCPKG_DEFAULT_TRIPLET" `
+            -DVCPKG_INSTALLED_DIR="$env:VCPKG_INSTALLED_DIR" `
+            -DBUILD_TESTING=ON `
+            -DBUILD_SAMPLE_TOOLS=OFF
+          if ($LASTEXITCODE -ne 0) {
+            throw "CMake configuration failed with exit code $LASTEXITCODE"
+          }
+
+      - name: Build Release
+        shell: pwsh
+        run: |
+          cmake --build build/windows-release --config Release --parallel
+          if ($LASTEXITCODE -ne 0) {
+            throw "Release build failed with exit code $LASTEXITCODE"
+          }
+
+      - name: Run tests
+        shell: pwsh
+        run: |
+          $vcpkgBin = Join-Path $env:VCPKG_INSTALLED_DIR "$env:VCPKG_DEFAULT_TRIPLET\bin"
+          $env:PATH = "$vcpkgBin;$env:PATH"
+
+          ctest --test-dir build/windows-release `
+            -C Release `
+            --output-on-failure `
+            --timeout 300
+          if ($LASTEXITCODE -ne 0) {
+            throw "CTest failed with exit code $LASTEXITCODE"
+          }
+
+      - name: Read package metadata
+        id: package
+        shell: pwsh
+        run: |
+          $cmake = Get-Content CMakeLists.txt -Raw
+          if ($cmake -notmatch 'project\(StarProcessor VERSION ([0-9]+\.[0-9]+\.[0-9]+)') {
+            throw "Unable to read the StarProcessor version from CMakeLists.txt"
+          }
+
+          $version = $Matches[1]
+          $name = "StarProcessor-Windows-x64-v$version"
+          "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "name=$name" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - name: Deploy runtime dependencies
+        shell: pwsh
+        run: |
+          $installRoot = Join-Path $env:RUNNER_TEMP "starprocessor-install"
+          $packageRoot = Join-Path $env:GITHUB_WORKSPACE "dist\${{ steps.package.outputs.name }}"
+          $exe = Join-Path $packageRoot "StarProcessor.exe"
+          $vcpkgBin = Join-Path $env:VCPKG_INSTALLED_DIR "$env:VCPKG_DEFAULT_TRIPLET\bin"
+
+          cmake --install build/windows-release `
+            --config Release `
+            --prefix $installRoot
+          if ($LASTEXITCODE -ne 0) {
+            throw "CMake install failed with exit code $LASTEXITCODE"
+          }
+
+          New-Item -ItemType Directory -Force -Path $packageRoot | Out-Null
+          Copy-Item (Join-Path $installRoot "bin\StarProcessor.exe") $exe
+
+          $windeployqt = (Get-Command windeployqt.exe -ErrorAction Stop).Source
+          & $windeployqt `
+            --release `
+            --no-translations `
+            --compiler-runtime `
+            --dir $packageRoot `
+            $exe
+          if ($LASTEXITCODE -ne 0) {
+            throw "windeployqt failed with exit code $LASTEXITCODE"
+          }
+
+          $runtimeDlls = Get-ChildItem -Path $vcpkgBin -Filter *.dll -File
+          if ($runtimeDlls.Count -eq 0) {
+            throw "No vcpkg runtime DLLs were found in $vcpkgBin"
+          }
+          $runtimeDlls | Copy-Item -Destination $packageRoot -Force
+
+          @(
+            "StarProcessor ${{ steps.package.outputs.version }}"
+            "Platform: Windows x64"
+            "Build: Release / MSVC 2022 / Qt $env:QT_VERSION"
+            "Commit: $env:GITHUB_SHA"
+          ) | Set-Content -Path (Join-Path $packageRoot "BUILD-INFO.txt") -Encoding utf8
+
+          Copy-Item "LICENSE" (Join-Path $packageRoot "LICENSE.txt")
+          Copy-Item "THIRD_PARTY_NOTICES.md" $packageRoot
+
+          if (-not (Test-Path (Join-Path $packageRoot "platforms\qwindows.dll"))) {
+            throw "Qt Windows platform plugin was not deployed"
+          }
+
+      - name: Create ZIP archive
+        shell: pwsh
+        run: |
+          $name = "${{ steps.package.outputs.name }}"
+          $packageRoot = Join-Path $env:GITHUB_WORKSPACE "dist\$name"
+          $archive = Join-Path $env:GITHUB_WORKSPACE "dist\$name.zip"
+
+          Compress-Archive -Path $packageRoot -DestinationPath $archive -CompressionLevel Optimal
+          if (-not (Test-Path $archive)) {
+            throw "ZIP archive was not created"
+          }
+
+          $hash = (Get-FileHash -Algorithm SHA256 $archive).Hash.ToLowerInvariant()
+          "$hash  $name.zip" | Set-Content -Path "$archive.sha256" -Encoding ascii
+
+      - name: Upload Windows client
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.package.outputs.name }}
+          path: |
+            dist/${{ steps.package.outputs.name }}.zip
+            dist/${{ steps.package.outputs.name }}.zip.sha256
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish tagged Windows client
+        if: github.ref_type == 'tag'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = "${{ github.ref_name }}"
+          $expectedTag = "v${{ steps.package.outputs.version }}"
+          if ($tag -ne $expectedTag) {
+            throw "Tag $tag does not match CMake project version $expectedTag"
+          }
+
+          gh release view $tag 2>$null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create $tag `
+              --title "StarProcessor $tag" `
+              --generate-notes
+          }
+          gh release upload $tag `
+            "dist/${{ steps.package.outputs.name }}.zip" `
+            "dist/${{ steps.package.outputs.name }}.zip.sha256" `
+            --clobber

@@ -39,7 +39,7 @@
 
 | 平台 | 最低版本 | 内存 | 磁盘空间 |
 |------|---------|------|---------|
-| macOS | 12+ (Monterey) | 8 GB | 5 GB + 序列缓存 |
+| macOS | 14+ (Sonoma，源码目标) | 8 GB | 5 GB + 序列缓存 |
 | Windows | 10/11 | 8 GB | 5 GB + 序列缓存 |
 
 > 处理高分辨率 RAW 文件（如 60MP+）建议 16 GB 以上内存。
@@ -168,6 +168,28 @@ cmake --build . --config Release
 ```
 
 > **注意**：当前 P2+ 已实现核心处理链路（对齐 → 帧间光度匹配 → 堆栈 → 线性降噪 → 自动优化 → Starless/Stars 缩星 → 导出）。
+
+## 客户端打包
+
+macOS 可在安装 Homebrew 依赖后生成自包含 DMG：
+
+```bash
+./scripts/package-macos.sh
+```
+
+输出位于 `dist/StarProcessor-v<version>-macOS-<arch>.dmg`，同时生成
+SHA-256 校验文件。脚本会运行 Release 构建、CTest、`macdeployqt`、包内
+依赖审计、ad-hoc 签名和启动截图检查。当前没有 Apple Developer 证书，
+因此本地发行包尚未公证，首次打开时可能需要在 Finder 中右键选择“打开”。
+打包脚本还会检测所有随包动态库的真实系统要求并写入应用信息；若 Homebrew
+依赖高于源码的 macOS 14 目标，最终 DMG 会以依赖的较高版本为准。
+
+Windows x64 客户端由 `.github/workflows/windows-package.yml` 在
+Windows Server 2022 上使用 MSVC 原生构建。推送与 CMake 版本一致的
+`v*` 标签后，工作流会运行测试、调用 `windeployqt`、封装 vcpkg DLL，
+并把 ZIP 与 SHA-256 文件发布到 GitHub Releases。
+
+详细发布流程见 [`docs/release-packaging.md`](docs/release-packaging.md)。
 
 ## 真实 RAW 样片回归
 

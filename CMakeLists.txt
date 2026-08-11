@@ -1,4 +1,11 @@
 cmake_minimum_required(VERSION 3.20)
+
+if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Darwin" AND
+   NOT DEFINED CMAKE_OSX_DEPLOYMENT_TARGET)
+    set(CMAKE_OSX_DEPLOYMENT_TARGET "14.0" CACHE STRING
+        "Minimum supported macOS version")
+endif()
+
 project(StarProcessor VERSION 0.7.0 LANGUAGES CXX)
 
 include(CTest)
@@ -155,6 +162,20 @@ set(APP_HEADERS
     src/ui/SceneLauncher.h
 )
 
+if(APPLE)
+    set(STARPROCESSOR_MAC_ICON
+        "${CMAKE_SOURCE_DIR}/resources/StarProcessor.icns")
+    set_source_files_properties(${STARPROCESSOR_MAC_ICON} PROPERTIES
+        MACOSX_PACKAGE_LOCATION "Resources")
+    list(APPEND APP_SOURCES ${STARPROCESSOR_MAC_ICON})
+elseif(WIN32)
+    configure_file(
+        "${CMAKE_SOURCE_DIR}/cmake/StarProcessor.rc.in"
+        "${CMAKE_CURRENT_BINARY_DIR}/StarProcessor.rc"
+        @ONLY)
+    list(APPEND APP_SOURCES "${CMAKE_CURRENT_BINARY_DIR}/StarProcessor.rc")
+endif()
+
 # 核心库不依赖 Widgets；ImageExporter、PresetManager 和 SkyGroundMask
 # 使用 Qt Core/Gui 的文件、色彩空间和图像能力。
 add_library(StarProcessorCore STATIC ${CORE_SOURCES} ${CORE_HEADERS})
@@ -251,6 +272,7 @@ if(APPLE)
         MACOSX_BUNDLE TRUE
         MACOSX_BUNDLE_INFO_PLIST "${CMAKE_SOURCE_DIR}/cmake/Info.plist.in"
         MACOSX_BUNDLE_BUNDLE_NAME "StarProcessor"
+        MACOSX_BUNDLE_ICON_FILE "StarProcessor.icns"
         MACOSX_BUNDLE_BUNDLE_VERSION "${PROJECT_VERSION}"
         MACOSX_BUNDLE_SHORT_VERSION_STRING "${PROJECT_VERSION}"
     )

@@ -3,6 +3,7 @@
 /build-*/
 /cmake-build-*/
 /out/
+/dist/
 /.vs/
 /.idea/
 
@@ -24,6 +25,8 @@ ui_*.h
 *.dylib
 *.exe
 *.app/
+*.dmg
+*.dmg.sha256
 *.ipa
 
 # macOS
