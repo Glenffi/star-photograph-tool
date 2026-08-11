@@ -1,6 +1,7 @@
 #pragma once
 
 #include "AutoOptimizeEngine.h"
+#include "BasicAdjustmentEngine.h"
 #include "StarReducer.h"
 
 #include <cstdint>
@@ -13,7 +14,9 @@ enum class FinishingStage {
     NoiseReduction,
     Dehaze,
     Stretch,
+    BasicAdjustments,
     GroundDetail,
+    Sharpening,
     StarReduction
 };
 
@@ -25,6 +28,7 @@ struct FinishingOptions {
     bool dehazeEnabled = false;
     int dehazeStrength = 30;
     bool stretchEnabled = false;
+    BasicAdjustmentOptions basicAdjustments;
     bool skyGroundSeparation = false;
     int groundDetailStrength = 40;
     bool starReductionEnabled = false;

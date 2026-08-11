@@ -42,6 +42,7 @@ public:
     void setModifiedCameraGrayPoint(double normalizedX, double normalizedY);
     void clearModifiedCameraGrayPoint();
     bool stretchEnabled() const;
+    BasicAdjustmentOptions basicAdjustmentOptions() const;
     bool starReduceEnabled() const;
     int starReduceStrength() const;
     QString outputFormat() const;
@@ -180,6 +181,32 @@ private:
     double m_modifiedCameraGrayPointX = -1.0;
     double m_modifiedCameraGrayPointY = -1.0;
     QCheckBox* m_stretchCheck = nullptr;
+
+    // ACR-style relative adjustments. Exposure is stored in tenths of an EV;
+    // the remaining signed sliders use the common -100..100 scale.
+    QGroupBox* m_basicAdjustGroup = nullptr;
+    QSlider* m_temperatureSlider = nullptr;
+    QLabel* m_temperatureLabel = nullptr;
+    QSlider* m_tintSlider = nullptr;
+    QLabel* m_tintLabel = nullptr;
+    QSlider* m_exposureSlider = nullptr;
+    QLabel* m_exposureLabel = nullptr;
+    QSlider* m_contrastSlider = nullptr;
+    QLabel* m_contrastLabel = nullptr;
+    QSlider* m_highlightsSlider = nullptr;
+    QLabel* m_highlightsLabel = nullptr;
+    QSlider* m_shadowsSlider = nullptr;
+    QLabel* m_shadowsLabel = nullptr;
+    QSlider* m_whitesSlider = nullptr;
+    QLabel* m_whitesLabel = nullptr;
+    QSlider* m_blacksSlider = nullptr;
+    QLabel* m_blacksLabel = nullptr;
+    QSlider* m_vibranceSlider = nullptr;
+    QLabel* m_vibranceLabel = nullptr;
+    QSlider* m_saturationSlider = nullptr;
+    QLabel* m_saturationLabel = nullptr;
+    QSlider* m_sharpeningSlider = nullptr;
+    QLabel* m_sharpeningLabel = nullptr;
 
     // 缩星组
     QWidget* m_starReduceGroup = nullptr;

@@ -362,6 +362,18 @@ void displayOutputPath(QLineEdit* edit, const QString& path) {
     edit->setCursorPosition(0);
 }
 
+QString signedAdjustmentText(int value) {
+    return value > 0 ? QStringLiteral("+%1").arg(value)
+                     : QString::number(value);
+}
+
+QString exposureText(int tenths) {
+    const double ev = static_cast<double>(tenths) / 10.0;
+    return QStringLiteral("%1%2 EV")
+        .arg(ev > 0.0 ? QStringLiteral("+") : QString())
+        .arg(ev, 0, 'f', 1);
+}
+
 } // namespace
 
 ParamsPanel::ParamsPanel(QWidget* parent)
@@ -920,6 +932,94 @@ void ParamsPanel::setupUI() {
     stackPageLayout->addWidget(m_timelapseGroup);
     stackPageLayout->addStretch();
 
+    // 基础调整与快速预览共用同一套参数和收尾处理管线。
+    m_basicAdjustGroup = createCollapsibleGroup(
+        QString::fromUtf8("基础调色"), true);
+    auto* basicAdjustLayout = new QVBoxLayout(m_basicAdjustGroup);
+    basicAdjustLayout->setSpacing(7);
+
+    auto addSectionLabel = [this, basicAdjustLayout](const QString& text) {
+        auto* label = new QLabel(text, m_basicAdjustGroup);
+        setRole(label, "muted");
+        label->setContentsMargins(0, 5, 0, 0);
+        basicAdjustLayout->addWidget(label);
+    };
+    auto addAdjustmentRow = [this, basicAdjustLayout](
+                                const QString& name, int minimum, int maximum,
+                                QSlider*& slider, QLabel*& valueLabel,
+                                const QString& tooltip, bool exposure = false) {
+        auto* row = new QHBoxLayout();
+        row->setSpacing(8);
+        auto* nameLabel = new QLabel(name, m_basicAdjustGroup);
+        nameLabel->setFixedWidth(58);
+        nameLabel->setToolTip(tooltip);
+        row->addWidget(nameLabel);
+        slider = createSlider(minimum, maximum, 0);
+        slider->setMinimumWidth(96);
+        slider->setToolTip(tooltip);
+        valueLabel = new QLabel(
+            exposure ? exposureText(0) : signedAdjustmentText(0),
+            m_basicAdjustGroup);
+        setRole(valueLabel, "value");
+        valueLabel->setMinimumWidth(exposure ? 48 : 30);
+        valueLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+        QLabel* const capturedLabel = valueLabel;
+        connect(slider, &QSlider::valueChanged, this,
+                [this, capturedLabel, exposure](int value) {
+                    capturedLabel->setText(
+                        exposure ? exposureText(value)
+                                 : signedAdjustmentText(value));
+                    onSliderValueChanged(value);
+                });
+        connect(slider, &QSlider::sliderReleased,
+                this, &ParamsPanel::onSliderReleased);
+        row->addWidget(slider, 1);
+        row->addWidget(valueLabel);
+        basicAdjustLayout->addLayout(row);
+    };
+
+    addSectionLabel(QString::fromUtf8("白平衡"));
+    addAdjustmentRow(QString::fromUtf8("色温偏移"), -100, 100,
+                     m_temperatureSlider, m_temperatureLabel,
+                     QString::fromUtf8("向左冷却画面，向右增加暖色；这是相对偏移，不代表绝对 Kelvin"));
+    addAdjustmentRow(QString::fromUtf8("色调"), -100, 100,
+                     m_tintSlider, m_tintLabel,
+                     QString::fromUtf8("在绿色与洋红之间校正色偏"));
+
+    addSectionLabel(QString::fromUtf8("光线"));
+    addAdjustmentRow(QString::fromUtf8("曝光"), -50, 50,
+                     m_exposureSlider, m_exposureLabel,
+                     QString::fromUtf8("整体曝光补偿，范围 -5.0 EV 到 +5.0 EV"), true);
+    addAdjustmentRow(QString::fromUtf8("对比度"), -100, 100,
+                     m_contrastSlider, m_contrastLabel,
+                     QString::fromUtf8("围绕中间调压缩或扩展明暗层次"));
+    addAdjustmentRow(QString::fromUtf8("高光"), -100, 100,
+                     m_highlightsSlider, m_highlightsLabel,
+                     QString::fromUtf8("主要调整亮部，并保护中间调和黑位"));
+    addAdjustmentRow(QString::fromUtf8("阴影"), -100, 100,
+                     m_shadowsSlider, m_shadowsLabel,
+                     QString::fromUtf8("主要调整暗部，并保护高光"));
+    addAdjustmentRow(QString::fromUtf8("白色色阶"), -100, 100,
+                     m_whitesSlider, m_whitesLabel,
+                     QString::fromUtf8("设置最亮区域的视觉强度"));
+    addAdjustmentRow(QString::fromUtf8("黑色色阶"), -100, 100,
+                     m_blacksSlider, m_blacksLabel,
+                     QString::fromUtf8("设置最暗区域的视觉深度"));
+
+    addSectionLabel(QString::fromUtf8("颜色"));
+    addAdjustmentRow(QString::fromUtf8("自然饱和度"), -100, 100,
+                     m_vibranceSlider, m_vibranceLabel,
+                     QString::fromUtf8("优先增强低饱和颜色，降低鲜艳区域溢色风险"));
+    addAdjustmentRow(QString::fromUtf8("饱和度"), -100, 100,
+                     m_saturationSlider, m_saturationLabel,
+                     QString::fromUtf8("统一调整全部颜色的饱和程度"));
+
+    addSectionLabel(QString::fromUtf8("细节"));
+    addAdjustmentRow(QString::fromUtf8("锐化"), 0, 100,
+                     m_sharpeningSlider, m_sharpeningLabel,
+                     QString::fromUtf8("亮度通道阈值锐化，抑制暗部噪声和彩色边缘"));
+    adjustPageLayout->addWidget(m_basicAdjustGroup);
+
     // 自动优化组（默认展开）
     m_optimizeGroup = createCollapsibleGroup(QString::fromUtf8("降噪与增强"), true);
     auto* optimizeLayout = new QVBoxLayout(m_optimizeGroup);
@@ -1398,6 +1498,17 @@ void ParamsPanel::onRestoreDefaults() {
     m_modifiedCameraColorStrengthSlider->setValue(100);
     clearModifiedCameraGrayPoint();
     m_stretchCheck->setChecked(false);
+    m_temperatureSlider->setValue(0);
+    m_tintSlider->setValue(0);
+    m_exposureSlider->setValue(0);
+    m_contrastSlider->setValue(0);
+    m_highlightsSlider->setValue(0);
+    m_shadowsSlider->setValue(0);
+    m_whitesSlider->setValue(0);
+    m_blacksSlider->setValue(0);
+    m_vibranceSlider->setValue(0);
+    m_saturationSlider->setValue(0);
+    m_sharpeningSlider->setValue(0);
     m_starReduceCheck->setChecked(false);
     m_starReduceSlider->setValue(70);
     m_outputFormat->setCurrentIndex(0);
@@ -1458,6 +1569,18 @@ void ParamsPanel::onSavePreset() {
     settings.setValue("modifiedCameraColorStrength",
                       m_modifiedCameraColorStrengthSlider->value());
     settings.setValue("stretchEnabled", m_stretchCheck->isChecked());
+    const BasicAdjustmentOptions basic = basicAdjustmentOptions();
+    settings.setValue("temperature", basic.temperature);
+    settings.setValue("tint", basic.tint);
+    settings.setValue("exposureTenths", basic.exposureTenths);
+    settings.setValue("contrast", basic.contrast);
+    settings.setValue("highlights", basic.highlights);
+    settings.setValue("shadows", basic.shadows);
+    settings.setValue("whites", basic.whites);
+    settings.setValue("blacks", basic.blacks);
+    settings.setValue("vibrance", basic.vibrance);
+    settings.setValue("saturation", basic.saturation);
+    settings.setValue("sharpening", basic.sharpening);
     settings.setValue("starReduceEnabled", m_starReduceCheck->isChecked());
     settings.setValue("starReduceStrength", m_starReduceSlider->value());
     settings.setValue("outputFormat", m_outputFormat->currentIndex());
@@ -1514,6 +1637,18 @@ void ParamsPanel::saveCurrentSettings() {
     settings.setValue("modifiedCameraColorStrength",
                       m_modifiedCameraColorStrengthSlider->value());
     settings.setValue("stretchEnabled", m_stretchCheck->isChecked());
+    const BasicAdjustmentOptions basic = basicAdjustmentOptions();
+    settings.setValue("temperature", basic.temperature);
+    settings.setValue("tint", basic.tint);
+    settings.setValue("exposureTenths", basic.exposureTenths);
+    settings.setValue("contrast", basic.contrast);
+    settings.setValue("highlights", basic.highlights);
+    settings.setValue("shadows", basic.shadows);
+    settings.setValue("whites", basic.whites);
+    settings.setValue("blacks", basic.blacks);
+    settings.setValue("vibrance", basic.vibrance);
+    settings.setValue("saturation", basic.saturation);
+    settings.setValue("sharpening", basic.sharpening);
     settings.setValue("starReduceEnabled", m_starReduceCheck->isChecked());
     settings.setValue("starReduceStrength", m_starReduceSlider->value());
     settings.setValue("outputFormat", m_outputFormat->currentIndex());
@@ -1571,6 +1706,18 @@ void ParamsPanel::loadPreset() {
     int modifiedCameraColorStrength =
         settings.value("modifiedCameraColorStrength", 100).toInt();
     bool stretch = settings.value("stretchEnabled", false).toBool();
+    BasicAdjustmentOptions basic;
+    basic.temperature = settings.value("temperature", 0).toInt();
+    basic.tint = settings.value("tint", 0).toInt();
+    basic.exposureTenths = settings.value("exposureTenths", 0).toInt();
+    basic.contrast = settings.value("contrast", 0).toInt();
+    basic.highlights = settings.value("highlights", 0).toInt();
+    basic.shadows = settings.value("shadows", 0).toInt();
+    basic.whites = settings.value("whites", 0).toInt();
+    basic.blacks = settings.value("blacks", 0).toInt();
+    basic.vibrance = settings.value("vibrance", 0).toInt();
+    basic.saturation = settings.value("saturation", 0).toInt();
+    basic.sharpening = settings.value("sharpening", 0).toInt();
     bool starReduce = settings.value("starReduceEnabled", false).toBool();
     int starReduceStrength = settings.value("starReduceStrength", 70).toInt();
     int outputFormat = settings.value("outputFormat", 0).toInt();
@@ -1627,6 +1774,17 @@ void ParamsPanel::loadPreset() {
     QSignalBlocker blocker27(m_starTrailCometSlider);
     QSignalBlocker blocker28(m_starTrailReverseCheck);
     QSignalBlocker blocker29(m_starTrailProtectGroundCheck);
+    QSignalBlocker blocker30(m_temperatureSlider);
+    QSignalBlocker blocker31(m_tintSlider);
+    QSignalBlocker blocker32(m_exposureSlider);
+    QSignalBlocker blocker33(m_contrastSlider);
+    QSignalBlocker blocker34(m_highlightsSlider);
+    QSignalBlocker blocker35(m_shadowsSlider);
+    QSignalBlocker blocker36(m_whitesSlider);
+    QSignalBlocker blocker37(m_blacksSlider);
+    QSignalBlocker blocker38(m_vibranceSlider);
+    QSignalBlocker blocker39(m_saturationSlider);
+    QSignalBlocker blocker40(m_sharpeningSlider);
 
     Q_UNUSED(alignIndex)
     m_alignMethod->setCurrentIndex(0);
@@ -1655,6 +1813,24 @@ void ParamsPanel::loadPreset() {
     m_modifiedCameraGrayPointY = -1.0;
     updateModifiedCameraColorControls();
     m_stretchCheck->setChecked(stretch);
+    auto applyBasicValue = [](QSlider* slider, QLabel* label, int value) {
+        slider->setValue(std::clamp(value, slider->minimum(), slider->maximum()));
+        label->setText(signedAdjustmentText(slider->value()));
+    };
+    applyBasicValue(m_temperatureSlider, m_temperatureLabel, basic.temperature);
+    applyBasicValue(m_tintSlider, m_tintLabel, basic.tint);
+    m_exposureSlider->setValue(std::clamp(
+        basic.exposureTenths, m_exposureSlider->minimum(),
+        m_exposureSlider->maximum()));
+    m_exposureLabel->setText(exposureText(m_exposureSlider->value()));
+    applyBasicValue(m_contrastSlider, m_contrastLabel, basic.contrast);
+    applyBasicValue(m_highlightsSlider, m_highlightsLabel, basic.highlights);
+    applyBasicValue(m_shadowsSlider, m_shadowsLabel, basic.shadows);
+    applyBasicValue(m_whitesSlider, m_whitesLabel, basic.whites);
+    applyBasicValue(m_blacksSlider, m_blacksLabel, basic.blacks);
+    applyBasicValue(m_vibranceSlider, m_vibranceLabel, basic.vibrance);
+    applyBasicValue(m_saturationSlider, m_saturationLabel, basic.saturation);
+    applyBasicValue(m_sharpeningSlider, m_sharpeningLabel, basic.sharpening);
     m_starReduceCheck->setChecked(starReduce);
     m_starReduceSlider->setValue(starReduceStrength);
     m_starReduceSlider->setEnabled(starReduce);
@@ -1740,6 +1916,28 @@ void ParamsPanel::onPresetChanged(int index) {
             preset.modifiedCameraColorStrength =
                 settings.value("modifiedCameraColorStrength", 100).toInt();
             preset.stretchEnabled = settings.value("stretchEnabled", false).toBool();
+            preset.basicAdjustments.temperature =
+                settings.value("temperature", 0).toInt();
+            preset.basicAdjustments.tint =
+                settings.value("tint", 0).toInt();
+            preset.basicAdjustments.exposureTenths =
+                settings.value("exposureTenths", 0).toInt();
+            preset.basicAdjustments.contrast =
+                settings.value("contrast", 0).toInt();
+            preset.basicAdjustments.highlights =
+                settings.value("highlights", 0).toInt();
+            preset.basicAdjustments.shadows =
+                settings.value("shadows", 0).toInt();
+            preset.basicAdjustments.whites =
+                settings.value("whites", 0).toInt();
+            preset.basicAdjustments.blacks =
+                settings.value("blacks", 0).toInt();
+            preset.basicAdjustments.vibrance =
+                settings.value("vibrance", 0).toInt();
+            preset.basicAdjustments.saturation =
+                settings.value("saturation", 0).toInt();
+            preset.basicAdjustments.sharpening =
+                settings.value("sharpening", 0).toInt();
             preset.starReduceEnabled = settings.value("starReduceEnabled", false).toBool();
             preset.starReduceStrength = settings.value("starReduceStrength", 70).toInt();
             preset.outputFormat = settings.value("outputFormat", 0).toInt() == 0 ? "tiff16" : "png8";
@@ -1799,6 +1997,17 @@ void ParamsPanel::applyPreset(const Preset& preset) {
     QSignalBlocker blocker14(m_autoRejectQualityCheck);
     QSignalBlocker blocker15(m_modifiedCameraColorStrengthSlider);
     QSignalBlocker blocker16(m_modifiedCameraColorMode);
+    QSignalBlocker blocker17(m_temperatureSlider);
+    QSignalBlocker blocker18(m_tintSlider);
+    QSignalBlocker blocker19(m_exposureSlider);
+    QSignalBlocker blocker20(m_contrastSlider);
+    QSignalBlocker blocker21(m_highlightsSlider);
+    QSignalBlocker blocker22(m_shadowsSlider);
+    QSignalBlocker blocker23(m_whitesSlider);
+    QSignalBlocker blocker24(m_blacksSlider);
+    QSignalBlocker blocker25(m_vibranceSlider);
+    QSignalBlocker blocker26(m_saturationSlider);
+    QSignalBlocker blocker27(m_sharpeningSlider);
 
     // Align method
     // 当前产品只提供已经实现并验证过的星点对齐。
@@ -1847,6 +2056,35 @@ void ParamsPanel::applyPreset(const Preset& preset) {
 
     // Stretch
     m_stretchCheck->setChecked(preset.stretchEnabled);
+
+    auto applyBasicValue = [](QSlider* slider, QLabel* label, int value) {
+        slider->setValue(std::clamp(value, slider->minimum(), slider->maximum()));
+        label->setText(signedAdjustmentText(slider->value()));
+    };
+    applyBasicValue(m_temperatureSlider, m_temperatureLabel,
+                    preset.basicAdjustments.temperature);
+    applyBasicValue(m_tintSlider, m_tintLabel,
+                    preset.basicAdjustments.tint);
+    m_exposureSlider->setValue(std::clamp(
+        preset.basicAdjustments.exposureTenths,
+        m_exposureSlider->minimum(), m_exposureSlider->maximum()));
+    m_exposureLabel->setText(exposureText(m_exposureSlider->value()));
+    applyBasicValue(m_contrastSlider, m_contrastLabel,
+                    preset.basicAdjustments.contrast);
+    applyBasicValue(m_highlightsSlider, m_highlightsLabel,
+                    preset.basicAdjustments.highlights);
+    applyBasicValue(m_shadowsSlider, m_shadowsLabel,
+                    preset.basicAdjustments.shadows);
+    applyBasicValue(m_whitesSlider, m_whitesLabel,
+                    preset.basicAdjustments.whites);
+    applyBasicValue(m_blacksSlider, m_blacksLabel,
+                    preset.basicAdjustments.blacks);
+    applyBasicValue(m_vibranceSlider, m_vibranceLabel,
+                    preset.basicAdjustments.vibrance);
+    applyBasicValue(m_saturationSlider, m_saturationLabel,
+                    preset.basicAdjustments.saturation);
+    applyBasicValue(m_sharpeningSlider, m_sharpeningLabel,
+                    preset.basicAdjustments.sharpening);
 
     // Star reduction is part of the preset contract. Apply both values here so
     // built-in and custom presets behave the same after being selected.
@@ -2124,6 +2362,23 @@ bool ParamsPanel::stretchEnabled() const {
     return m_stretchCheck ? m_stretchCheck->isChecked() : false;
 }
 
+BasicAdjustmentOptions ParamsPanel::basicAdjustmentOptions() const {
+    BasicAdjustmentOptions options;
+    if (!m_temperatureSlider) return options;
+    options.temperature = m_temperatureSlider->value();
+    options.tint = m_tintSlider->value();
+    options.exposureTenths = m_exposureSlider->value();
+    options.contrast = m_contrastSlider->value();
+    options.highlights = m_highlightsSlider->value();
+    options.shadows = m_shadowsSlider->value();
+    options.whites = m_whitesSlider->value();
+    options.blacks = m_blacksSlider->value();
+    options.vibrance = m_vibranceSlider->value();
+    options.saturation = m_saturationSlider->value();
+    options.sharpening = m_sharpeningSlider->value();
+    return options;
+}
+
 bool ParamsPanel::starReduceEnabled() const {
     return m_starReduceCheck ? m_starReduceCheck->isChecked() : false;
 }
@@ -2363,6 +2618,7 @@ QString ParamsPanel::upstreamSignature() const {
 }
 
 QString ParamsPanel::finishingSignature() const {
+    const BasicAdjustmentOptions basic = basicAdjustmentOptions();
     return QStringList{
         QString::number(noiseReductionEnabled()),
         QString::number(noiseReductionStrength()),
@@ -2372,7 +2628,14 @@ QString ParamsPanel::finishingSignature() const {
         QString::number(modifiedCameraGrayPointX(), 'f', 6),
         QString::number(modifiedCameraGrayPointY(), 'f', 6),
         QString::number(dewarpEnabled()), QString::number(dewarpStrength()),
-        QString::number(stretchEnabled()), QString::number(starReduceEnabled()),
+        QString::number(stretchEnabled()),
+        QString::number(basic.temperature), QString::number(basic.tint),
+        QString::number(basic.exposureTenths), QString::number(basic.contrast),
+        QString::number(basic.highlights), QString::number(basic.shadows),
+        QString::number(basic.whites), QString::number(basic.blacks),
+        QString::number(basic.vibrance), QString::number(basic.saturation),
+        QString::number(basic.sharpening),
+        QString::number(starReduceEnabled()),
         QString::number(starReduceStrength()),
         QString::number(groundDetailStrength())
     }.join('|');

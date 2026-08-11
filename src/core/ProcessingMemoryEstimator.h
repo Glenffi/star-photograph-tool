@@ -18,6 +18,8 @@ public:
         bool modifiedCameraColor = false;
         bool dehaze = false;
         bool stretch = false;
+        bool basicAdjustments = false;
+        bool sharpening = false;
         bool starReduction = false;
         bool rawCalibration = false;
     };

@@ -100,7 +100,8 @@ uint64_t ProcessingMemoryEstimator::estimatePeakBytes(
     if (!checkedMultiply(frameBytes, 2, postProcessPeak)) return 0;
     const bool createsComparisonPreview = options.skyGroundSeparation ||
         options.noiseReduction || options.modifiedCameraColor ||
-        options.dehaze || options.stretch || options.starReduction;
+        options.dehaze || options.stretch || options.basicAdjustments ||
+        options.sharpening || options.starReduction;
     if (createsComparisonPreview) {
         if (frameBytes > std::numeric_limits<uint64_t>::max() -
                              kComparisonPreviewWorkingBytes) {
@@ -124,6 +125,8 @@ uint64_t ProcessingMemoryEstimator::estimatePeakBytes(
         !includeFrameEquivalents(options.modifiedCameraColor, 2ULL) ||
         !includeFrameEquivalents(options.dehaze, 15ULL) ||
         !includeFrameEquivalents(options.stretch, 4ULL) ||
+        !includeFrameEquivalents(options.basicAdjustments, 2ULL) ||
+        !includeFrameEquivalents(options.sharpening, 4ULL) ||
         // Starless RGB, signed RGB star layer and its eroded working buffer
         // coexist with the caller-owned image and luminance planes.
         !includeFrameEquivalents(options.starReduction, 8ULL)) {

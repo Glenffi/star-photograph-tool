@@ -873,6 +873,9 @@ void ProcessingWorker::run() {
         m_params.modifiedCameraColorEnabled;
     estimateOptions.dehaze = m_params.dewarpEnabled;
     estimateOptions.stretch = m_params.stretchEnabled;
+    estimateOptions.basicAdjustments =
+        m_params.basicAdjustments.hasToneOrColorAdjustments();
+    estimateOptions.sharpening = m_params.basicAdjustments.hasSharpening();
     estimateOptions.starReduction = m_params.starReduceEnabled;
     estimateOptions.rawCalibration = m_params.deepSkyMode;
     const uint64_t estimatedBytes = ProcessingMemoryEstimator::estimatePeakBytes(
@@ -1514,6 +1517,9 @@ void ProcessingWorker::runStarTrail() {
     estimateOptions.modifiedCameraColor = m_params.modifiedCameraColorEnabled;
     estimateOptions.dehaze = m_params.dewarpEnabled;
     estimateOptions.stretch = m_params.stretchEnabled;
+    estimateOptions.basicAdjustments =
+        m_params.basicAdjustments.hasToneOrColorAdjustments();
+    estimateOptions.sharpening = m_params.basicAdjustments.hasSharpening();
     estimateOptions.starReduction = false;
     const uint64_t estimatedBytes = ProcessingMemoryEstimator::estimatePeakBytes(
         width, height, estimateOptions);
@@ -2246,6 +2252,9 @@ void ProcessingWorker::runSingleFrame() {
     options.modifiedCameraColor = m_params.modifiedCameraColorEnabled;
     options.dehaze = m_params.dewarpEnabled;
     options.stretch = m_params.stretchEnabled;
+    options.basicAdjustments =
+        m_params.basicAdjustments.hasToneOrColorAdjustments();
+    options.sharpening = m_params.basicAdjustments.hasSharpening();
     options.starReduction = m_params.starReduceEnabled;
 
     auto fitsMemoryBudget = [this, &options](int width, int height) {
@@ -2322,6 +2331,7 @@ bool ProcessingWorker::finishResult(std::vector<uint16_t>& resultRgb,
         || m_params.modifiedCameraColorEnabled
         || m_params.dewarpEnabled
         || m_params.stretchEnabled
+        || !m_params.basicAdjustments.isNeutral()
         || (usesSkyGroundMask && m_params.groundDetailStrength > 0)
         || (m_params.starReduceEnabled && m_params.starReduceStrength > 0);
     if (hasFinishingStage) {
@@ -2352,6 +2362,7 @@ bool ProcessingWorker::finishResult(std::vector<uint16_t>& resultRgb,
     finishingOptions.dehazeEnabled = m_params.dewarpEnabled;
     finishingOptions.dehazeStrength = m_params.dewarpStrength;
     finishingOptions.stretchEnabled = m_params.stretchEnabled;
+    finishingOptions.basicAdjustments = m_params.basicAdjustments;
     finishingOptions.skyGroundSeparation = usesSkyGroundMask;
     finishingOptions.groundDetailStrength = m_params.groundDetailStrength;
     finishingOptions.starReductionEnabled = m_params.starReduceEnabled;
@@ -2377,8 +2388,16 @@ bool ProcessingWorker::finishResult(std::vector<uint16_t>& resultRgb,
                 emit stageMessage("自动优化...");
                 emit progress(90);
                 break;
+            case FinishingStage::BasicAdjustments:
+                emit stageMessage("基础调色...");
+                emit progress(92);
+                break;
             case FinishingStage::GroundDetail:
                 emit stageMessage("恢复地景细节...");
+                break;
+            case FinishingStage::Sharpening:
+                emit stageMessage("亮度锐化...");
+                emit progress(94);
                 break;
             case FinishingStage::StarReduction:
                 emit stageMessage("缩星处理...");

@@ -3,6 +3,8 @@
 #include <QString>
 #include <QList>
 
+#include "BasicAdjustmentEngine.h"
+
 struct Preset {
     QString name;
     QString alignMethod = "star";
@@ -17,6 +19,7 @@ struct Preset {
     bool modifiedCameraColorEnabled = false;
     int modifiedCameraColorStrength = 100;
     bool stretchEnabled = false;
+    BasicAdjustmentOptions basicAdjustments;
     bool starReduceEnabled = false;
     int starReduceStrength = 70;
     QString outputFormat = "tiff16";

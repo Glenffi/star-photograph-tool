@@ -19,6 +19,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <iostream>
 #include <limits>
 
@@ -220,6 +221,32 @@ int main(int argc, char* argv[]) {
     const QCommandLineOption stretchOption(
         "stretch",
         "Apply background neutralization and linked RGB Arcsinh stretch.");
+    const QCommandLineOption temperatureOption(
+        "temperature", "Relative temperature adjustment (-100 to 100).",
+        "value", "0");
+    const QCommandLineOption tintOption(
+        "tint", "Green-to-magenta tint adjustment (-100 to 100).",
+        "value", "0");
+    const QCommandLineOption exposureOption(
+        "exposure", "Exposure adjustment in EV (-5.0 to 5.0).",
+        "ev", "0");
+    const QCommandLineOption contrastOption(
+        "contrast", "Contrast adjustment (-100 to 100).", "value", "0");
+    const QCommandLineOption highlightsOption(
+        "highlights", "Highlight adjustment (-100 to 100).", "value", "0");
+    const QCommandLineOption shadowsOption(
+        "shadows", "Shadow adjustment (-100 to 100).", "value", "0");
+    const QCommandLineOption whitesOption(
+        "whites", "White-level adjustment (-100 to 100).", "value", "0");
+    const QCommandLineOption blacksOption(
+        "blacks", "Black-level adjustment (-100 to 100).", "value", "0");
+    const QCommandLineOption vibranceOption(
+        "vibrance", "Vibrance adjustment (-100 to 100).", "value", "0");
+    const QCommandLineOption saturationOption(
+        "saturation", "Saturation adjustment (-100 to 100).", "value", "0");
+    const QCommandLineOption sharpeningOption(
+        "sharpening", "Luminance sharpening strength (0 to 100).",
+        "value", "0");
     const QCommandLineOption starReduceOption(
         "star-reduce-strength",
         "Enable star reduction at strength 1-100; 0 disables it.",
@@ -247,6 +274,10 @@ int main(int argc, char* argv[]) {
                        modifiedCameraColorOption,
                        modifiedCameraColorStrengthOption,
                        modifiedCameraGrayPointOption, stretchOption,
+                       temperatureOption, tintOption, exposureOption,
+                       contrastOption, highlightsOption, shadowsOption,
+                       whitesOption, blacksOption, vibranceOption,
+                       saturationOption, sharpeningOption,
                        starReduceOption});
     parser.process(application);
 
@@ -284,6 +315,40 @@ int main(int argc, char* argv[]) {
     const int starReduceStrength =
         parser.value(starReduceOption).toInt(&starReduceOk);
     const bool stretchEnabled = parser.isSet(stretchOption);
+    BasicAdjustmentOptions basicAdjustments;
+    bool temperatureOk = false;
+    basicAdjustments.temperature =
+        parser.value(temperatureOption).toInt(&temperatureOk);
+    bool tintOk = false;
+    basicAdjustments.tint = parser.value(tintOption).toInt(&tintOk);
+    bool exposureOk = false;
+    const double exposureEv = parser.value(exposureOption).toDouble(&exposureOk);
+    exposureOk = exposureOk && std::isfinite(exposureEv) &&
+        exposureEv >= -5.0 && exposureEv <= 5.0;
+    basicAdjustments.exposureTenths = exposureOk
+        ? static_cast<int>(std::lround(exposureEv * 10.0)) : 0;
+    bool contrastOk = false;
+    basicAdjustments.contrast =
+        parser.value(contrastOption).toInt(&contrastOk);
+    bool highlightsOk = false;
+    basicAdjustments.highlights =
+        parser.value(highlightsOption).toInt(&highlightsOk);
+    bool shadowsOk = false;
+    basicAdjustments.shadows =
+        parser.value(shadowsOption).toInt(&shadowsOk);
+    bool whitesOk = false;
+    basicAdjustments.whites = parser.value(whitesOption).toInt(&whitesOk);
+    bool blacksOk = false;
+    basicAdjustments.blacks = parser.value(blacksOption).toInt(&blacksOk);
+    bool vibranceOk = false;
+    basicAdjustments.vibrance =
+        parser.value(vibranceOption).toInt(&vibranceOk);
+    bool saturationOk = false;
+    basicAdjustments.saturation =
+        parser.value(saturationOption).toInt(&saturationOk);
+    bool sharpeningOk = false;
+    basicAdjustments.sharpening =
+        parser.value(sharpeningOption).toInt(&sharpeningOk);
     bool modifiedCameraColorStrengthOk = false;
     const int modifiedCameraColorStrength =
         parser.value(modifiedCameraColorStrengthOption).toInt(
@@ -385,6 +450,11 @@ int main(int argc, char* argv[]) {
                      "for timelapse sequence output.\n";
         return 2;
     }
+    if (timelapseMode && !basicAdjustments.isNeutral()) {
+        std::cerr << "Basic color adjustments and sharpening are not yet "
+                     "available for timelapse sequence output.\n";
+        return 2;
+    }
     if (!limitOk || limit < 0 || !startIndexOk || startIndex < 0 ||
         !referenceOk || referenceIndex < -1 ||
         !kappaOk || kappa <= 0.0 || !memoryBudgetOk ||
@@ -394,6 +464,10 @@ int main(int argc, char* argv[]) {
         modifiedCameraColorStrength < 0 ||
         modifiedCameraColorStrength > 100 ||
         !modifiedCameraGrayPointOk ||
+        !temperatureOk || !tintOk || !exposureOk || !contrastOk ||
+        !highlightsOk || !shadowsOk || !whitesOk || !blacksOk ||
+        !vibranceOk || !saturationOk || !sharpeningOk ||
+        !basicAdjustments.isValid() ||
         !starReduceOk || starReduceStrength < 0 ||
         starReduceStrength > 100 ||
         !starTrailCometStrengthOk || starTrailCometStrength < 0 ||
@@ -419,7 +493,8 @@ int main(int argc, char* argv[]) {
                      "--reference-index, "
                      "--method, --kappa, "
                      "--memory-budget-mib, --denoise-strength, "
-                     "--dehaze-strength, modified-camera color, or "
+                     "--dehaze-strength, modified-camera color, basic "
+                     "adjustments, or "
                      "--star-reduce-strength/timelapse/star-trail/sky-ground "
                      "options.\n";
         return 2;
@@ -483,6 +558,9 @@ int main(int argc, char* argv[]) {
     estimateOptions.modifiedCameraColor = modifiedCameraColorEnabled;
     estimateOptions.dehaze = dehazeStrength > 0;
     estimateOptions.stretch = stretchEnabled;
+    estimateOptions.basicAdjustments =
+        basicAdjustments.hasToneOrColorAdjustments();
+    estimateOptions.sharpening = basicAdjustments.hasSharpening();
     estimateOptions.starReduction = starReduceStrength > 0;
     estimateOptions.rawCalibration = deepSkyCalibration;
     const uint64_t estimatedBytes = timelapseMode
@@ -547,6 +625,7 @@ int main(int argc, char* argv[]) {
     params.dewarpEnabled = dehazeStrength > 0;
     params.dewarpStrength = dehazeStrength;
     params.stretchEnabled = stretchEnabled;
+    params.basicAdjustments = basicAdjustments;
     params.starReduceEnabled = starReduceStrength > 0;
     params.starReduceStrength = starReduceStrength;
 
@@ -790,6 +869,18 @@ int main(int argc, char* argv[]) {
     report["modifiedCameraColorSamplePoint"] = colorSamplePoint;
     report["dehazeStrength"] = dehazeStrength;
     report["stretchEnabled"] = stretchEnabled;
+    report["temperature"] = basicAdjustments.temperature;
+    report["tint"] = basicAdjustments.tint;
+    report["exposureEv"] =
+        static_cast<double>(basicAdjustments.exposureTenths) / 10.0;
+    report["contrast"] = basicAdjustments.contrast;
+    report["highlights"] = basicAdjustments.highlights;
+    report["shadows"] = basicAdjustments.shadows;
+    report["whites"] = basicAdjustments.whites;
+    report["blacks"] = basicAdjustments.blacks;
+    report["vibrance"] = basicAdjustments.vibrance;
+    report["saturation"] = basicAdjustments.saturation;
+    report["sharpening"] = basicAdjustments.sharpening;
     report["starReduceStrength"] = starReduceStrength;
     const StarReductionStats& reductionStats = worker.starReductionStats();
     report["starReductionDetectedStars"] =
@@ -850,6 +941,7 @@ int main(int argc, char* argv[]) {
         (params.noiseReductionEnabled && params.noiseReductionStrength > 0) ||
         params.modifiedCameraColorEnabled || params.dewarpEnabled ||
         params.stretchEnabled ||
+        !params.basicAdjustments.isNeutral() ||
         (params.skyGroundSepEnabled && params.groundDetailStrength > 0) ||
         (params.starReduceEnabled && params.starReduceStrength > 0);
     const PreviewImage8 preview = hasFinishingStage

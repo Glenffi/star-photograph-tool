@@ -69,6 +69,7 @@ public:
         bool dewarpEnabled = false;
         int dewarpStrength = 30;
         bool stretchEnabled = false;
+        BasicAdjustmentOptions basicAdjustments;
         bool starReduceEnabled = false;
         int starReduceStrength = 70;
         QString outputFormat = "tiff16";

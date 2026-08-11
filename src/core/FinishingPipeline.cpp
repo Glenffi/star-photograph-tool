@@ -127,6 +127,18 @@ bool FinishingPipeline::process(
             if (!finishStage()) return false;
         }
 
+        if (options.basicAdjustments.hasToneOrColorAdjustments()) {
+            if (!beginStage(FinishingStage::BasicAdjustments)) return false;
+            std::vector<uint16_t> adjusted;
+            if (!BasicAdjustmentEngine::adjustRgb(
+                    rgb, width, height, options.basicAdjustments, adjusted)) {
+                result.error = "Basic color and tone adjustments failed";
+                return false;
+            }
+            rgb = std::move(adjusted);
+            if (!finishStage()) return false;
+        }
+
         if (options.skyGroundSeparation &&
             options.groundDetailStrength > 0) {
             if (!beginStage(FinishingStage::GroundDetail)) return false;
@@ -136,6 +148,19 @@ bool FinishingPipeline::process(
                 result.error = "Ground detail restoration failed";
                 return false;
             }
+            if (!finishStage()) return false;
+        }
+
+        if (options.basicAdjustments.hasSharpening()) {
+            if (!beginStage(FinishingStage::Sharpening)) return false;
+            std::vector<uint16_t> sharpened;
+            if (!BasicAdjustmentEngine::sharpenRgb(
+                    rgb, width, height,
+                    options.basicAdjustments.sharpening, sharpened)) {
+                result.error = "Luminance sharpening failed";
+                return false;
+            }
+            rgb = std::move(sharpened);
             if (!finishStage()) return false;
         }
 

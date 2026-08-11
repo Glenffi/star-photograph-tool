@@ -60,6 +60,17 @@ void PresetManager::savePreset(const Preset& preset, const QString& path) {
     obj["modifiedCameraColorEnabled"] = preset.modifiedCameraColorEnabled;
     obj["modifiedCameraColorStrength"] = preset.modifiedCameraColorStrength;
     obj["stretchEnabled"] = preset.stretchEnabled;
+    obj["temperature"] = preset.basicAdjustments.temperature;
+    obj["tint"] = preset.basicAdjustments.tint;
+    obj["exposureTenths"] = preset.basicAdjustments.exposureTenths;
+    obj["contrast"] = preset.basicAdjustments.contrast;
+    obj["highlights"] = preset.basicAdjustments.highlights;
+    obj["shadows"] = preset.basicAdjustments.shadows;
+    obj["whites"] = preset.basicAdjustments.whites;
+    obj["blacks"] = preset.basicAdjustments.blacks;
+    obj["vibrance"] = preset.basicAdjustments.vibrance;
+    obj["saturation"] = preset.basicAdjustments.saturation;
+    obj["sharpening"] = preset.basicAdjustments.sharpening;
     obj["starReduceEnabled"] = preset.starReduceEnabled;
     obj["starReduceStrength"] = preset.starReduceStrength;
     obj["outputFormat"] = preset.outputFormat;
@@ -98,6 +109,18 @@ Preset PresetManager::loadPreset(const QString& path) {
     preset.modifiedCameraColorStrength =
         obj["modifiedCameraColorStrength"].toInt(100);
     preset.stretchEnabled = obj["stretchEnabled"].toBool(false);
+    preset.basicAdjustments.temperature = obj["temperature"].toInt(0);
+    preset.basicAdjustments.tint = obj["tint"].toInt(0);
+    preset.basicAdjustments.exposureTenths =
+        obj["exposureTenths"].toInt(0);
+    preset.basicAdjustments.contrast = obj["contrast"].toInt(0);
+    preset.basicAdjustments.highlights = obj["highlights"].toInt(0);
+    preset.basicAdjustments.shadows = obj["shadows"].toInt(0);
+    preset.basicAdjustments.whites = obj["whites"].toInt(0);
+    preset.basicAdjustments.blacks = obj["blacks"].toInt(0);
+    preset.basicAdjustments.vibrance = obj["vibrance"].toInt(0);
+    preset.basicAdjustments.saturation = obj["saturation"].toInt(0);
+    preset.basicAdjustments.sharpening = obj["sharpening"].toInt(0);
     preset.starReduceEnabled = obj["starReduceEnabled"].toBool(false);
     preset.starReduceStrength = obj["starReduceStrength"].toInt(70);
     preset.outputFormat = obj["outputFormat"].toString("tiff16");

@@ -14,8 +14,12 @@ QString stageText(FinishingStage stage) {
         return QString::fromUtf8("快速预览：去雾");
     case FinishingStage::Stretch:
         return QString::fromUtf8("快速预览：曲线拉伸");
+    case FinishingStage::BasicAdjustments:
+        return QString::fromUtf8("快速预览：基础调色");
     case FinishingStage::GroundDetail:
         return QString::fromUtf8("快速预览：地景细节");
+    case FinishingStage::Sharpening:
+        return QString::fromUtf8("快速预览：锐化");
     case FinishingStage::StarReduction:
         return QString::fromUtf8("快速预览：缩星");
     }

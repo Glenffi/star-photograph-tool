@@ -174,6 +174,10 @@ void testQuickPreviewNoOpAndCancellation() {
     colorOptions.modifiedCameraColor.manualPointX = 0.25;
     colorOptions.modifiedCameraColor.manualPointY = 0.25;
     colorOptions.modifiedCameraColor.strength = 60;
+    colorOptions.basicAdjustments.temperature = 12;
+    colorOptions.basicAdjustments.exposureTenths = 3;
+    colorOptions.basicAdjustments.vibrance = 18;
+    colorOptions.basicAdjustments.sharpening = 25;
     std::vector<uint16_t> expected = colorSource;
     FinishingResult expectedResult;
     check(FinishingPipeline::process(

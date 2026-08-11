@@ -17,6 +17,7 @@
 #include <QDialog>
 #include <QLineEdit>
 #include <QComboBox>
+#include <QCloseEvent>
 #include <QLabel>
 #include <QDragEnterEvent>
 #include <QDropEvent>
@@ -101,6 +102,11 @@ public:
     }
 
 protected:
+    void closeEvent(QCloseEvent* event) override {
+        if (m_paramsPanel) m_paramsPanel->saveCurrentSettings();
+        QMainWindow::closeEvent(event);
+    }
+
     void dragEnterEvent(QDragEnterEvent* event) override {
         if (!processingActive() && event->mimeData()->hasUrls()) {
             event->acceptProposedAction();
@@ -772,6 +778,8 @@ private:
         options.dehazeEnabled = m_paramsPanel->dewarpEnabled();
         options.dehazeStrength = m_paramsPanel->dewarpStrength();
         options.stretchEnabled = m_paramsPanel->stretchEnabled();
+        options.basicAdjustments =
+            m_paramsPanel->basicAdjustmentOptions();
         options.skyGroundSeparation =
             (m_scene == ProcessingScene::SkyGround &&
              m_paramsPanel->skyGroundSeparationEnabled()) ||
@@ -1191,6 +1199,8 @@ private slots:
         params.dewarpEnabled = m_paramsPanel->dewarpEnabled();
         params.dewarpStrength = m_paramsPanel->dewarpStrength();
         params.stretchEnabled = m_paramsPanel->stretchEnabled();
+        params.basicAdjustments =
+            m_paramsPanel->basicAdjustmentOptions();
         params.starReduceEnabled = !params.starTrailMode &&
             m_paramsPanel->starReduceEnabled();
         params.starReduceStrength = m_paramsPanel->starReduceStrength();

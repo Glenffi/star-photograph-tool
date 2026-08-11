@@ -118,6 +118,8 @@ void testEnabledStagesRunInWorkerOrder() {
     options.dehazeEnabled = true;
     options.dehazeStrength = 10;
     options.stretchEnabled = true;
+    options.basicAdjustments.exposureTenths = 2;
+    options.basicAdjustments.sharpening = 10;
     options.skyGroundSeparation = true;
     options.groundDetailStrength = 10;
     options.starReductionEnabled = true;
@@ -133,7 +135,9 @@ void testEnabledStagesRunInWorkerOrder() {
         FinishingStage::NoiseReduction,
         FinishingStage::Dehaze,
         FinishingStage::Stretch,
+        FinishingStage::BasicAdjustments,
         FinishingStage::GroundDetail,
+        FinishingStage::Sharpening,
         FinishingStage::StarReduction
     };
 

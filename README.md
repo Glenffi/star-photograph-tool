@@ -2,7 +2,7 @@
 
 跨平台 RAW 图像处理软件，专注于星空摄影领域。
 
-> **当前版本**：v0.7.0。核心闭环、带聚合预检的 Bayer 域深空校准、BCF 改机色彩还原、天地分离、星轨合成、延时序列降噪、连续低频背景校正、保色 Arcsinh 拉伸、多尺度降噪、Starless/Stars 缩星、可保持 100% 视图的参数快速预览、完整双画面比较，以及重新设计的任务型桌面工作台已经接入；Windows 仍需实机验证。
+> **当前版本**：v0.8.0。核心闭环、带聚合预检的 Bayer 域深空校准、BCF 改机色彩还原、天地分离、星轨合成、延时序列降噪、连续低频背景校正、保色 Arcsinh 拉伸、多尺度降噪、ACR 风格基础调色与亮度锐化、Starless/Stars 缩星、可保持 100% 视图的参数快速预览、完整双画面比较，以及任务型桌面工作台已经接入；Windows 仍需实机验证。
 
 ## 当前已实现
 
@@ -20,6 +20,8 @@
 - 线性 RGB 多尺度降噪，亮度与色度分离处理并保护强结构
 - BCF/天文改机色彩还原：在线性域自动采样中性天空，或从结果预览吸取手动灰点；校正强度可在 0–100% 连续调整
 - 亮度引导去雾、连续的低频背景色偏/亮度校正与 RGB 联动 Arcsinh 拉伸；背景模型使用共享亮度肩部和有符号色度偏移，不再由三个通道各自的硬阈值形成彩色等值环；高光保留 85% 以上亮度层次，并通过 90% 起始的混合保色肩部避免高饱和星云或亮星单通道硬截断
+- ACR 风格基础调整：色温偏移、色调、曝光、对比度、高光、阴影、白色、黑色、自然饱和度和饱和度；明暗调整联动 RGB 亮度，颜色超界时围绕目标亮度收敛色度，避免逐通道硬裁切形成新色带
+- 亮度通道阈值锐化：保护深阴影与亮星核心，重建 RGB 时保持色相；默认关闭，建议在线性降噪之后以 10–35 的保守强度使用
 - 局部 RGB 背景重建的 Starless/Stars 分离、亚像素圆形 Minimum 和弱残留清理
 - 线性 sRGB 16-bit TIFF（嵌入 ICC）和 sRGB 8-bit PNG 导出
 - 内嵌 RAW 缩略图优先、half-size 快速回退的浏览预览
@@ -76,6 +78,7 @@ StarProcessor/
 │   │   ├── TimelapseEngine.h/cpp       # 延时序列滑动窗口稳健时域降噪
 │   │   ├── PhotometricNormalizer.h/cpp # 帧间曝光与背景色偏匹配
 │   │   ├── NoiseReductionEngine.h/cpp # 线性 RGB 多尺度亮度/色度降噪
+│   │   ├── BasicAdjustmentEngine.h/cpp # ACR 风格明暗、色彩与亮度锐化
 │   │   ├── StarReducer.h/cpp          # Starless/Stars 分离 + 亚像素圆形 Minimum
 │   │   ├── ImageExporter.h/cpp        # 16-bit TIFF / PNG 8-bit 导出
 │   │   ├── AutoOptimizeEngine.h/cpp   # 去雾、Arcsinh 拉伸与蒙版地景细节恢复
@@ -167,7 +170,7 @@ cmake --build . --config Release
 .\Release\StarProcessor.exe
 ```
 
-> **注意**：当前 P2+ 已实现核心处理链路（对齐 → 帧间光度匹配 → 堆栈 → 线性降噪 → 自动优化 → Starless/Stars 缩星 → 导出）。
+> **注意**：当前处理链路为：对齐 → 帧间光度匹配 → 堆栈 → 改机色彩还原 → 线性降噪 → 去雾/自动拉伸 → 基础调色 → 地景细节 → 亮度锐化 → Starless/Stars 缩星 → 导出。未启用的阶段会直接跳过。
 
 ## 客户端打包
 
@@ -235,7 +238,9 @@ Windows Server 2022 上使用 MSVC 原生构建。推送与 CMake 版本一致�
 ./build/StarProcessorPipelineRunner \
   --input ../star-photograph-tool-samples/star-raw \
   --output build/single-output --single --denoise-strength 25 \
-  --restore-modified-camera-color --modified-camera-color-strength 75 --stretch
+  --restore-modified-camera-color --modified-camera-color-strength 75 --stretch \
+  --exposure 0.3 --highlights -25 --shadows 15 \
+  --vibrance 18 --sharpening 25
 
 # 手动灰点使用 0–1 归一化坐标，并自动启用改机色彩还原
 ./build/StarProcessorPipelineRunner \
@@ -276,6 +281,8 @@ Windows Server 2022 上使用 MSVC 原生构建。推送与 CMake 版本一致�
 深空校准通过 `--dark-dir`、`--flat-dir`、`--bias-dir` 同时启用。三类素材必须与 Light 来自同一机身、ISO、传感器尺寸和 Bayer 布局；Dark 还必须匹配 Light 曝光，Bias 必须为短曝光。正式解包 CFA 前会先读取全部 RAW 头，一次性聚合报告重复素材、相机/尺寸/ISO/曝光不匹配；错误时 `pipeline-report.json` 的 `error` 保留完整诊断，成功时 `calibrationPreflightWarnings` 记录帧数偏少或长曝光 Flat 等建议。像素相关的 Flat 欠曝、接近饱和和 CFA 布局仍在正式校准阶段继续检查。
 
 工具会生成完整分辨率 TIFF、固定全范围的 `result-preview.png` 和 `pipeline-report.json`。报告分别记录全流程耗时、纯堆栈耗时、每帧质量评分、结构化跳帧原因、光度模型、自动裁切偏移、输出直方图和画质选项；当整组素材的中位星点椭率达到 0.22 时，还会写入 `starShapeWarning`，提示检查单帧曝光拖线或镜头像差。`--start-index` 先跳过指定数量的已排序 RAW，再由 `--limit` 限制数量，`--reference-index` 始终相对于最终选中的片段。`--restore-modified-camera-color` 在线性 RGB 阶段自动估计并校正 BCF/天文改机的通道响应，`--modified-camera-color-strength` 接受 `0–100`，`--modified-camera-gray-point x,y` 以归一化坐标改用手动稳健邻域；报告会记录模式、强度、中性样本、RGB 增益和高光截断数量。普通相机不应默认启用。天地分离模式还会保存本次实际使用的 `sky-ground-mask.png`，并记录蒙版来源与天空占比，便于检查自动检测是否可靠；`--sky-ground-mask /path/to/mask.png` 可改用白色天空、黑色地景的用户蒙版。`--ground-method` 接受 `average`、`reference` 或 `median`，默认 `average`；`--ground-detail-strength` 接受 `0–70`，默认 40。天地模式下，多尺度降噪和缩星只作用于天空，地景由原坐标多帧合成及可选细节恢复处理。延时模式为每张输入生成一张同名序号输出；`--timelapse-window` 接受 `3` 或 `5`，`--timelapse-strength` 和 `--timelapse-motion-protection` 接受 `0–100`，后者默认为 75；`--timelapse-no-ground` 可关闭固定地景保护。延时管线会根据天空区域估计整段序列的亮度与色偏曲线，并以受限的 5 帧中值平滑抑制孤立闪烁，不会强行拉平日出、月升等连续曝光趋势。`--reference-index -1` 默认自动选择参考帧；`--no-quality-rejection` 保留严重质量离群帧，但仍执行自动参考帧选择。帧间光度匹配默认开启；`--no-photometric-normalization` 可关闭帧间匹配和延时防闪烁，用于 A/B 检查。`--denoise-strength` 接受 `0–70`；`--stretch` 先进行背景校正，再根据背景中值和高光端自动求解 RGB 联动 Arcsinh 曲线，亮度高光继续使用剩余输出空间，高饱和像素在 90% 以上通过保色与最低亮度约束的混合肩部收敛到 99.5%，避免直接夹到 65535；`--dehaze-strength` 和 `--star-reduce-strength` 接受 `0–100`。处理期间，完整帧写入任务专属系统临时目录；任务正常、失败或取消后都会自动清理临时缓存。
+
+基础调色参数与 GUI 使用同一引擎：`--temperature`、`--tint`、`--contrast`、`--highlights`、`--shadows`、`--whites`、`--blacks`、`--vibrance` 和 `--saturation` 接受 `-100..100`，`--exposure` 接受 `-5.0..5.0 EV`，`--sharpening` 接受 `0..100`。这些参数及结果统计会写入 `pipeline-report.json`，便于同一 RAW 的 A/B 对照。延时逐帧输出当前不支持这组收尾参数。
 
 `--memory-budget-mib` 可为测试或受控运行设置更低的内存上限。该值只能收紧平台安全预算，不能绕过实时内存门禁；传 `0` 或省略参数时使用自动预算。
 

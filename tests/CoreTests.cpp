@@ -2285,6 +2285,11 @@ void testPresetDenoisePersistence() {
     original.photometricNormalizationEnabled = false;
     original.noiseReductionEnabled = true;
     original.noiseReductionStrength = 42;
+    original.basicAdjustments.temperature = 18;
+    original.basicAdjustments.exposureTenths = 7;
+    original.basicAdjustments.highlights = -24;
+    original.basicAdjustments.vibrance = 16;
+    original.basicAdjustments.sharpening = 35;
     const QString path = directory.filePath("preset.json");
     PresetManager::savePreset(original, path);
     const Preset loaded = PresetManager::loadPreset(path);
@@ -2292,8 +2297,13 @@ void testPresetDenoisePersistence() {
               !loaded.autoRejectLowQualityFrames &&
               !loaded.photometricNormalizationEnabled &&
               loaded.noiseReductionEnabled &&
-              loaded.noiseReductionStrength == 42,
-          "JSON presets should persist denoise settings");
+              loaded.noiseReductionStrength == 42 &&
+              loaded.basicAdjustments.temperature == 18 &&
+              loaded.basicAdjustments.exposureTenths == 7 &&
+              loaded.basicAdjustments.highlights == -24 &&
+              loaded.basicAdjustments.vibrance == 16 &&
+              loaded.basicAdjustments.sharpening == 35,
+          "JSON presets should persist denoise and basic adjustment settings");
 
     const QString legacyPath = directory.filePath("legacy.json");
     QFile legacyFile(legacyPath);
@@ -2306,13 +2316,15 @@ void testPresetDenoisePersistence() {
               legacy.photometricNormalizationEnabled &&
               !legacy.noiseReductionEnabled &&
               legacy.noiseReductionStrength == 30 &&
+              legacy.basicAdjustments.isNeutral() &&
               legacy.kappaValue == 2.5,
           "Legacy presets without newer fields should use safe defaults");
 
     const Preset missing =
         PresetManager::loadPreset(directory.filePath("missing.json"));
     check(!missing.noiseReductionEnabled &&
-              missing.noiseReductionStrength == 30,
+              missing.noiseReductionStrength == 30 &&
+              missing.basicAdjustments.isNeutral(),
           "Missing preset files should return initialized defaults");
 }
 
