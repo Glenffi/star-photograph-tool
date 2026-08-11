@@ -71,13 +71,13 @@ def main() -> int:
             parser.error(f"duplicate package platform: {platform}")
         expected_name = {
             "windows-x64": re.compile(
-                rf"^StarProcessor-Windows-x64-v{re.escape(version)}\\.zip$"
+                rf"^StarProcessor-Windows-x64-v{re.escape(version)}\.zip$"
             ),
             "macos-arm64": re.compile(
-                rf"^StarProcessor-v{re.escape(version)}-macOS-arm64\\.dmg$"
+                rf"^StarProcessor-v{re.escape(version)}-macOS-arm64\.dmg$"
             ),
             "macos-x64": re.compile(
-                rf"^StarProcessor-v{re.escape(version)}-macOS-x64\\.dmg$"
+                rf"^StarProcessor-v{re.escape(version)}-macOS-x64\.dmg$"
             ),
         }[platform]
         if not expected_name.fullmatch(path.name):
