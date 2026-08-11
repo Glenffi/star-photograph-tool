@@ -542,7 +542,7 @@ int main(int argc, char* argv[]) {
 
     RawImageLoader loader;
     RawImageLoader::Metadata metadata;
-    if (!loader.loadMetadata(files.front().toStdString(), metadata)) {
+    if (!loader.loadMetadata(files.front(), metadata)) {
         std::cerr << "Cannot read first-frame metadata.\n";
         return 3;
     }

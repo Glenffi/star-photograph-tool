@@ -2243,7 +2243,7 @@ void testTiffIccProfile() {
         0, 1000, 2000, 10000, 20000, 30000,
         40000, 50000, 60000, 65535, 32768, 16384
     };
-    check(ImageExporter::exportRgb16(rgb, 2, 2, path.toStdString(),
+    check(ImageExporter::exportRgb16(rgb, 2, 2, path,
                                      ImageExporter::Tiff16),
           "RGB TIFF export should succeed");
 
@@ -2264,6 +2264,13 @@ void testTiffIccProfile() {
               "Embedded TIFF ICC profile should be parseable");
     }
     TIFFClose(tiff);
+
+    const QString unicodePath = directory.filePath(
+        QString::fromUtf8("中文输出-银河.tiff"));
+    check(ImageExporter::exportRgb16(rgb, 2, 2, unicodePath,
+                                     ImageExporter::Tiff16) &&
+              QFileInfo::exists(unicodePath),
+          "RGB TIFF export should support a Unicode file path");
 }
 
 void testPresetDenoisePersistence() {
@@ -2332,11 +2339,11 @@ void testRawApiValidation() {
     RawImageLoader loader;
     RawImageLoader::Metadata metadata;
     RawImageLoader::PreviewData preview;
-    check(!loader.loadMetadata("/path/that/does/not/exist.raw", metadata),
+    check(!loader.loadMetadata(QStringLiteral("/path/that/does/not/exist.raw"), metadata),
           "Metadata API should report missing files");
-    check(!loader.loadPreview("/path/that/does/not/exist.raw", 120, preview),
+    check(!loader.loadPreview(QStringLiteral("/path/that/does/not/exist.raw"), 120, preview),
           "Preview API should report missing files");
-    check(!loader.loadPreview("unused.raw", 0, preview),
+    check(!loader.loadPreview(QStringLiteral("unused.raw"), 0, preview),
           "Preview API should reject a non-positive requested size before I/O");
 }
 
@@ -2426,7 +2433,7 @@ void testSkyGroundHorizonDetection() {
         alphaMask.setPixelColor(1, 0, QColor(255, 255, 255, 255));
         const QString path = directory.filePath("alpha-mask.png");
         check(alphaMask.save(path), "Alpha mask fixture should be writable");
-        check(SkyGroundMask::loadUserMask(path.toStdString(), 2, 1, mask, 0) &&
+        check(SkyGroundMask::loadUserMask(path, 2, 1, mask, 0) &&
                   mask == std::vector<uint8_t>({0, 255}),
               "Transparent user-mask pixels should mean ground, not sky");
     }

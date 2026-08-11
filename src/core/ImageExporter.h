@@ -1,7 +1,7 @@
 #pragma once
 
+#include <QString>
 #include <cstdint>
-#include <string>
 #include <vector>
 
 /**
@@ -28,7 +28,7 @@ public:
      */
     static bool export16Bit(const std::vector<uint16_t>& image,
                             int width, int height,
-                            const std::string& path,
+                            const QString& path,
                             Format format = Tiff16);
 
     /**
@@ -43,6 +43,6 @@ public:
      */
     static bool exportRgb16(const std::vector<uint16_t>& rgb,
                               int width, int height,
-                              const std::string& path,
+                              const QString& path,
                               Format format = Tiff16);
 };

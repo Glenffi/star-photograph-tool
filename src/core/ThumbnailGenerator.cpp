@@ -20,15 +20,18 @@ public:
         RawImageLoader::Metadata metadata;
         QPointer<ThumbnailGenerator> safeGen(m_generator);
 
-        const bool loaded = loader.loadPreview(m_filePath.toStdString(), m_maxSize,
+        const bool loaded = loader.loadPreview(m_filePath, m_maxSize,
                                                preview, &metadata);
+        const bool metadataLoaded = metadata.width > 0 && metadata.height > 0;
 
         // Metadata is available after open_file(), even when pixel preview
         // extraction fails for a camera-specific RAW variant.
-        QMetaObject::invokeMethod(m_generator, [safeGen, filePath = m_filePath, metadata]() {
+        QMetaObject::invokeMethod(m_generator, [safeGen, filePath = m_filePath,
+                                                 metadata, metadataLoaded]() {
             if (!safeGen) return;
             emit safeGen->metadataReady(filePath, metadata.iso, metadata.exposureTime,
-                                        metadata.aperture, metadata.focalLength);
+                                        metadata.aperture, metadata.focalLength,
+                                        metadataLoaded);
         }, Qt::QueuedConnection);
 
         if (!loaded) {

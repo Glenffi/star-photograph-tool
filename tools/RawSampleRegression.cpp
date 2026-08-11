@@ -230,7 +230,7 @@ QJsonObject inspectFile(const QString& sampleRoot,
     RawImageLoader::Metadata metadata;
     QElapsedTimer timer;
     timer.start();
-    const bool metadataOk = loader.loadMetadata(path.toStdString(), metadata);
+    const bool metadataOk = loader.loadMetadata(path, metadata);
     result["metadataMs"] = static_cast<double>(timer.elapsed());
     result["metadataOk"] = metadataOk;
     if (metadataOk) {
@@ -240,7 +240,7 @@ QJsonObject inspectFile(const QString& sampleRoot,
 
     RawImageLoader::PreviewData preview;
     timer.restart();
-    const bool previewOk = loader.loadPreview(path.toStdString(), 1600, preview);
+    const bool previewOk = loader.loadPreview(path, 1600, preview);
     result["previewMs"] = static_cast<double>(timer.elapsed());
     result["previewOk"] = previewOk;
     if (previewOk) {
@@ -260,7 +260,7 @@ QJsonObject inspectFile(const QString& sampleRoot,
 
     RawImageLoader::ImageData image;
     timer.restart();
-    const bool fullOk = loader.loadRaw(path.toStdString(), image);
+    const bool fullOk = loader.loadRaw(path, image);
     result["fullDecodeMs"] = static_cast<double>(timer.elapsed());
     result["fullDecodeOk"] = fullOk;
     if (!fullOk) return result;
@@ -536,7 +536,7 @@ int main(int argc, char* argv[]) {
         if (!files.isEmpty()) {
             RawImageLoader metadataLoader;
             RawImageLoader::Metadata firstMetadata;
-            if (metadataLoader.loadMetadata(files.front().toStdString(), firstMetadata)) {
+            if (metadataLoader.loadMetadata(files.front(), firstMetadata)) {
                 memoryEstimate["normalBytes"] = QString::number(
                     ProcessingMemoryEstimator::estimatePeakBytes(
                         firstMetadata.width, firstMetadata.height, files.size(), false));

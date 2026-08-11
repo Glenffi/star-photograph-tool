@@ -37,7 +37,10 @@ QString formatExposure(double exposureTime) {
 }
 
 QString formatMetadata(const FileItem& item) {
-    if (item.iso <= 0 && item.exposureTime <= 0.0 && item.focalLength <= 0) {
+    if (item.metadataFailed) {
+        return QString::fromUtf8("RAW 读取失败");
+    }
+    if (!item.metadataLoaded) {
         return QString::fromUtf8("正在读取元数据...");
     }
     const QString iso = item.iso > 0
@@ -105,10 +108,10 @@ FileCard::FileCard(const FileItem& item, QWidget* parent)
     m_metaLabel = new QLabel(this);
     m_metaLabel->setMinimumWidth(0);
     m_metaLabel->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
-    m_metaLabel->setStyleSheet(
-        "font-size: 10px; color: #7F918D; background-color: transparent;"
-    );
     m_metaLabel->setText(formatMetadata(item));
+    m_metaLabel->setStyleSheet(QString(
+        "font-size: 10px; color: %1; background-color: transparent;"
+    ).arg(item.metadataFailed ? "#E69B8F" : "#7F918D"));
     textLayout->addWidget(m_metaLabel);
 
     layout->addLayout(textLayout, 1);
@@ -136,6 +139,9 @@ void FileCard::updateFromItem(const FileItem& item) {
     }
 
     m_metaLabel->setText(formatMetadata(item));
+    m_metaLabel->setStyleSheet(QString(
+        "font-size: 10px; color: %1; background-color: transparent;"
+    ).arg(item.metadataFailed ? "#E69B8F" : "#7F918D"));
 
     updateStyle();
 }
@@ -510,6 +516,8 @@ void ProjectPanel::applyPreviewData(const QString& filePath,
     m_fileItems[index].exposureTime = exposureTime;
     m_fileItems[index].aperture = aperture;
     m_fileItems[index].focalLength = focalLength;
+    m_fileItems[index].metadataLoaded = true;
+    m_fileItems[index].metadataFailed = false;
     updateCard(index);
     updateBottomBar();
     for (const QString& pending : std::exchange(
@@ -715,13 +723,17 @@ void ProjectPanel::onThumbnailReady(const QString& filePath, const QPixmap& thum
     updateCard(idx);
 }
 
-void ProjectPanel::onMetadataReady(const QString& filePath, int iso, double exposureTime, double aperture, int focalLength) {
+void ProjectPanel::onMetadataReady(const QString& filePath, int iso,
+                                   double exposureTime, double aperture,
+                                   int focalLength, bool loaded) {
     int idx = findIndexByPath(filePath);
     if (idx < 0) return;
     m_fileItems[idx].iso = iso;
     m_fileItems[idx].exposureTime = exposureTime;
     m_fileItems[idx].aperture = aperture;
     m_fileItems[idx].focalLength = focalLength;
+    m_fileItems[idx].metadataLoaded = loaded;
+    m_fileItems[idx].metadataFailed = !loaded;
     updateCard(idx);
     updateBottomBar();
 }

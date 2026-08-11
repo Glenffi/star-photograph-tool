@@ -2,6 +2,7 @@
 
 #include <array>
 #include <cstdint>
+#include <QString>
 #include <string>
 #include <vector>
 
@@ -67,15 +68,17 @@ public:
     // - loadMetadata(): RAW header only; never unpacks or demosaics pixels.
     // - loadPreview(): embedded preview first, then a fast half-size fallback.
     // - loadRaw(): full-resolution AHD, reserved for the processing pipeline.
-    bool loadMetadata(const std::string& filePath, Metadata& out);
-    bool loadPreview(const std::string& filePath, int requestedMaxSize,
+    // Keep paths as QString until they reach LibRaw. On Windows this lets the
+    // implementation use LibRaw's wchar_t overload for non-ASCII file names.
+    bool loadMetadata(const QString& filePath, Metadata& out);
+    bool loadPreview(const QString& filePath, int requestedMaxSize,
                      PreviewData& out, Metadata* metadata = nullptr);
-    bool loadRaw(const std::string& filePath, ImageData& out);
+    bool loadRaw(const QString& filePath, ImageData& out);
 
     // Deep-sky calibration path. Only repeating 2x2 Bayer sensors are accepted
     // for now; X-Trans and already-demosaiced RAW variants fail explicitly.
-    bool loadRawCfa(const std::string& filePath, CfaImageData& out);
-    bool processCalibratedCfa(const std::string& filePath,
+    bool loadRawCfa(const QString& filePath, CfaImageData& out);
+    bool processCalibratedCfa(const QString& filePath,
                               const CfaImageData& calibrated,
                               ImageData& out);
 };

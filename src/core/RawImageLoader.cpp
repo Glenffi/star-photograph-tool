@@ -2,15 +2,29 @@
 
 #include <libraw/libraw.h>
 
+#include <QFile>
+#include <QDebug>
+
 #include <algorithm>
 #include <array>
 #include <cstring>
 #include <ctime>
-#include <iostream>
 #include <limits>
 #include <memory>
 
 namespace {
+
+int openRawFile(LibRaw& processor, const QString& filePath) {
+#ifdef _WIN32
+    // LibRaw's narrow overload follows the active Windows code page, so UTF-8
+    // paths fail when a user name or parent folder contains Chinese text.
+    const std::wstring nativePath = filePath.toStdWString();
+    return processor.open_file(nativePath.c_str());
+#else
+    const QByteArray nativePath = QFile::encodeName(filePath);
+    return processor.open_file(nativePath.constData());
+#endif
+}
 
 void extractMetadata(const LibRaw& processor, RawImageLoader::Metadata& out) {
     const auto& data = processor.imgdata;
@@ -84,12 +98,12 @@ bool copyBitmap8(const libraw_processed_image_t& image,
     return true;
 }
 
-bool loadFastHalfSize(const std::string& filePath,
+bool loadFastHalfSize(const QString& filePath,
                       RawImageLoader::PreviewData& out) {
     // LibRaw contains large internal fixed-size tables. Keep it off the stack:
     // Qt worker threads have a smaller default stack than the main thread.
     auto processor = std::make_unique<LibRaw>();
-    int result = processor->open_file(filePath.c_str());
+    int result = openRawFile(*processor, filePath);
     if (result != LIBRAW_SUCCESS) return false;
     result = processor->unpack();
     if (result != LIBRAW_SUCCESS) return false;
@@ -182,7 +196,7 @@ bool extractBayerCfa(LibRaw& processor, RawImageLoader::CfaImageData& out,
     return true;
 }
 
-bool processOpenedRaw(LibRaw& processor, const std::string& filePath,
+bool processOpenedRaw(LibRaw& processor, const QString& filePath,
                       RawImageLoader::ImageData& out,
                       bool calibratedCfa, uint16_t calibratedSaturation) {
     auto& params = processor.imgdata.params;
@@ -205,21 +219,21 @@ bool processOpenedRaw(LibRaw& processor, const std::string& filePath,
 
     int result = processor.dcraw_process();
     if (result != LIBRAW_SUCCESS) {
-        std::cerr << "LibRaw dcraw_process failed: " << filePath
-                  << " (code: " << result << ")" << std::endl;
+        qWarning().noquote() << "LibRaw dcraw_process failed:" << filePath
+                             << "(code:" << result << ")";
         return false;
     }
 
     libraw_processed_image_t* image = processor.dcraw_make_mem_image(&result);
     if (!image || result != LIBRAW_SUCCESS || image->type != LIBRAW_IMAGE_BITMAP) {
-        std::cerr << "LibRaw dcraw_make_mem_image failed: " << filePath << std::endl;
+        qWarning().noquote() << "LibRaw dcraw_make_mem_image failed:" << filePath;
         if (image) LibRaw::dcraw_clear_mem(image);
         return false;
     }
 
     if (image->bits != 16 || image->colors != 3) {
-        std::cerr << "Unsupported LibRaw output (bits=" << image->bits
-                  << ", colors=" << image->colors << "): " << filePath << std::endl;
+        qWarning().noquote() << "Unsupported LibRaw output (bits=" << image->bits
+                             << ", colors=" << image->colors << "):" << filePath;
         LibRaw::dcraw_clear_mem(image);
         return false;
     }
@@ -233,7 +247,7 @@ bool processOpenedRaw(LibRaw& processor, const std::string& filePath,
     const size_t valueCount = pixelCount * 3;
     const size_t expectedSize = valueCount * sizeof(uint16_t);
     if (image->data_size < expectedSize) {
-        std::cerr << "LibRaw buffer is smaller than expected: " << filePath << std::endl;
+        qWarning().noquote() << "LibRaw buffer is smaller than expected:" << filePath;
         LibRaw::dcraw_clear_mem(image);
         return false;
     }
@@ -249,29 +263,29 @@ bool processOpenedRaw(LibRaw& processor, const std::string& filePath,
 
 } // namespace
 
-bool RawImageLoader::loadMetadata(const std::string& filePath, Metadata& out) {
+bool RawImageLoader::loadMetadata(const QString& filePath, Metadata& out) {
     out = {};
     auto processor = std::make_unique<LibRaw>();
-    const int result = processor->open_file(filePath.c_str());
+    const int result = openRawFile(*processor, filePath);
     if (result != LIBRAW_SUCCESS) {
-        std::cerr << "LibRaw open_file failed: " << filePath
-                  << " (code: " << result << ")" << std::endl;
+        qWarning().noquote() << "LibRaw open_file failed:" << filePath
+                             << "(code:" << result << ")";
         return false;
     }
     extractMetadata(*processor, out);
     return true;
 }
 
-bool RawImageLoader::loadPreview(const std::string& filePath, int requestedMaxSize,
+bool RawImageLoader::loadPreview(const QString& filePath, int requestedMaxSize,
                                  PreviewData& out, Metadata* metadata) {
     out = {};
     if (requestedMaxSize <= 0) return false;
 
     auto processor = std::make_unique<LibRaw>();
-    int result = processor->open_file(filePath.c_str());
+    int result = openRawFile(*processor, filePath);
     if (result != LIBRAW_SUCCESS) {
-        std::cerr << "LibRaw open_file failed: " << filePath
-                  << " (code: " << result << ")" << std::endl;
+        qWarning().noquote() << "LibRaw open_file failed:" << filePath
+                             << "(code:" << result << ")";
         return false;
     }
 
@@ -325,18 +339,18 @@ bool RawImageLoader::loadPreview(const std::string& filePath, int requestedMaxSi
         return true;
     }
 
-    std::cerr << "LibRaw preview decoding failed: " << filePath << std::endl;
+    qWarning().noquote() << "LibRaw preview decoding failed:" << filePath;
     return false;
 }
 
-bool RawImageLoader::loadRaw(const std::string& filePath, ImageData& out) {
+bool RawImageLoader::loadRaw(const QString& filePath, ImageData& out) {
     out = {};
     auto processor = std::make_unique<LibRaw>();
 
-    int result = processor->open_file(filePath.c_str());
+    int result = openRawFile(*processor, filePath);
     if (result != LIBRAW_SUCCESS) {
-        std::cerr << "LibRaw open_file failed: " << filePath
-                  << " (code: " << result << ")" << std::endl;
+        qWarning().noquote() << "LibRaw open_file failed:" << filePath
+                             << "(code:" << result << ")";
         return false;
     }
 
@@ -346,33 +360,33 @@ bool RawImageLoader::loadRaw(const std::string& filePath, ImageData& out) {
 
     result = processor->unpack();
     if (result != LIBRAW_SUCCESS) {
-        std::cerr << "LibRaw unpack failed: " << filePath
-                  << " (code: " << result << ")" << std::endl;
+        qWarning().noquote() << "LibRaw unpack failed:" << filePath
+                             << "(code:" << result << ")";
         return false;
     }
 
     return processOpenedRaw(*processor, filePath, out, false, 0);
 }
 
-bool RawImageLoader::loadRawCfa(const std::string& filePath,
+bool RawImageLoader::loadRawCfa(const QString& filePath,
                                 CfaImageData& out) {
     out = {};
     auto processor = std::make_unique<LibRaw>();
-    int result = processor->open_file(filePath.c_str());
+    int result = openRawFile(*processor, filePath);
     if (result != LIBRAW_SUCCESS) {
-        std::cerr << "LibRaw open_file failed: " << filePath
-                  << " (code: " << result << ")" << std::endl;
+        qWarning().noquote() << "LibRaw open_file failed:" << filePath
+                             << "(code:" << result << ")";
         return false;
     }
     result = processor->unpack();
     if (result != LIBRAW_SUCCESS) {
-        std::cerr << "LibRaw unpack failed: " << filePath
-                  << " (code: " << result << ")" << std::endl;
+        qWarning().noquote() << "LibRaw unpack failed:" << filePath
+                             << "(code:" << result << ")";
         return false;
     }
     if (!extractBayerCfa(*processor, out, true)) {
-        std::cerr << "RAW is not a supported repeating Bayer CFA: "
-                  << filePath << std::endl;
+        qWarning().noquote() << "RAW is not a supported repeating Bayer CFA:"
+                             << filePath;
         out = {};
         return false;
     }
@@ -385,7 +399,7 @@ bool RawImageLoader::loadRawCfa(const std::string& filePath,
 }
 
 bool RawImageLoader::processCalibratedCfa(
-    const std::string& filePath, const CfaImageData& calibrated,
+    const QString& filePath, const CfaImageData& calibrated,
     ImageData& out) {
     out = {};
     if (calibrated.width <= 0 || calibrated.height <= 0 ||
@@ -396,7 +410,7 @@ bool RawImageLoader::processCalibratedCfa(
     }
 
     auto processor = std::make_unique<LibRaw>();
-    int result = processor->open_file(filePath.c_str());
+    int result = openRawFile(*processor, filePath);
     if (result != LIBRAW_SUCCESS) return false;
     Metadata metadata;
     extractMetadata(*processor, metadata);

@@ -2,6 +2,8 @@
 #include <QImage>
 #include <QString>
 #include <QColorSpace>
+#include <QDebug>
+#include <QFile>
 #include <algorithm>
 #include <cstring>
 #include <iostream>
@@ -11,11 +13,23 @@
 #include <tiffio.h>
 #endif
 
-static bool exportTiff16Bit(const std::vector<uint16_t>& image, int width, int height, const std::string& path) {
 #ifdef HAS_LIBTIFF
-    TIFF* tiff = TIFFOpen(path.c_str(), "w");
+static TIFF* openTiffForWrite(const QString& path) {
+#ifdef _WIN32
+    const std::wstring nativePath = path.toStdWString();
+    return TIFFOpenW(nativePath.c_str(), "w");
+#else
+    const QByteArray nativePath = QFile::encodeName(path);
+    return TIFFOpen(nativePath.constData(), "w");
+#endif
+}
+#endif
+
+static bool exportTiff16Bit(const std::vector<uint16_t>& image, int width, int height, const QString& path) {
+#ifdef HAS_LIBTIFF
+    TIFF* tiff = openTiffForWrite(path);
     if (!tiff) {
-        std::cerr << "ImageExporter: 无法打开 TIFF 文件: " << path << std::endl;
+        qWarning().noquote() << "ImageExporter: 无法打开 TIFF 文件:" << path;
         return false;
     }
 
@@ -45,11 +59,11 @@ static bool exportTiff16Bit(const std::vector<uint16_t>& image, int width, int h
 #endif
 }
 
-static bool exportTiffRgb16(const std::vector<uint16_t>& rgb, int width, int height, const std::string& path) {
+static bool exportTiffRgb16(const std::vector<uint16_t>& rgb, int width, int height, const QString& path) {
 #ifdef HAS_LIBTIFF
-    TIFF* tiff = TIFFOpen(path.c_str(), "w");
+    TIFF* tiff = openTiffForWrite(path);
     if (!tiff) {
-        std::cerr << "ImageExporter: 无法打开 TIFF 文件: " << path << std::endl;
+        qWarning().noquote() << "ImageExporter: 无法打开 TIFF 文件:" << path;
         return false;
     }
 
@@ -111,7 +125,7 @@ static uint8_t linearToSrgb8(uint16_t linear16) {
     return static_cast<uint8_t>(std::clamp(val, 0, 255));
 }
 
-static bool exportPng8Bit(const std::vector<uint16_t>& image, int width, int height, const std::string& path) {
+static bool exportPng8Bit(const std::vector<uint16_t>& image, int width, int height, const QString& path) {
     QImage qimg(width, height, QImage::Format_Grayscale8);
     // 设置 sRGB 色彩空间，与 RGB PNG 保持一致
     qimg.setColorSpace(QColorSpace(QColorSpace::SRgb));
@@ -122,10 +136,10 @@ static bool exportPng8Bit(const std::vector<uint16_t>& image, int width, int hei
             qimg.setPixel(x, y, v);
         }
     }
-    return qimg.save(QString::fromStdString(path), "PNG");
+    return qimg.save(path, "PNG");
 }
 
-static bool exportPngRgb16(const std::vector<uint16_t>& rgb, int width, int height, const std::string& path) {
+static bool exportPngRgb16(const std::vector<uint16_t>& rgb, int width, int height, const QString& path) {
     QImage qimg(width, height, QImage::Format_RGB888);
     // 设置 sRGB 色彩空间，确保查看器正确解释
     qimg.setColorSpace(QColorSpace(QColorSpace::SRgb));
@@ -138,12 +152,12 @@ static bool exportPngRgb16(const std::vector<uint16_t>& rgb, int width, int heig
             qimg.setPixelColor(x, y, QColor(r, g, b));
         }
     }
-    return qimg.save(QString::fromStdString(path), "PNG");
+    return qimg.save(path, "PNG");
 }
 
 bool ImageExporter::export16Bit(const std::vector<uint16_t>& image,
                                 int width, int height,
-                                const std::string& path,
+                                const QString& path,
                                 Format format) {
     if (image.empty() || width <= 0 || height <= 0) {
         std::cerr << "ImageExporter: 无效的图像数据" << std::endl;
@@ -164,7 +178,7 @@ bool ImageExporter::export16Bit(const std::vector<uint16_t>& image,
 
 bool ImageExporter::exportRgb16(const std::vector<uint16_t>& rgb,
                                 int width, int height,
-                                const std::string& path,
+                                const QString& path,
                                 Format format) {
     if (rgb.empty() || width <= 0 || height <= 0) {
         std::cerr << "ImageExporter: 无效的 RGB 图像数据" << std::endl;

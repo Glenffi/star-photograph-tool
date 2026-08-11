@@ -344,7 +344,7 @@ void PreviewPanel::loadImage(const QString& filePath) {
         RawImageLoader::Metadata metadata;
         constexpr int kPreviewLongSide = 2400;
         const bool loaded = loader.loadPreview(
-            filePath.toStdString(), kPreviewLongSide, preview, &metadata);
+            filePath, kPreviewLongSide, preview, &metadata);
 
         QImage image;
         if (loaded && preview.encoding == RawImageLoader::PreviewData::Encoding::Jpeg) {

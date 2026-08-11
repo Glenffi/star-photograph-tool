@@ -1037,7 +1037,7 @@ private slots:
     void onViewMetadata(const QString& filePath) {
         RawImageLoader loader;
         RawImageLoader::Metadata metadata;
-        if (!loader.loadMetadata(filePath.toStdString(), metadata)) {
+        if (!loader.loadMetadata(filePath, metadata)) {
             QMessageBox::warning(this, "元数据", "无法加载文件元数据");
             return;
         }
@@ -1366,7 +1366,7 @@ private slots:
                     "cacheDir", QDir::homePath() + "/StarProcessor/Cache").toString();
                 QDir().mkpath(cacheDir);
                 QString cacheFile = cacheDir + "/" + QDateTime::currentDateTime().toString("yyyyMMdd_hhmmss") + "_cached.tiff";
-                if (!ImageExporter::exportRgb16(m_cachedStackedData, m_cachedWidth, m_cachedHeight, cacheFile.toStdString())) {
+                if (!ImageExporter::exportRgb16(m_cachedStackedData, m_cachedWidth, m_cachedHeight, cacheFile)) {
                     qWarning() << "缓存 TIFF 写入失败:" << cacheFile;
                 }
 
@@ -1501,8 +1501,8 @@ private slots:
                     ? "_star_trail_export" : "_stacked_export") + ext;
         QString fullPath = outPath + "/" + fileName;
 
-        if (ImageExporter::exportRgb16(m_cachedStackedData, m_cachedWidth, m_cachedHeight,
-                                        fullPath.toStdString(), fmt)) {
+        if (ImageExporter::exportRgb16(m_cachedStackedData, m_cachedWidth,
+                                      m_cachedHeight, fullPath, fmt)) {
             QMessageBox::information(this, "导出成功", QString("已导出到：%1").arg(fullPath));
             statusBar()->showMessage(QString("已导出：%1").arg(fileName), 5000);
         } else {

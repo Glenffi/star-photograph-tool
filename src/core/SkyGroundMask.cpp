@@ -408,10 +408,10 @@ bool SkyGroundMask::autoDetectPreview(const QImage& preview, int targetWidth,
 // ---------------------------------------------------------------------------
 // 8. 加载用户蒙版（带 downscale 羽化优化）
 // ---------------------------------------------------------------------------
-bool SkyGroundMask::loadUserMask(const std::string& path, int width, int height,
+bool SkyGroundMask::loadUserMask(const QString& path, int width, int height,
                                  std::vector<uint8_t>& mask, int featherRadius)
 {
-    QImage img(QString::fromStdString(path));
+    QImage img(path);
     if (img.isNull())
         return false;
 

@@ -1,7 +1,7 @@
 #pragma once
 
+#include <QString>
 #include <cstdint>
-#include <string>
 #include <vector>
 
 class QImage;
@@ -59,7 +59,7 @@ public:
      * @param mask   输出 8-bit 灰度蒙版
      * @return true 成功
      */
-    static bool loadUserMask(const std::string& path, int width, int height,
+    static bool loadUserMask(const QString& path, int width, int height,
                              std::vector<uint8_t>& mask, int featherRadius = 0);
 
     /**

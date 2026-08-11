@@ -48,7 +48,7 @@ bool loadMaskPreview(const QString& path, QImage& image) {
     RawImageLoader loader;
     RawImageLoader::PreviewData preview;
     constexpr int kMaskPreviewLongSide = 2400;
-    if (!loader.loadPreview(path.toStdString(), kMaskPreviewLongSide, preview)) {
+    if (!loader.loadPreview(path, kMaskPreviewLongSide, preview)) {
         return false;
     }
     if (preview.encoding == RawImageLoader::PreviewData::Encoding::Jpeg) {
@@ -521,7 +521,7 @@ bool ProcessingWorker::buildDeepSkyCalibration(
 
     auto loadCompatible = [&](const QString& path, const QString& kind,
                               RawImageLoader::CfaImageData& frame) {
-        if (!loader.loadRawCfa(path.toStdString(), frame)) {
+        if (!loader.loadRawCfa(path, frame)) {
             m_errorString = QString("无法解码%1: %2")
                 .arg(kind, QFileInfo(path).fileName());
             return false;
@@ -633,7 +633,7 @@ bool ProcessingWorker::loadCalibratedRaw(
     const RawCalibrationEngine::MasterFrames& masters,
     RawImageLoader::ImageData& image) {
     RawImageLoader::CfaImageData light;
-    if (!loader.loadRawCfa(path.toStdString(), light)) {
+    if (!loader.loadRawCfa(path, light)) {
         m_errorString = QString("无法读取 Light Bayer 数据: %1")
             .arg(QFileInfo(path).fileName());
         return false;
@@ -648,8 +648,7 @@ bool ProcessingWorker::loadCalibratedRaw(
     RawCalibrationEngine::CalibrationStats stats;
     if (!RawCalibrationEngine::calibrateLight(
             light, masters, calibrated, &stats) ||
-        !loader.processCalibratedCfa(
-            path.toStdString(), calibrated, image)) {
+        !loader.processCalibratedCfa(path, calibrated, image)) {
         m_errorString = QString("Light 校准或去马赛克失败: %1")
             .arg(QFileInfo(path).fileName());
         return false;
@@ -775,7 +774,7 @@ void ProcessingWorker::run() {
     for (int i = 0; i < m_files.size(); ++i) {
         if (stopIfCancelled()) return;
         RawImageLoader::Metadata item;
-        if (!loader.loadMetadata(m_files[i].toStdString(), item)) {
+        if (!loader.loadMetadata(m_files[i], item)) {
             m_errorString = QString("无法读取元数据: %1")
                                 .arg(QFileInfo(m_files[i]).fileName());
             return;
@@ -816,7 +815,7 @@ void ProcessingWorker::run() {
             std::vector<uint16_t> previewLuminance;
             int previewWidth = 0;
             int previewHeight = 0;
-            if (loader.loadPreview(m_files[i].toStdString(), 1600, preview) &&
+            if (loader.loadPreview(m_files[i], 1600, preview) &&
                 previewToLuminance(preview, previewLuminance,
                                    previewWidth, previewHeight)) {
                 FrameQualityEvaluator::evaluate(
@@ -919,7 +918,7 @@ void ProcessingWorker::run() {
     if (m_params.deepSkyMode) {
         emit stageMessage("读取参考 Light 的 Bayer 数据...");
         if (!loader.loadRawCfa(
-                m_files[static_cast<int>(referenceIndex)].toStdString(),
+                m_files[static_cast<int>(referenceIndex)],
                 calibrationReference)) {
             m_errorString = "参考 Light 不是当前支持的 2×2 Bayer RAW";
             return;
@@ -948,8 +947,8 @@ void ProcessingWorker::run() {
                 calibrationReference, calibrationMasters,
                 calibrated, &stats) &&
             loader.processCalibratedCfa(
-                m_files[static_cast<int>(referenceIndex)].toStdString(),
-                calibrated, referenceImage);
+                m_files[static_cast<int>(referenceIndex)], calibrated,
+                referenceImage);
         if (referenceLoaded) {
             ++m_calibratedLightFrameCount;
             m_calibrationClippedLowPixels += stats.clippedLowPixels;
@@ -960,8 +959,7 @@ void ProcessingWorker::run() {
         calibrationReference.data.shrink_to_fit();
     } else {
         referenceLoaded = loader.loadRaw(
-            m_files[static_cast<int>(referenceIndex)].toStdString(),
-            referenceImage);
+            m_files[static_cast<int>(referenceIndex)], referenceImage);
     }
     if (!referenceLoaded) {
         m_errorString = QString("无法加载参考帧: %1")
@@ -1065,7 +1063,7 @@ void ProcessingWorker::run() {
             }
         } else {
             maskReady = SkyGroundMask::loadUserMask(
-                m_params.userMaskPath.toStdString(), width, height, mask,
+                m_params.userMaskPath, width, height, mask,
                 m_params.featherRadius);
             if (maskReady) m_skyGroundMaskSource = "user-mask";
         }
@@ -1125,7 +1123,7 @@ void ProcessingWorker::run() {
         const bool sourceLoaded = m_params.deepSkyMode
             ? loadCalibratedRaw(
                   loader, m_files[i], calibrationMasters, sourceImage)
-            : loader.loadRaw(m_files[i].toStdString(), sourceImage);
+            : loader.loadRaw(m_files[i], sourceImage);
         if (!sourceLoaded) {
             if (m_params.deepSkyMode) return;
             SkippedFrameInfo skipped;
@@ -1460,7 +1458,7 @@ void ProcessingWorker::runStarTrail() {
     for (int index = 0; index < m_files.size(); ++index) {
         if (stopIfCancelled()) return;
         RawImageLoader::Metadata item;
-        if (!loader.loadMetadata(m_files[index].toStdString(), item)) {
+        if (!loader.loadMetadata(m_files[index], item)) {
             m_errorString = QString("无法读取元数据: %1")
                                 .arg(QFileInfo(m_files[index]).fileName());
             return;
@@ -1580,7 +1578,7 @@ void ProcessingWorker::runStarTrail() {
     for (int index = 0; index < m_files.size(); ++index) {
         if (stopIfCancelled()) return;
         RawImageLoader::ImageData image;
-        if (!loader.loadRaw(m_files[index].toStdString(), image) ||
+        if (!loader.loadRaw(m_files[index], image) ||
             image.width != width || image.height != height ||
             image.channels != 3) {
             m_errorString = QString("无法解码星轨 RAW: %1")
@@ -1741,7 +1739,7 @@ void ProcessingWorker::runTimelapse() {
     for (int index = 0; index < m_files.size(); ++index) {
         if (stopIfCancelled()) return;
         RawImageLoader::Metadata item;
-        if (!loader.loadMetadata(m_files[index].toStdString(), item)) {
+        if (!loader.loadMetadata(m_files[index], item)) {
             m_errorString = QString("无法读取元数据: %1")
                                 .arg(QFileInfo(m_files[index]).fileName());
             return;
@@ -1821,7 +1819,7 @@ void ProcessingWorker::runTimelapse() {
     for (int index = 0; index < m_files.size(); ++index) {
         if (stopIfCancelled()) return;
         RawImageLoader::ImageData image;
-        if (!loader.loadRaw(m_files[index].toStdString(), image)) {
+        if (!loader.loadRaw(m_files[index], image)) {
             m_errorString = QString("无法解码 RAW: %1")
                                 .arg(QFileInfo(m_files[index]).fileName());
             return;
@@ -2218,7 +2216,7 @@ void ProcessingWorker::runTimelapse() {
         emit stageMessage(QString("输出第 %1/%2 张...")
                               .arg(targetIndex + 1).arg(m_files.size()));
         if (!ImageExporter::exportRgb16(
-                resultRgb, width, height, outputPath.toStdString(),
+                resultRgb, width, height, outputPath,
                 png ? ImageExporter::Png8 : ImageExporter::Tiff16)) {
             m_errorString = QString("延时序列导出失败: %1").arg(outputName);
             return;
@@ -2240,7 +2238,7 @@ void ProcessingWorker::runSingleFrame() {
     RawImageLoader::Metadata metadata;
 
     emit stageMessage("检查单张 RAW 与内存预算...");
-    if (!loader.loadMetadata(sourcePath.toStdString(), metadata)) {
+    if (!loader.loadMetadata(sourcePath, metadata)) {
         m_errorString = QString("无法读取元数据: %1")
                             .arg(QFileInfo(sourcePath).fileName());
         return;
@@ -2278,7 +2276,7 @@ void ProcessingWorker::runSingleFrame() {
 
     emit stageMessage("解码单张 RAW...");
     RawImageLoader::ImageData image;
-    if (!loader.loadRaw(sourcePath.toStdString(), image)) {
+    if (!loader.loadRaw(sourcePath, image)) {
         m_errorString = QString("无法解码 RAW: %1")
                             .arg(QFileInfo(sourcePath).fileName());
         return;
@@ -2450,7 +2448,7 @@ bool ProcessingWorker::finishResult(std::vector<uint16_t>& resultRgb,
         QDateTime::currentDateTime().toString("yyyyMMdd_hhmmss") +
         outputSuffix + extension;
     if (!ImageExporter::exportRgb16(m_stackedData, width, height,
-                                    m_outputFile.toStdString(),
+                                    m_outputFile,
                                     png ? ImageExporter::Png8 : ImageExporter::Tiff16)) {
         m_outputFile.clear();
         m_errorString = "导出失败";

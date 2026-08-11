@@ -26,7 +26,7 @@ void MaskPreviewWorker::run() {
     RawImageLoader::PreviewData preview;
     RawImageLoader::Metadata metadata;
     constexpr int kPreviewLongSide = 2400;
-    if (!loader.loadPreview(m_filePath.toStdString(), kPreviewLongSide,
+    if (!loader.loadPreview(m_filePath, kPreviewLongSide,
                             preview, &metadata)) {
         m_error = "无法加载图像";
         return;

@@ -28,6 +28,8 @@ struct FileItem {
     bool isReferenceFrame = false;
     bool isExcluded = false;
     bool hasThumbnail = false;
+    bool metadataLoaded = false;
+    bool metadataFailed = false;
 };
 
 class FileCard : public QWidget {
@@ -92,7 +94,8 @@ signals:
 
 private slots:
     void onThumbnailReady(const QString& filePath, const QPixmap& thumbnail);
-    void onMetadataReady(const QString& filePath, int iso, double exposureTime, double aperture, int focalLength);
+    void onMetadataReady(const QString& filePath, int iso, double exposureTime,
+                         double aperture, int focalLength, bool loaded);
     void onCustomContextMenu(const QPoint& pos);
     void onExcludeSelected();
     void onSetReferenceFrame();

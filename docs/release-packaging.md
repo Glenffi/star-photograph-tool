@@ -52,8 +52,8 @@ Windows 包必须由 Windows runner 验证，macOS 上不使用 MinGW 交叉编�
 确认主分支干净、Release 构建通过后：
 
 ```bash
-git tag -a v0.8.0 -m "StarProcessor v0.8.0"
-git push origin v0.8.0
+git tag -a v0.8.1 -m "StarProcessor v0.8.1"
+git push origin v0.8.1
 ```
 
 标签推送后查看 GitHub Actions 的 `Package Windows` 任务。成功后 Release 页面会出现 Windows ZIP 和校验文件。macOS DMG 在本机生成并完成启动验证后交付；获得 Apple Developer 证书后再接入签名、公证和 Release 自动上传。

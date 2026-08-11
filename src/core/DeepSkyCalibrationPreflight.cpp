@@ -163,8 +163,7 @@ DeepSkyCalibrationPreflight::Report DeepSkyCalibrationPreflight::inspect(
             FrameRecord frame;
             frame.path = path;
             frame.role = role;
-            frame.readable = loader.loadMetadata(
-                path.toStdString(), frame.metadata);
+            frame.readable = loader.loadMetadata(path, frame.metadata);
             frames.push_back(std::move(frame));
         }
     };
