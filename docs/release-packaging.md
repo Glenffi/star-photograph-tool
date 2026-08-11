@@ -52,8 +52,10 @@ Windows 包必须由 Windows runner 验证，macOS 上不使用 MinGW 交叉编�
 确认主分支干净、Release 构建通过后：
 
 ```bash
-git tag -a v0.8.1 -m "StarProcessor v0.8.1"
-git push origin v0.8.1
+git tag -a v0.9.0 -m "StarProcessor v0.9.0"
+git push origin v0.9.0
 ```
 
 标签推送后查看 GitHub Actions 的 `Package Windows` 任务。成功后 Release 页面会出现 Windows ZIP 和校验文件。macOS DMG 在本机生成并完成启动验证后交付；获得 Apple Developer 证书后再接入签名、公证和 Release 自动上传。
+
+两端安装包都准备好后，再按 [`update-distribution.md`](update-distribution.md) 发布更新清单。更新服务器只保留清单指向的当前版本，不作为历史 Release 归档；历史版本仍由 GitHub Releases 承担。

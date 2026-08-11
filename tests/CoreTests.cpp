@@ -17,6 +17,7 @@
 #include "core/StarReducer.h"
 #include "core/TemporalPhotometricSmoother.h"
 #include "core/TimelapseEngine.h"
+#include "core/UpdateManifest.h"
 
 #include <QByteArray>
 #include <QColor>
@@ -2439,6 +2440,59 @@ void testSkyGroundHorizonDetection() {
     }
 }
 
+void testUpdateManifest() {
+    const QByteArray manifestJson = R"JSON({
+        "schemaVersion": 1,
+        "version": "0.9.0",
+        "publishedAt": "2026-08-11T10:30:00Z",
+        "releaseNotes": "安全更新检查与安装包校验",
+        "platforms": {
+            "windows-x64": {
+                "fileName": "StarProcessor-Windows-x64-v0.9.0.zip",
+                "url": "https://di.nexusgen.net/starprocessor/downloads/StarProcessor-Windows-x64-v0.9.0.zip",
+                "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+                "size": 12345678
+            }
+        }
+    })JSON";
+
+    UpdateManifest manifest;
+    QString error;
+    check(UpdateManifestParser::parse(manifestJson, "windows-x64",
+                                      manifest, error),
+          "A valid update manifest should parse");
+    check(manifest.version == "0.9.0" &&
+              manifest.package.size == 12345678 &&
+              manifest.package.fileName ==
+                  "StarProcessor-Windows-x64-v0.9.0.zip",
+          "The update manifest should retain trusted package metadata");
+    check(UpdateManifestParser::isNewerVersion("0.9.0", "0.8.1"),
+          "A greater semantic version should be considered newer");
+    check(!UpdateManifestParser::isNewerVersion("0.9.0-beta.1", "0.9.0"),
+          "A prerelease should not replace its final release");
+    check(UpdateManifestParser::compareVersions("1.0.0-beta.2",
+                                                "1.0.0-beta.11") < 0,
+          "Numeric prerelease identifiers should compare numerically");
+    check(UpdateManifestParser::compareVersions("1.0.0-01", "1.0.0") == 0,
+          "A numeric prerelease identifier with a leading zero should be invalid");
+
+    QByteArray unsafeManifest = manifestJson;
+    unsafeManifest.replace(
+        "https://di.nexusgen.net/starprocessor/downloads/StarProcessor-Windows-x64-v0.9.0.zip",
+        "http://di.nexusgen.net/starprocessor/downloads/StarProcessor-Windows-x64-v0.9.0.zip");
+    check(!UpdateManifestParser::parse(unsafeManifest, "windows-x64",
+                                       manifest, error),
+          "The update manifest should reject a non-HTTPS package URL");
+    QByteArray mismatchedVersion = manifestJson;
+    mismatchedVersion.replace("v0.9.0.zip", "v0.8.1.zip");
+    check(!UpdateManifestParser::parse(mismatchedVersion, "windows-x64",
+                                       manifest, error),
+          "A package filename should identify the advertised version");
+    check(!UpdateManifestParser::parse(manifestJson, "linux-x64",
+                                       manifest, error),
+          "The update manifest should reject an unavailable platform");
+}
+
 } // namespace
 
 int main(int argc, char* argv[]) {
@@ -2463,6 +2517,7 @@ int main(int argc, char* argv[]) {
     testPresetDenoisePersistence();
     testRawApiValidation();
     testSkyGroundHorizonDetection();
+    testUpdateManifest();
 
     if (failures == 0) {
         std::cout << "All core tests passed.\n";

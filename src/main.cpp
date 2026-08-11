@@ -38,6 +38,7 @@
 #include "ui/Toolbar.h"
 #include "ui/UiAssets.h"
 #include "ui/SceneLauncher.h"
+#include "update/UpdateManager.h"
 
 #include "core/RawImageLoader.h"
 #include "core/ImageExporter.h"
@@ -56,10 +57,17 @@ public:
         setAcceptDrops(true);
 
         setupCentralWidget();
+        m_updateManager = new UpdateManager(this);
         setupMenuBar();
         setupStatusBar();
         setupStepBar();
         setupConnections();
+
+        connect(m_updateManager, &UpdateManager::statusMessage,
+                this, [this](const QString& message, int timeoutMs) {
+                    statusBar()->showMessage(message, timeoutMs);
+                });
+        m_updateManager->scheduleAutomaticCheck();
 
         statusBar()->showMessage("就绪 — 拖入 RAW 文件或点击导入开始");
     }
@@ -439,6 +447,13 @@ private:
         // 帮助菜单
         auto* helpMenu = menuBar()->addMenu("帮助");
         helpMenu->setStyleSheet(menuStyleSheet());
+
+        auto* updateAction = new QAction("检查更新...", this);
+        connect(updateAction, &QAction::triggered, this, [this]() {
+            m_updateManager->checkForUpdates(true);
+        });
+        helpMenu->addAction(updateAction);
+        helpMenu->addSeparator();
 
         auto* aboutAction = new QAction("关于", this);
         connect(aboutAction, &QAction::triggered, this, &MainWindow::onAboutClicked);
@@ -1621,6 +1636,7 @@ private:
         QString::fromUtf8("素材"), QString::fromUtf8("对齐"),
         QString::fromUtf8("堆栈"), QString::fromUtf8("结果")};
     QAction* m_beforeAfterAction = nullptr;
+    UpdateManager* m_updateManager = nullptr;
     ProcessingWorker* m_worker = nullptr;
     MaskPreviewWorker* m_maskPreviewWorker = nullptr;
     QSet<MaskPreviewWorker*> m_activeMaskPreviewWorkers;

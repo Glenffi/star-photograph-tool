@@ -2,7 +2,7 @@
 
 跨平台 RAW 图像处理软件，专注于星空摄影领域。
 
-> **当前版本**：v0.8.1。核心闭环、带聚合预检的 Bayer 域深空校准、BCF 改机色彩还原、天地分离、星轨合成、延时序列降噪、连续低频背景校正、保色 Arcsinh 拉伸、多尺度降噪、ACR 风格基础调色与亮度锐化、Starless/Stars 缩星、可保持 100% 视图的参数快速预览、完整双画面比较，以及任务型桌面工作台已经接入。v0.8.1 修复了 Windows 中文用户名、父目录或文件名导致 RAW 无法打开且素材卡片永久显示“正在读取元数据”的问题。
+> **当前版本**：v0.9.0。核心闭环、带聚合预检的 Bayer 域深空校准、BCF 改机色彩还原、天地分离、星轨合成、延时序列降噪、连续低频背景校正、保色 Arcsinh 拉伸、多尺度降噪、ACR 风格基础调色与亮度锐化、Starless/Stars 缩星、可保持 100% 视图的参数快速预览、完整双画面比较，以及任务型桌面工作台已经接入。v0.9.0 在 v0.8.1 的 Windows Unicode 路径修复基础上新增 HTTPS 更新检查、受信任下载路径限制和安装包 SHA-256 校验。
 
 ## 当前已实现
 
@@ -29,6 +29,7 @@
 - 基于全部对齐变换的共同有效区域自动裁切，避免少帧覆盖边界进入成片
 - 面向六类拍摄任务重新设计的桌面工作台：编号式场景入口、紧凑素材队列、影像画布和按“堆栈 / 调整 / 输出”组织的参数页
 - 有界内存的“处理前 / 处理后 / 分屏”比较；分屏会将两张完整图片等比例并排，快速预览刷新会保持比较模式、缩放和滚动位置
+- HTTPS 客户端更新检查：按平台读取版本清单，流式下载到系统“下载”目录，并在打开安装包前校验文件大小和 SHA-256
 
 ## 规划中
 
@@ -82,12 +83,15 @@ StarProcessor/
 │   │   ├── StarReducer.h/cpp          # Starless/Stars 分离 + 亚像素圆形 Minimum
 │   │   ├── ImageExporter.h/cpp        # 16-bit TIFF / PNG 8-bit 导出
 │   │   ├── AutoOptimizeEngine.h/cpp   # 去雾、Arcsinh 拉伸与蒙版地景细节恢复
+│   │   ├── UpdateManifest.h/cpp       # 更新清单校验与语义版本比较
 │   │   └── PresetManager.h/cpp        # 内置预设与用户预设持久化
 │   ├── ui/
 │   │   ├── ProjectPanel.h/cpp         # 左侧面板：文件列表
 │   │   ├── PreviewPanel.h/cpp         # 中央面板：图像预览
 │   │   ├── ParamsPanel.h/cpp          # 右侧面板：处理参数
 │   │   └── Toolbar.h/cpp              # 顶部工具栏
+│   ├── update/
+│   │   └── UpdateManager.h/cpp        # HTTPS 检查、下载、大小与 SHA-256 校验
 │   └── workers/
 │       ├── ProcessingWorker.h/cpp     # 正式处理管线后台执行
 │       └── MaskPreviewWorker.h/cpp    # 天地蒙版快速预览
@@ -118,6 +122,12 @@ StarProcessor/
 完成一次正式处理后，应用还会缓存最长边 2400 px 的线性 RGB16 堆栈和对应天地蒙版。只修改降噪、改机色彩、去雾、拉伸、地景细节或缩星参数时，界面在 400 ms 防抖后仅重跑共用收尾管线，并在后台任务间协作取消过期请求；对齐、堆栈、参考帧、校准帧或天地合成参数变化仍要求完整重算。快速预览会持续标明分辨率和“完整导出需重新处理”，且不会错误开放导出按钮。刷新结果时保留用户当前的处理前/后/分屏模式、适应或 100% 缩放及滚动位置；缩星开启时状态栏还会显示实际处理星数，便于确认参数已经生效。
 
 界面结构、视觉变量和离屏截图方法见 [`docs/ui-workflow.md`](docs/ui-workflow.md)。
+
+## 客户端更新
+
+从 v0.9.0 起，应用每天最多静默检查一次更新，也可通过“帮助 → 检查更新”手动执行。发现新版本后由用户确认下载；应用不会静默安装。安装包必须来自项目的 HTTPS 下载目录，并同时通过清单声明的文件大小与 SHA-256 校验，才会保存到系统“下载”目录并允许打开。
+
+清单协议、服务器目录、单版本保留策略和发布命令见 [`docs/update-distribution.md`](docs/update-distribution.md)。服务器凭据不进入仓库。
 
 ## 构建
 
@@ -197,7 +207,7 @@ Windows Server 2022 上使用 MSVC 原生构建。推送与 CMake 版本一致�
 `v*` 标签后，工作流会运行测试、调用 `windeployqt`、封装 vcpkg DLL，
 并把 ZIP 与 SHA-256 文件发布到 GitHub Releases。
 
-详细发布流程见 [`docs/release-packaging.md`](docs/release-packaging.md)。
+客户端打包流程见 [`docs/release-packaging.md`](docs/release-packaging.md)，更新服务器发布流程见 [`docs/update-distribution.md`](docs/update-distribution.md)。
 
 ## 真实 RAW 样片回归
 

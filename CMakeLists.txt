@@ -6,7 +6,7 @@ if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Darwin" AND
         "Minimum supported macOS version")
 endif()
 
-project(StarProcessor VERSION 0.8.1 LANGUAGES CXX)
+project(StarProcessor VERSION 0.9.0 LANGUAGES CXX)
 
 include(CTest)
 option(BUILD_SAMPLE_TOOLS "Build local RAW sample regression tools" ON)
@@ -29,7 +29,7 @@ else()
 endif()
 
 # 查找 Qt6 组件
-find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets)
+find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Network)
 
 # 查找 LibRaw（支持跨平台）
 # 优先级：1) 环境变量 LIBRAW_ROOT  2) 常见包管理器路径  3) 系统默认路径
@@ -116,6 +116,7 @@ set(CORE_SOURCES
     src/core/StarTrailEngine.cpp
     src/core/TimelapseEngine.cpp
     src/core/TemporalPhotometricSmoother.cpp
+    src/core/UpdateManifest.cpp
 )
 
 set(APP_SOURCES
@@ -127,6 +128,7 @@ set(APP_SOURCES
     src/ui/ParamsPanel.cpp
     src/ui/UiAssets.cpp
     src/ui/SceneLauncher.cpp
+    src/update/UpdateManager.cpp
 )
 
 set(CORE_HEADERS
@@ -152,6 +154,7 @@ set(CORE_HEADERS
     src/core/StarTrailEngine.h
     src/core/TimelapseEngine.h
     src/core/TemporalPhotometricSmoother.h
+    src/core/UpdateManifest.h
 )
 
 set(APP_HEADERS
@@ -162,6 +165,7 @@ set(APP_HEADERS
     src/ui/ParamsPanel.h
     src/ui/UiAssets.h
     src/ui/SceneLauncher.h
+    src/update/UpdateManager.h
 )
 
 if(APPLE)
@@ -215,9 +219,11 @@ target_include_directories(${PROJECT_NAME} PRIVATE ${CMAKE_SOURCE_DIR}/src)
 target_link_libraries(${PROJECT_NAME} PRIVATE
     StarProcessorWorkers
     Qt6::Widgets
+    Qt6::Network
 )
 target_compile_definitions(${PROJECT_NAME} PRIVATE
-    STARPROCESSOR_VERSION="${PROJECT_VERSION}")
+    STARPROCESSOR_VERSION="${PROJECT_VERSION}"
+    STARPROCESSOR_UPDATE_MANIFEST_URL="https://di.nexusgen.net/starprocessor/update.json")
 
 if(BUILD_TESTING)
     add_executable(StarProcessorBasicAdjustmentTests
