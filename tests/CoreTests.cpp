@@ -955,6 +955,28 @@ void testRgbAutoOptimize() {
     }
     check(maximumAdjacentJump < 64,
           "Spatial background interpolation should remain continuous at grid edges");
+    int maximumSlopeChange = 0;
+    std::array<int, 3> previousSlope = {};
+    for (int x = 1; x < gradientWidth; ++x) {
+        const size_t previousPixel =
+            (static_cast<size_t>(gradientHeight / 2) * gradientWidth + x - 1) * 3;
+        const size_t currentPixel = previousPixel + 3;
+        for (size_t channel = 0; channel < 3; ++channel) {
+            const int slope =
+                static_cast<int>(neutralized[currentPixel + channel]) -
+                static_cast<int>(neutralized[previousPixel + channel]);
+            if (x > 1) {
+                maximumSlopeChange = std::max(
+                    maximumSlopeChange,
+                    std::abs(slope - previousSlope[channel]));
+            }
+            previousSlope[channel] = slope;
+        }
+    }
+    check(maximumSlopeChange < 16,
+          "Spatial background correction should not introduce a hard contour "
+          "where a channel crosses the background target (maximum slope change=" +
+              std::to_string(maximumSlopeChange) + ")");
 
     // A stepped synthetic ridge used to contaminate the coarse low-percentile
     // grid: cells containing dark land estimated a lower sky background and

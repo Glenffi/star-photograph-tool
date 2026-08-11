@@ -11,6 +11,7 @@ namespace UiAssets {
 enum class Glyph {
     AddPhotos,
     Add,
+    Scenes,
     Folder,
     Trash,
     Export,

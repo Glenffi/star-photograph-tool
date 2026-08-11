@@ -47,6 +47,16 @@ void paintGlyph(QPainter& painter, UiAssets::Glyph glyph,
             painter.drawLine(QPointF(12.0, 4.5), QPointF(12.0, 19.5));
             painter.drawLine(QPointF(4.5, 12.0), QPointF(19.5, 12.0));
             break;
+        case UiAssets::Glyph::Scenes:
+            painter.drawRoundedRect(QRectF(3.5, 4.0, 7.0, 7.0), 1.5, 1.5);
+            painter.drawRoundedRect(QRectF(13.5, 4.0, 7.0, 7.0), 1.5, 1.5);
+            painter.drawRoundedRect(QRectF(3.5, 14.0, 7.0, 6.0), 1.5, 1.5);
+            painter.drawRoundedRect(QRectF(13.5, 14.0, 7.0, 6.0), 1.5, 1.5);
+            painter.setPen(Qt::NoPen);
+            painter.setBrush(color);
+            painter.drawEllipse(QPointF(7.0, 7.5), 1.2, 1.2);
+            painter.drawEllipse(QPointF(17.0, 17.0), 1.2, 1.2);
+            break;
         case UiAssets::Glyph::Folder: {
             QPainterPath folder;
             folder.moveTo(3.0, 7.0);

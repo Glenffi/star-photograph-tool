@@ -194,22 +194,21 @@ bool AutoOptimizeEngine::neutralizeBackgroundRgb(
             }
         }
 
-        std::array<uint16_t, 3> channelBackground{};
-        for (size_t channel = 0; channel < 3; ++channel) {
-            std::vector<uint16_t> validBackgrounds;
-            validBackgrounds.reserve(gridSize);
-            for (size_t index = 0; index < gridSize; ++index) {
-                if (validGridCell[index]) {
-                    validBackgrounds.push_back(smoothGrid[channel][index]);
-                }
-            }
-            channelBackground[channel] =
-                medianValue(std::move(validBackgrounds));
+        std::vector<uint16_t> validBackgroundLuminances;
+        validBackgroundLuminances.reserve(gridSize);
+        for (size_t index = 0; index < gridSize; ++index) {
+            if (!validGridCell[index]) continue;
+            validBackgroundLuminances.push_back(clampToUint16(
+                (13933.0 * smoothGrid[0][index] +
+                 46871.0 * smoothGrid[1][index] +
+                 4732.0 * smoothGrid[2][index]) / 65536.0));
         }
-        // Never invent signal in a weak channel. The lowest channel background
-        // is the neutral residual; stronger additive casts are subtracted.
-        const double target = *std::min_element(
-            channelBackground.begin(), channelBackground.end());
+        const double luminanceTarget = percentileValue(
+            std::move(validBackgroundLuminances), 20, 100);
+        // Spread the transition across a meaningful part of the low signal
+        // range. This replaces the old hard max(0, x) contour with a smooth,
+        // channel-linked shoulder.
+        const double luminanceKnee = std::max(256.0, luminanceTarget * 0.15);
 
         std::vector<uint16_t> output(src.size());
         for (int y = 0; y < h; ++y) {
@@ -238,6 +237,7 @@ bool AutoOptimizeEngine::neutralizeBackgroundRgb(
                     xLow == xHigh ? 0.0 : gridX - xLow;
                 const size_t base =
                     (static_cast<size_t>(y) * w + x) * 3;
+                std::array<double, 3> model = {};
                 for (size_t channel = 0; channel < 3; ++channel) {
                     const auto& surface = smoothGrid[channel];
                     const double top =
@@ -250,23 +250,45 @@ bool AutoOptimizeEngine::neutralizeBackgroundRgb(
                             (1.0 - xFraction) +
                         surface[static_cast<size_t>(yHigh) * gridColumns + xHigh] *
                             xFraction;
-                    const double model =
+                    model[channel] =
                         top * (1.0 - yFraction) + bottom * yFraction;
-                    double correction = std::max(0.0, model - target);
-                    if (skyMask) {
-                        const double t = (*skyMask)[
-                            static_cast<size_t>(y) * w + x] / 255.0;
-                        // Ease into and out of the feathered boundary. A
-                        // smoothstep has zero slope at both ends, reducing the
-                        // chance of a visible chroma contour at the ridge. A
-                        // conservative strength retains real atmospheric glow
-                        // instead of forcing a nightscape horizon to neutral.
-                        constexpr double kNightscapeStrength = 0.6;
-                        const double opacity = t * t * (3.0 - 2.0 * t);
-                        correction *= opacity * kNightscapeStrength;
-                    }
-                    output[base + channel] =
-                        clampToUint16(src[base + channel] - correction);
+                }
+
+                // Remove only the chromatic component of the local background
+                // model. The previous max(0, model - globalTarget) changed its
+                // derivative where each channel crossed the target; after a
+                // strong stretch those three different zero contours became
+                // visible colored rings. Centering RGB around the model's own
+                // luminance is signed and continuous, and its weighted offsets
+                // sum to zero, so real airglow and light-pollution brightness
+                // gradients remain intact.
+                const double modelLuminance =
+                    (13933.0 * model[0] + 46871.0 * model[1] +
+                     4732.0 * model[2]) / 65536.0;
+                const double luminanceDelta =
+                    modelLuminance - luminanceTarget;
+                const double luminanceCorrection = 0.8 *
+                    (0.5 * (luminanceDelta + std::sqrt(
+                         luminanceDelta * luminanceDelta +
+                         luminanceKnee * luminanceKnee)) -
+                     0.5 * luminanceKnee);
+                double opacity = 1.0;
+                if (skyMask) {
+                    const double t = (*skyMask)[
+                        static_cast<size_t>(y) * w + x] / 255.0;
+                    // Ease into and out of the feathered boundary. A
+                    // conservative strength retains real atmospheric glow
+                    // instead of forcing a nightscape horizon to neutral.
+                    constexpr double kNightscapeStrength = 0.6;
+                    opacity = t * t * (3.0 - 2.0 * t) *
+                        kNightscapeStrength;
+                }
+                for (size_t channel = 0; channel < 3; ++channel) {
+                    const double chromaOffset =
+                        model[channel] - modelLuminance;
+                    output[base + channel] = clampToUint16(
+                        src[base + channel] -
+                        (chromaOffset + luminanceCorrection) * opacity);
                 }
             }
         }

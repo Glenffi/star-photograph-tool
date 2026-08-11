@@ -912,8 +912,19 @@ private:
                             m_toolbar->enableExport(false);
                             setWorkflowStage(3, QString::fromUtf8(
                                 "快速预览已更新 · 完整导出需重新处理"));
-                            statusBar()->showMessage(
-                                QString::fromUtf8("快速预览已更新"), 2500);
+                            const StarReductionStats& starStats =
+                                worker->starReductionStats();
+                            if (m_paramsPanel->starReduceEnabled()) {
+                                statusBar()->showMessage(
+                                    QString::fromUtf8(
+                                        "快速预览已更新 · 缩星处理 %1 颗，"
+                                        "请在 100% 下检查")
+                                        .arg(starStats.processedStars),
+                                    4000);
+                            } else {
+                                statusBar()->showMessage(
+                                    QString::fromUtf8("快速预览已更新"), 2500);
+                            }
                         }
                     } else if (isLatest && !worker->wasCancelled()) {
                         statusBar()->showMessage(

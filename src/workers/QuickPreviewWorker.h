@@ -33,6 +33,9 @@ public:
     QString errorString() const {
         return QString::fromStdString(m_finishingResult.error);
     }
+    const StarReductionStats& starReductionStats() const {
+        return m_finishingResult.starReductionStats;
+    }
 
 signals:
     void stageMessage(const QString& message);

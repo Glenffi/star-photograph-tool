@@ -91,6 +91,10 @@ private:
     void updateZoomDisplay();
     void updateImageDisplay();
     void applyZoom();
+    void applyFitZoom();
+    double fitZoomForViewport() const;
+    bool imageSampleAt(const QPoint& labelPosition, const QImage*& image,
+                       int& x, int& y) const;
     double maximumSafeZoom() const;
     const QImage& displayedImage() const;
     void resetComparison();
@@ -134,6 +138,8 @@ private:
     QImage m_beforeImage;
     QImage m_afterImage;
     double m_zoom = 1.0;
+    bool m_fitToView = true;
+    bool m_fitUpdatePending = false;
     bool m_panning = false;
     QPoint m_lastPanPos;
     bool m_beforeAfterMode = false;

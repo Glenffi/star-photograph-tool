@@ -16,8 +16,16 @@
 #include <QFileInfo>
 #include <QDebug>
 #include <QPainter>
+#include <QTimer>
 #include <algorithm>
 #include <cmath>
+
+namespace {
+
+constexpr int kPreviewMargin = 16;
+constexpr int kSplitGutter = 12;
+
+} // namespace
 
 PreviewPanel::PreviewPanel(QWidget* parent)
     : QWidget(parent)
@@ -268,10 +276,12 @@ void PreviewPanel::setupImageView() {
     containerLayout->setAlignment(Qt::AlignCenter);
 
     m_imageLabel = new QLabel(m_imageContainer);
+    m_imageLabel->setObjectName("previewImageLabel");
     m_imageLabel->setStyleSheet("background-color: transparent;");
     m_imageLabel->setAlignment(Qt::AlignCenter);
     m_imageLabel->setMouseTracking(true);
     m_imageLabel->installEventFilter(this);
+    m_scrollArea->viewport()->installEventFilter(this);
     containerLayout->addWidget(m_imageLabel, 0, Qt::AlignCenter);
 
     m_scrollArea->setWidget(m_imageContainer);
@@ -480,6 +490,18 @@ void PreviewPanel::loadRgb16BitComparison(const QImage& before,
                                            int w, int h,
                                            uint16_t blackPoint,
                                            uint16_t whitePoint) {
+    const bool updatingExistingResult =
+        m_showingResult && hasComparison() && !before.isNull();
+    const int preservedViewMode = m_viewMode;
+    const double preservedZoom = m_zoom;
+    const bool preservedFitToView = m_fitToView;
+    const QSize preservedBeforeSize = m_beforeImage.size();
+    const QSize preservedAfterSize = m_afterImage.size();
+    const int preservedHorizontalScroll = m_scrollArea
+        ? m_scrollArea->horizontalScrollBar()->value() : 0;
+    const int preservedVerticalScroll = m_scrollArea
+        ? m_scrollArea->verticalScrollBar()->value() : 0;
+
     setPointSelectionActive(false);
     clearMaskOverlay();
     ++m_previewGeneration;
@@ -523,8 +545,36 @@ void PreviewPanel::loadRgb16BitComparison(const QImage& before,
 
     m_emptyState->setVisible(false);
     m_scrollArea->setVisible(true);
-    updateImageDisplay();
-    onFitView();
+    const bool sameComparisonGeometry = updatingExistingResult &&
+        m_beforeImage.size() == preservedBeforeSize &&
+        m_afterImage.size() == preservedAfterSize;
+    if (sameComparisonGeometry) {
+        m_viewMode = std::clamp(preservedViewMode, 0, 2);
+        m_beforeAfterMode = m_viewMode == 2;
+        if (m_beforeBtn) m_beforeBtn->setChecked(m_viewMode == 0);
+        if (m_afterBtn) m_afterBtn->setChecked(m_viewMode == 1);
+        if (m_splitBtn) m_splitBtn->setChecked(m_viewMode == 2);
+        m_fitToView = preservedFitToView;
+        if (m_fitToView) {
+            applyFitZoom();
+        } else {
+            m_zoom = std::clamp(
+                preservedZoom, 0.01, maximumSafeZoom());
+            applyZoom();
+            QTimer::singleShot(0, this,
+                [this, preservedHorizontalScroll,
+                 preservedVerticalScroll]() {
+                    if (!m_scrollArea) return;
+                    m_scrollArea->horizontalScrollBar()->setValue(
+                        preservedHorizontalScroll);
+                    m_scrollArea->verticalScrollBar()->setValue(
+                        preservedVerticalScroll);
+                });
+        }
+    } else {
+        updateImageDisplay();
+        onFitView();
+    }
     updateZoomDisplay();
 }
 
@@ -545,6 +595,7 @@ void PreviewPanel::clearImage() {
     m_imageExposure = 0.0;
     m_imageFocalLength = 0;
     m_zoom = 1.0;
+    m_fitToView = true;
     m_showingResult = false;
     m_viewMode = 1;
     m_beforeAfterMode = false;
@@ -564,6 +615,7 @@ void PreviewPanel::clearImage() {
 }
 
 void PreviewPanel::setZoom(double zoom) {
+    m_fitToView = false;
     m_zoom = std::clamp(zoom, 0.01, maximumSafeZoom());
     applyZoom();
     updateZoomDisplay();
@@ -592,7 +644,11 @@ void PreviewPanel::setPointSelectionActive(bool active) {
         m_beforeAfterMode = false;
         if (m_beforeBtn) m_beforeBtn->setChecked(true);
         emit beforeAfterModeChanged(false);
-        applyZoom();
+        if (m_fitToView) {
+            applyFitZoom();
+        } else {
+            applyZoom();
+        }
     }
     m_imageLabel->setCursor(
         m_pointSelectionActive ? Qt::CrossCursor : Qt::ArrowCursor);
@@ -619,17 +675,38 @@ void PreviewPanel::clearSelectedPoint() {
 void PreviewPanel::onFitView() {
     if (m_currentImage.isNull()) return;
 
-    int viewW = m_scrollArea->viewport()->width() - 16;
-    int viewH = m_scrollArea->viewport()->height() - 16;
-    if (viewW <= 0 || viewH <= 0) return;
+    m_fitToView = true;
+    applyFitZoom();
+}
 
-    double scaleW = double(viewW) / m_currentImage.width();
-    double scaleH = double(viewH) / m_currentImage.height();
-    m_zoom = std::clamp(std::min(scaleW, scaleH), 0.01, maximumSafeZoom());
+void PreviewPanel::applyFitZoom() {
+    if (m_currentImage.isNull()) return;
+
+    const double fitZoom = fitZoomForViewport();
+    if (fitZoom <= 0.0) return;
+
+    m_zoom = std::clamp(fitZoom, 0.01, maximumSafeZoom());
 
     applyZoom();
     updateZoomDisplay();
     emit zoomChanged(m_zoom);
+}
+
+double PreviewPanel::fitZoomForViewport() const {
+    if (!m_scrollArea || !m_scrollArea->viewport()) return 0.0;
+    const QImage& image = displayedImage();
+    if (image.isNull()) return 0.0;
+
+    int viewW = m_scrollArea->viewport()->width() - kPreviewMargin;
+    const int viewH = m_scrollArea->viewport()->height() - kPreviewMargin;
+    if (m_viewMode == 2 && hasComparison()) {
+        viewW = (viewW - kSplitGutter) / 2;
+    }
+    if (viewW <= 0 || viewH <= 0) return 0.0;
+
+    const double scaleW = static_cast<double>(viewW) / image.width();
+    const double scaleH = static_cast<double>(viewH) / image.height();
+    return std::min(scaleW, scaleH);
 }
 
 void PreviewPanel::onZoom100() {
@@ -649,7 +726,11 @@ void PreviewPanel::onToggleBeforeAfter() {
     m_beforeAfterMode = true;
     m_viewMode = 2;
     if (m_splitBtn) m_splitBtn->setChecked(true);
-    applyZoom();
+    if (m_fitToView) {
+        applyFitZoom();
+    } else {
+        applyZoom();
+    }
 }
 
 void PreviewPanel::onViewModeChanged(int id) {
@@ -657,7 +738,11 @@ void PreviewPanel::onViewModeChanged(int id) {
     m_viewMode = std::clamp(id, 0, 2);
     m_beforeAfterMode = m_viewMode == 2;
     emit beforeAfterModeChanged(m_beforeAfterMode);
-    applyZoom();
+    if (m_fitToView) {
+        applyFitZoom();
+    } else {
+        applyZoom();
+    }
 }
 
 void PreviewPanel::onToggleInfo() {
@@ -683,25 +768,26 @@ void PreviewPanel::applyZoom() {
             w, h, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
         const QPixmap after = QPixmap::fromImage(m_afterImage).scaled(
             w, h, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
-        pixmap = QPixmap(w, h);
-        pixmap.fill(Qt::transparent);
+        const int afterX = w + kSplitGutter;
+        pixmap = QPixmap(w * 2 + kSplitGutter, h);
+        pixmap.fill(QColor("#090D0F"));
         QPainter comparisonPainter(&pixmap);
         comparisonPainter.drawPixmap(0, 0, before);
-        comparisonPainter.save();
-        comparisonPainter.setClipRect(w / 2, 0, w - w / 2, h);
-        comparisonPainter.drawPixmap(0, 0, after);
-        comparisonPainter.restore();
-        comparisonPainter.setPen(QPen(QColor("#F5FAF8"), 1));
-        comparisonPainter.drawLine(w / 2, 0, w / 2, h);
+        comparisonPainter.drawPixmap(afterX, 0, after);
+        comparisonPainter.setPen(QPen(QColor("#344548"), 1));
+        comparisonPainter.drawLine(w + kSplitGutter / 2, 0,
+                                   w + kSplitGutter / 2, h);
         if (w > 180 && h > 48) {
             comparisonPainter.setPen(Qt::NoPen);
             comparisonPainter.setBrush(QColor(12, 14, 16, 190));
             comparisonPainter.drawRoundedRect(QRect(8, 8, 52, 22), 4, 4);
-            comparisonPainter.drawRoundedRect(QRect(w - 60, 8, 52, 22), 4, 4);
+            comparisonPainter.drawRoundedRect(
+                QRect(afterX + w - 60, 8, 52, 22), 4, 4);
             comparisonPainter.setPen(QColor("#F5FAF8"));
             comparisonPainter.drawText(QRect(8, 8, 52, 22), Qt::AlignCenter,
                                        QString::fromUtf8("处理前"));
-            comparisonPainter.drawText(QRect(w - 60, 8, 52, 22), Qt::AlignCenter,
+            comparisonPainter.drawText(
+                QRect(afterX + w - 60, 8, 52, 22), Qt::AlignCenter,
                                        QString::fromUtf8("处理后"));
         }
         comparisonPainter.end();
@@ -716,34 +802,73 @@ void PreviewPanel::applyZoom() {
     // 叠加蒙版
     if (m_maskOverlayVisible && !m_maskOverlay.isNull()) {
         QPainter painter(&pixmap);
-        QImage scaledMask = m_maskOverlay.scaled(pixmap.size(), Qt::KeepAspectRatio, Qt::SmoothTransformation);
+        const QImage scaledMask = m_maskOverlay.scaled(
+            w, h, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
         painter.drawImage(0, 0, scaledMask);
+        if (m_viewMode == 2 && hasComparison()) {
+            painter.drawImage(w + kSplitGutter, 0, scaledMask);
+        }
         painter.end();
     }
 
     if (m_selectedPointX >= 0.0 && m_selectedPointY >= 0.0) {
         QPainter painter(&pixmap);
         painter.setRenderHint(QPainter::Antialiasing, true);
-        const QPointF center(
-            m_selectedPointX * pixmap.width(),
-            m_selectedPointY * pixmap.height());
-        painter.setBrush(Qt::NoBrush);
-        painter.setPen(QPen(QColor(9, 13, 15, 210), 4.0));
-        painter.drawEllipse(center, 8.0, 8.0);
-        painter.setPen(QPen(QColor("#4ED7AE"), 2.0));
-        painter.drawEllipse(center, 8.0, 8.0);
-        painter.drawLine(center + QPointF(-12.0, 0.0),
-                         center + QPointF(-5.0, 0.0));
-        painter.drawLine(center + QPointF(5.0, 0.0),
-                         center + QPointF(12.0, 0.0));
-        painter.drawLine(center + QPointF(0.0, -12.0),
-                         center + QPointF(0.0, -5.0));
-        painter.drawLine(center + QPointF(0.0, 5.0),
-                         center + QPointF(0.0, 12.0));
+        const auto drawMarker = [&painter](const QPointF& center) {
+            painter.setBrush(Qt::NoBrush);
+            painter.setPen(QPen(QColor(9, 13, 15, 210), 4.0));
+            painter.drawEllipse(center, 8.0, 8.0);
+            painter.setPen(QPen(QColor("#4ED7AE"), 2.0));
+            painter.drawEllipse(center, 8.0, 8.0);
+            painter.drawLine(center + QPointF(-12.0, 0.0),
+                             center + QPointF(-5.0, 0.0));
+            painter.drawLine(center + QPointF(5.0, 0.0),
+                             center + QPointF(12.0, 0.0));
+            painter.drawLine(center + QPointF(0.0, -12.0),
+                             center + QPointF(0.0, -5.0));
+            painter.drawLine(center + QPointF(0.0, 5.0),
+                             center + QPointF(0.0, 12.0));
+        };
+        drawMarker(QPointF(m_selectedPointX * w, m_selectedPointY * h));
+        if (m_viewMode == 2 && hasComparison()) {
+            drawMarker(QPointF(w + kSplitGutter + m_selectedPointX * w,
+                               m_selectedPointY * h));
+        }
     }
 
     m_imageLabel->setPixmap(pixmap);
     m_imageLabel->setFixedSize(pixmap.size());
+}
+
+bool PreviewPanel::imageSampleAt(const QPoint& labelPosition,
+                                 const QImage*& image,
+                                 int& x, int& y) const {
+    const QImage& displayed = displayedImage();
+    if (displayed.isNull()) return false;
+
+    const int paneWidth = std::max(1, qRound(displayed.width() * m_zoom));
+    const int paneHeight = std::max(1, qRound(displayed.height() * m_zoom));
+    if (labelPosition.y() < 0 || labelPosition.y() >= paneHeight) return false;
+
+    int localX = labelPosition.x();
+    image = &displayed;
+    if (m_viewMode == 2 && hasComparison()) {
+        if (localX >= 0 && localX < paneWidth) {
+            image = &m_beforeImage;
+        } else {
+            localX -= paneWidth + kSplitGutter;
+            if (localX < 0 || localX >= paneWidth) return false;
+            image = &m_afterImage;
+        }
+    } else if (localX < 0 || localX >= paneWidth) {
+        return false;
+    }
+
+    x = static_cast<int>(
+        static_cast<int64_t>(localX) * image->width() / paneWidth);
+    y = static_cast<int>(
+        static_cast<int64_t>(labelPosition.y()) * image->height() / paneHeight);
+    return x >= 0 && x < image->width() && y >= 0 && y < image->height();
 }
 
 double PreviewPanel::maximumSafeZoom() const {
@@ -753,7 +878,9 @@ double PreviewPanel::maximumSafeZoom() const {
     // A scaled QPixmap may require several temporary copies. Bound it to about
     // 32 megapixels so zoom cannot allocate multiple gigabytes on a large frame.
     constexpr double maxRenderedPixels = 32.0 * 1024.0 * 1024.0;
-    const double pixels = static_cast<double>(image.width()) * image.height();
+    const double frameCount = (m_viewMode == 2 && hasComparison()) ? 2.0 : 1.0;
+    const double pixels = static_cast<double>(image.width()) * image.height()
+        * frameCount;
     return std::clamp(std::sqrt(maxRenderedPixels / std::max(1.0, pixels)), 1.0, 8.0);
 }
 
@@ -827,12 +954,12 @@ void PreviewPanel::mouseMoveEvent(QMouseEvent* event) {
 
     // 鼠标像素信息
     if (!m_currentImage.isNull() && m_scrollArea->isVisible()) {
-        QPoint labelPos = m_imageLabel->mapFrom(this, event->pos());
-        int x = int(labelPos.x() / m_zoom);
-        int y = int(labelPos.y() / m_zoom);
-
-        if (x >= 0 && x < m_currentImage.width() && y >= 0 && y < m_currentImage.height()) {
-            QRgb pixel = m_currentImage.pixel(x, y);
+        const QPoint labelPosition = m_imageLabel->mapFrom(this, event->pos());
+        const QImage* sampled = nullptr;
+        int x = -1;
+        int y = -1;
+        if (imageSampleAt(labelPosition, sampled, x, y)) {
+            const QRgb pixel = sampled->pixel(x, y);
             emit mousePixelInfo(x, y, qRed(pixel), qGreen(pixel), qBlue(pixel));
             m_mouseInfo->setText(
                 QString::fromUtf8("鼠标: %1,%2 | RGB: (%3, %4, %5)")
@@ -856,6 +983,20 @@ void PreviewPanel::mouseReleaseEvent(QMouseEvent* event) {
 }
 
 bool PreviewPanel::eventFilter(QObject* watched, QEvent* event) {
+    if (m_scrollArea && watched == m_scrollArea->viewport()) {
+        if (event->type() == QEvent::Resize && m_fitToView &&
+            !m_currentImage.isNull() && !m_fitUpdatePending) {
+            m_fitUpdatePending = true;
+            QTimer::singleShot(0, this, [this]() {
+                m_fitUpdatePending = false;
+                if (m_fitToView && !m_currentImage.isNull()) {
+                    applyFitZoom();
+                }
+            });
+        }
+        return QWidget::eventFilter(watched, event);
+    }
+
     if (watched != m_imageLabel || m_currentImage.isNull()) {
         return QWidget::eventFilter(watched, event);
     }
@@ -913,29 +1054,18 @@ bool PreviewPanel::eventFilter(QObject* watched, QEvent* event) {
                 m_scrollArea->verticalScrollBar()->value() - delta.y());
         }
 
-        const QPoint position = mouse->position().toPoint();
-        const int labelWidth = std::max(1, m_imageLabel->width());
-        const int labelHeight = std::max(1, m_imageLabel->height());
-        const QImage* sampled = &m_currentImage;
-        if (hasComparison()) {
-            if (m_viewMode == 0 ||
-                (m_viewMode == 2 && position.x() < labelWidth / 2)) {
-                sampled = &m_beforeImage;
-            } else {
-                sampled = &m_afterImage;
-            }
-        }
-        const int x = static_cast<int>(
-            static_cast<int64_t>(position.x()) * sampled->width() / labelWidth);
-        const int y = static_cast<int>(
-            static_cast<int64_t>(position.y()) * sampled->height() / labelHeight);
-        if (x >= 0 && x < sampled->width() && y >= 0 && y < sampled->height()) {
+        const QImage* sampled = nullptr;
+        int x = -1;
+        int y = -1;
+        if (imageSampleAt(mouse->position().toPoint(), sampled, x, y)) {
             const QRgb pixel = sampled->pixel(x, y);
             emit mousePixelInfo(x, y, qRed(pixel), qGreen(pixel), qBlue(pixel));
             m_mouseInfo->setText(
                 QString::fromUtf8("鼠标: %1,%2 | RGB: (%3, %4, %5)")
                     .arg(x).arg(y)
                     .arg(qRed(pixel)).arg(qGreen(pixel)).arg(qBlue(pixel)));
+        } else {
+            m_mouseInfo->setText(QString::fromUtf8("鼠标: — | RGB: —"));
         }
         return true;
     }
@@ -970,7 +1100,11 @@ void PreviewPanel::setBeforeAfterMode(bool enabled) {
     if (enabled && m_splitBtn) m_splitBtn->setChecked(true);
     if (!enabled && m_afterBtn) m_afterBtn->setChecked(true);
     emit beforeAfterModeChanged(enabled);
-    applyZoom();
+    if (m_fitToView) {
+        applyFitZoom();
+    } else {
+        applyZoom();
+    }
 }
 
 void PreviewPanel::setBeforeImage(const QImage& image) {

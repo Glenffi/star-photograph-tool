@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(StarProcessor VERSION 0.6.9 LANGUAGES CXX)
+project(StarProcessor VERSION 0.7.0 LANGUAGES CXX)
 
 include(CTest)
 option(BUILD_SAMPLE_TOOLS "Build local RAW sample regression tools" ON)
@@ -216,6 +216,21 @@ if(BUILD_TESTING)
         tests/StarTrailEngineTests.cpp)
     target_link_libraries(StarProcessorStarTrailTests PRIVATE StarProcessorCore)
     add_test(NAME star_trail_engine COMMAND StarProcessorStarTrailTests)
+
+    add_executable(StarProcessorPreviewTests
+        tests/PreviewPanelTests.cpp
+        src/ui/PreviewPanel.cpp
+        src/ui/UiAssets.cpp
+        src/ui/PreviewPanel.h
+        src/ui/UiAssets.h)
+    target_include_directories(StarProcessorPreviewTests PRIVATE
+        ${CMAKE_SOURCE_DIR}/src)
+    target_link_libraries(StarProcessorPreviewTests PRIVATE
+        StarProcessorCore
+        Qt6::Widgets)
+    add_test(NAME preview_panel COMMAND StarProcessorPreviewTests)
+    set_tests_properties(preview_panel PROPERTIES
+        ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 endif()
 
 if(BUILD_SAMPLE_TOOLS)
