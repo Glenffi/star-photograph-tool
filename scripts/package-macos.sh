@@ -53,9 +53,9 @@ fi
 # Qt 6.9 added -no-codesign, while the macOS 14 CI intentionally uses Qt
 # 6.8 LTS. Packaging signs the completed bundle below, so older deploy tools
 # can safely use their default ad-hoc behavior during dependency copying.
-declare -a macdeployqt_signing_arguments=()
+declare -a macdeployqt_arguments=(-always-overwrite -no-plugins)
 if "${MACDEPLOYQT}" -help 2>&1 | grep -q -- '-no-codesign'; then
-    macdeployqt_signing_arguments=(-no-codesign)
+    macdeployqt_arguments+=(-no-codesign)
 fi
 
 cmake_arguments=(
@@ -106,9 +106,7 @@ cmake -E make_directory "${DMG_ROOT}"
 ditto "${BUILT_APP}" "${STAGED_APP}"
 
 "${MACDEPLOYQT}" "${STAGED_APP}" \
-    -always-overwrite \
-    -no-plugins \
-    "${macdeployqt_signing_arguments[@]}" \
+    "${macdeployqt_arguments[@]}" \
     -libpath="${LIBRAW_PREFIX}/lib" \
     -libpath="${TIFF_PREFIX}/lib"
 
@@ -130,9 +128,7 @@ for plugin in "${qt_plugins[@]}"; do
     cmake -E make_directory "$(dirname "${staged_plugin}")"
     ditto "${source_plugin}" "${staged_plugin}"
     "${MACDEPLOYQT}" "${STAGED_APP}" \
-        -always-overwrite \
-        -no-plugins \
-        "${macdeployqt_signing_arguments[@]}" \
+        "${macdeployqt_arguments[@]}" \
         -executable="${staged_plugin}" \
         -libpath="${LIBRAW_PREFIX}/lib" \
         -libpath="${TIFF_PREFIX}/lib"
