@@ -148,9 +148,24 @@ while IFS= read -r -d '' binary; do
     fi
 
     install_name="$(otool -D "${binary}" 2>/dev/null | sed -n '2p' || true)"
+    # Some Qt 6.8 macdeployqt builds rewrite a bundled image's LC_ID_DYLIB
+    # to its absolute staged path. That identifier is metadata for consumers,
+    # not a dependency the image itself needs to resolve. Compare both the
+    # literal ID and its canonical path so symlinked framework/plugin paths do
+    # not get reported as external dependencies.
+    binary_real="$(realpath "${binary}")"
+    install_name_real=""
+    if [[ "${install_name}" == /* && -e "${install_name}" ]]; then
+        install_name_real="$(realpath "${install_name}")"
+    fi
     while IFS= read -r dependency; do
         [[ -z "${dependency}" ]] && continue
         [[ "${dependency}" == "${install_name}" ]] && continue
+        if [[ "${dependency}" == /* && -e "${dependency}" &&
+              "$(realpath "${dependency}")" == "${binary_real}" ]]; then
+            continue
+        fi
+        [[ -n "${install_name_real}" && "${dependency}" == "${install_name_real}" ]] && continue
         case "${dependency}" in
             @*|/System/*|/usr/lib/*) ;;
             *)
