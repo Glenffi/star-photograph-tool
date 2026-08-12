@@ -50,6 +50,14 @@ if [[ ! -x "${MACDEPLOYQT}" ]]; then
     exit 2
 fi
 
+# Qt 6.9 added -no-codesign, while the macOS 14 CI intentionally uses Qt
+# 6.8 LTS. Packaging signs the completed bundle below, so older deploy tools
+# can safely use their default ad-hoc behavior during dependency copying.
+declare -a macdeployqt_signing_arguments=()
+if "${MACDEPLOYQT}" -help 2>&1 | grep -q -- '-no-codesign'; then
+    macdeployqt_signing_arguments=(-no-codesign)
+fi
+
 cmake_arguments=(
     -S "${ROOT_DIR}"
     -B "${BUILD_DIR}"
@@ -100,7 +108,7 @@ ditto "${BUILT_APP}" "${STAGED_APP}"
 "${MACDEPLOYQT}" "${STAGED_APP}" \
     -always-overwrite \
     -no-plugins \
-    -no-codesign \
+    "${macdeployqt_signing_arguments[@]}" \
     -libpath="${LIBRAW_PREFIX}/lib" \
     -libpath="${TIFF_PREFIX}/lib"
 
@@ -124,7 +132,7 @@ for plugin in "${qt_plugins[@]}"; do
     "${MACDEPLOYQT}" "${STAGED_APP}" \
         -always-overwrite \
         -no-plugins \
-        -no-codesign \
+        "${macdeployqt_signing_arguments[@]}" \
         -executable="${staged_plugin}" \
         -libpath="${LIBRAW_PREFIX}/lib" \
         -libpath="${TIFF_PREFIX}/lib"
