@@ -558,21 +558,6 @@ void ParamsPanel::setupUI() {
     auto* alignLayout = new QVBoxLayout(m_alignGroup);
     alignLayout->setSpacing(8);
 
-    auto* methodRow = new QHBoxLayout();
-    auto* methodLabel = new QLabel(QString::fromUtf8("方法:"), m_alignGroup);
-    methodLabel->setFixedWidth(60);
-    methodRow->addWidget(methodLabel);
-    m_alignMethod = new QComboBox(m_alignGroup);
-    m_alignMethod->addItem(QString::fromUtf8("星点对齐"));
-    connect(m_alignMethod, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this](int index) {
-        if (index > 0) {
-            m_alignMethod->setCurrentIndex(0);
-            QMessageBox::information(this, "提示", "该对齐方式将在后续版本实现");
-        }
-    });
-    methodRow->addWidget(m_alignMethod, 1);
-    alignLayout->addLayout(methodRow);
-
     auto* refRow = new QHBoxLayout();
     auto* refLabel = new QLabel(QString::fromUtf8("参考帧:"), m_alignGroup);
     refLabel->setFixedWidth(60);
@@ -1483,7 +1468,6 @@ void ParamsPanel::onRestoreDefaults() {
     }
     {
         QSignalBlocker blocker(m_stackAlgorithm); // 阻塞信号，避免触发 m_userChangedStackMethod = true
-        m_alignMethod->setCurrentIndex(0);
         m_refFrame->setCurrentIndex(0);
         m_stackAlgorithm->setCurrentIndex(0);
         m_kappaSlider->setValue(25);
@@ -1553,7 +1537,6 @@ void ParamsPanel::onSavePreset() {
     settings.beginWriteArray("customPresets", count + 1);
     settings.setArrayIndex(count);
     settings.setValue("name", name);
-    settings.setValue("alignMethod", m_alignMethod->currentIndex());
     settings.setValue("stackMethod", m_stackAlgorithm->currentIndex());
     settings.setValue("kappaValue", m_kappaSlider->value());
     settings.setValue("autoRejectLowQualityFrames",
@@ -1621,7 +1604,6 @@ void ParamsPanel::recommendStackMethod(int frameCount) {
 
 void ParamsPanel::saveCurrentSettings() {
     QSettings settings("StarProcessor", "App");
-    settings.setValue("alignMethod", m_alignMethod->currentIndex());
     settings.setValue("stackMethod", m_stackAlgorithm->currentIndex());
     settings.setValue("kappaValue", m_kappaSlider->value());
     settings.setValue("autoRejectLowQualityFrames",
@@ -1690,7 +1672,6 @@ void ParamsPanel::loadPreset() {
     loadCustomPresets();
 
     // 加载上次使用的参数
-    int alignIndex = settings.value("alignMethod", 0).toInt();
     int stackIndex = settings.value("stackMethod", 0).toInt();
     int kappa = settings.value("kappaValue", 25).toInt();
     bool autoRejectQuality =
@@ -1745,7 +1726,6 @@ void ParamsPanel::loadPreset() {
         settings.value("starTrailProtectGround", true).toBool();
 
     // 使用信号阻塞避免触发 paramsChanged
-    QSignalBlocker blocker1(m_alignMethod);
     QSignalBlocker blocker2(m_stackAlgorithm);
     QSignalBlocker blocker3(m_kappaSlider);
     QSignalBlocker blocker4(m_dewarpCheck);
@@ -1786,8 +1766,6 @@ void ParamsPanel::loadPreset() {
     QSignalBlocker blocker39(m_saturationSlider);
     QSignalBlocker blocker40(m_sharpeningSlider);
 
-    Q_UNUSED(alignIndex)
-    m_alignMethod->setCurrentIndex(0);
     m_stackAlgorithm->setCurrentIndex(stackIndex);
     m_kappaSlider->setValue(kappa);
     m_kappaLabel->setText(QString::number(kappa / 10.0, 'f', 1));
@@ -1897,8 +1875,6 @@ void ParamsPanel::onPresetChanged(int index) {
             settings.setArrayIndex(customIndex);
             Preset preset;
             preset.name = settings.value("name").toString();
-            int alignIdx = settings.value("alignMethod", 0).toInt();
-            preset.alignMethod = alignIdx == 0 ? "star" : alignIdx == 1 ? "feature" : "manual";
             preset.stackMethod = settings.value("stackMethod", 0).toInt() == 0 ? "median" :
                                  settings.value("stackMethod", 0).toInt() == 1 ? "average" :
                                  settings.value("stackMethod", 0).toInt() == 2 ? "kappa-sigma" : "winsorized";
@@ -1981,7 +1957,6 @@ void ParamsPanel::onPresetChanged(int index) {
 
 void ParamsPanel::applyPreset(const Preset& preset) {
     // Block signals to avoid recursive emits
-    QSignalBlocker blocker1(m_alignMethod);
     QSignalBlocker blocker2(m_stackAlgorithm);
     QSignalBlocker blocker3(m_kappaSlider);
     QSignalBlocker blocker4(m_dewarpCheck);
@@ -2008,10 +1983,6 @@ void ParamsPanel::applyPreset(const Preset& preset) {
     QSignalBlocker blocker25(m_vibranceSlider);
     QSignalBlocker blocker26(m_saturationSlider);
     QSignalBlocker blocker27(m_sharpeningSlider);
-
-    // Align method
-    // 当前产品只提供已经实现并验证过的星点对齐。
-    m_alignMethod->setCurrentIndex(0);
 
     // Stack method
     if (preset.stackMethod == "median") m_stackAlgorithm->setCurrentIndex(0);
@@ -2245,16 +2216,6 @@ void ParamsPanel::updateStackMethodDescription() {
     if (m_kappaNameLabel) m_kappaNameLabel->setEnabled(usesKappa);
     if (m_kappaSlider) m_kappaSlider->setEnabled(usesKappa);
     if (m_kappaLabel) m_kappaLabel->setEnabled(usesKappa);
-}
-
-QString ParamsPanel::alignMethod() const {
-    if (!m_alignMethod) return "star";
-    switch (m_alignMethod->currentIndex()) {
-        case 0: return "star";
-        case 1: return "feature";
-        case 2: return "manual";
-        default: return "star";
-    }
 }
 
 QString ParamsPanel::stackMethod() const {
@@ -2597,7 +2558,7 @@ void ParamsPanel::updateCalibrationStatus() {
 
 QString ParamsPanel::upstreamSignature() const {
     return QStringList{
-        alignMethod(), selectedReferenceFrame(), stackMethod(),
+        QStringLiteral("star"), selectedReferenceFrame(), stackMethod(),
         QString::number(kappaValue(), 'f', 1),
         QString::number(autoRejectLowQualityFrames()),
         QString::number(photometricNormalizationEnabled()),

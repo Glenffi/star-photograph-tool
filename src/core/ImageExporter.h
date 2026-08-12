@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QString>
+#include <functional>
 #include <cstdint>
 #include <vector>
 
@@ -29,7 +30,8 @@ public:
     static bool export16Bit(const std::vector<uint16_t>& image,
                             int width, int height,
                             const QString& path,
-                            Format format = Tiff16);
+                            Format format = Tiff16,
+                            const std::function<bool()>& cancelled = {});
 
     /**
      * @brief 导出 16-bit RGB 图像（3 通道）
@@ -42,7 +44,8 @@ public:
      * @return true 导出成功
      */
     static bool exportRgb16(const std::vector<uint16_t>& rgb,
-                              int width, int height,
-                              const QString& path,
-                              Format format = Tiff16);
+                            int width, int height,
+                            const QString& path,
+                            Format format = Tiff16,
+                            const std::function<bool()>& cancelled = {});
 };

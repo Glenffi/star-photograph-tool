@@ -1,6 +1,7 @@
 #include "core/ImageAligner.h"
 #include "core/ImageBufferUtils.h"
 #include "core/ImageExporter.h"
+#include "core/MinimumFilter.h"
 #include "core/AutoOptimizeEngine.h"
 #include "core/DeepSkyCalibrationPreflight.h"
 #include "core/FrameQualityEvaluator.h"
@@ -46,6 +47,60 @@ void check(bool condition, const std::string& message) {
     if (condition) return;
     ++failures;
     std::cerr << "[FAIL] " << message << '\n';
+}
+
+std::vector<float> bruteForceMinimumFilter(
+    const std::vector<float>& source, int width, int height, int radius) {
+    std::vector<float> output(source.size());
+    for (int y = 0; y < height; ++y) {
+        for (int x = 0; x < width; ++x) {
+            float minimum = source[static_cast<size_t>(y) * width + x];
+            for (int yy = std::max(0, y - radius);
+                 yy <= std::min(height - 1, y + radius); ++yy) {
+                for (int xx = std::max(0, x - radius);
+                     xx <= std::min(width - 1, x + radius); ++xx) {
+                    minimum = std::min(
+                        minimum,
+                        source[static_cast<size_t>(yy) * width + xx]);
+                }
+            }
+            output[static_cast<size_t>(y) * width + x] = minimum;
+        }
+    }
+    return output;
+}
+
+void testMinimumFilter() {
+    std::mt19937 random(0x53544152U);
+    std::uniform_real_distribution<float> value(-1.0f, 2.0f);
+    for (int width : {1, 2, 7, 16}) {
+        for (int height : {1, 3, 9}) {
+            std::vector<float> source(
+                static_cast<size_t>(width) * height);
+            for (float& sample : source) sample = value(random);
+            for (int radius : {0, 1, 3, 8}) {
+                std::vector<float> actual;
+                check(MinimumFilter::applySquare(
+                          source, width, height, radius, actual),
+                      "Minimum filter should accept valid dimensions");
+                check(actual == bruteForceMinimumFilter(
+                                    source, width, height, radius),
+                      "Separable minimum filter must exactly match the "
+                      "clipped-edge brute-force oracle");
+            }
+        }
+    }
+
+    std::vector<float> hugeRadius;
+    check(MinimumFilter::applySquare(
+              {4.0f, 2.0f}, 2, 1, std::numeric_limits<int>::max(),
+              hugeRadius) && hugeRadius == std::vector<float>({2.0f, 2.0f}),
+          "Minimum filter should safely clamp an extreme radius to the image");
+
+    std::vector<float> unchanged = {42.0f};
+    check(!MinimumFilter::applySquare({1.0f}, 2, 1, 1, unchanged) &&
+              unchanged == std::vector<float>({42.0f}),
+          "Rejected minimum-filter input should leave output unchanged");
 }
 
 void addGaussianStar(std::vector<uint16_t>& image, int width, int height,
@@ -917,6 +972,11 @@ void testRgbAutoOptimize() {
                               return std::abs(static_cast<int>(value) - 5000) <= 1;
                           }),
           "Guided dehaze should keep a flat field spatially uniform");
+    flatDehazed = {42};
+    check(!AutoOptimizeEngine::dehaze(
+              flatMono, 32, 32, 101, flatDehazed) &&
+              flatDehazed == std::vector<uint16_t>({42}),
+          "Mono dehaze should reject strength outside its 0-100 contract");
     const std::vector<uint16_t> previous = {42};
     dehazed = previous;
     check(!AutoOptimizeEngine::dehazeRgb(
@@ -1258,8 +1318,8 @@ void testMemoryEstimator() {
     ProcessingMemoryEstimator::EstimateOptions dehazeOptions = baseOptions;
     dehazeOptions.dehaze = true;
     check(ProcessingMemoryEstimator::estimatePeakBytes(
-              6000, 4000, dehazeOptions) > baseEstimate,
-          "Dehaze should increase the estimated peak for full-resolution float planes");
+              6000, 4000, dehazeOptions) == frameBytes * 9,
+          "Dehaze should reserve its reduced guided-filter working set");
     ProcessingMemoryEstimator::EstimateOptions denoiseOptions = baseOptions;
     denoiseOptions.noiseReduction = true;
     check(ProcessingMemoryEstimator::estimatePeakBytes(
@@ -2274,6 +2334,64 @@ void testTiffIccProfile() {
           "RGB TIFF export should support a Unicode file path");
 }
 
+void testPngTransferAndColorSpace() {
+    QTemporaryDir directory;
+    check(directory.isValid(), "Temporary PNG directory should be available");
+    if (!directory.isValid()) return;
+
+    const QString rgbPath = directory.filePath(
+        QString::fromUtf8("中文输出-预览.png"));
+    const std::vector<uint16_t> rgb = {
+        0, 65535, 32768,
+        203, 204, 205
+    };
+    check(ImageExporter::exportRgb16(rgb, 2, 1, rgbPath,
+                                     ImageExporter::Png8),
+          "RGB PNG export should succeed on a Unicode path");
+    const QImage loaded(rgbPath);
+    check(!loaded.isNull() && loaded.width() == 2 && loaded.height() == 1,
+          "Exported RGB PNG should be readable at the expected size");
+    if (!loaded.isNull()) {
+        const QColor first = loaded.pixelColor(0, 0);
+        check(first.red() == 0 && first.green() == 255 &&
+                  std::abs(first.blue() - 188) <= 1,
+              "PNG export should apply the sRGB transfer function");
+        check(loaded.colorSpace().isValid() &&
+                  loaded.colorSpace() == QColorSpace(QColorSpace::SRgb),
+              "RGB PNG should be tagged as sRGB");
+    }
+
+    const QString grayPath = directory.filePath("gray.png");
+    const std::vector<uint16_t> gray = {0, 65535, 32768};
+    check(ImageExporter::export16Bit(gray, 3, 1, grayPath,
+                                     ImageExporter::Png8),
+          "Grayscale PNG export should succeed");
+    const QImage grayLoaded(grayPath);
+    check(!grayLoaded.isNull() && grayLoaded.pixelColor(0, 0).red() == 0 &&
+              grayLoaded.pixelColor(1, 0).red() == 255 &&
+              std::abs(grayLoaded.pixelColor(2, 0).red() - 188) <= 1,
+          "Grayscale PNG should use the same sRGB transfer function");
+}
+
+void testCancellableExport() {
+    QTemporaryDir directory;
+    check(directory.isValid(),
+          "Temporary cancellable-export directory should be available");
+    if (!directory.isValid()) return;
+
+    const std::vector<uint16_t> rgb(64 * 64 * 3, 1000);
+    const QString tiffPath = directory.filePath("cancelled.tiff");
+    check(!ImageExporter::exportRgb16(
+              rgb, 64, 64, tiffPath, ImageExporter::Tiff16,
+              []() { return true; }) && !QFileInfo::exists(tiffPath),
+          "Cancelled TIFF export should remove its incomplete file");
+    const QString pngPath = directory.filePath("cancelled.png");
+    check(!ImageExporter::exportRgb16(
+              rgb, 64, 64, pngPath, ImageExporter::Png8,
+              []() { return true; }) && !QFileInfo::exists(pngPath),
+          "Cancelled PNG conversion should not create an output file");
+}
+
 void testPresetDenoisePersistence() {
     const QList<Preset> builtins = PresetManager::builtinPresets();
     check(builtins.size() == 2 &&
@@ -2497,6 +2615,7 @@ void testUpdateManifest() {
 
 int main(int argc, char* argv[]) {
     QCoreApplication application(argc, argv);
+    testMinimumFilter();
     testStacking();
     testRawCalibration();
     testDeepSkyCalibrationPreflight();
@@ -2514,6 +2633,8 @@ int main(int argc, char* argv[]) {
     testPhotometricNormalization();
     testFrameQualitySelection();
     testTiffIccProfile();
+    testPngTransferAndColorSpace();
+    testCancellableExport();
     testPresetDenoisePersistence();
     testRawApiValidation();
     testSkyGroundHorizonDetection();

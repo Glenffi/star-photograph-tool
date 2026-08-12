@@ -1752,6 +1752,8 @@ void ProcessingWorker::runTimelapse() {
             return;
         }
         metadata.push_back(std::move(item));
+        emit progress(1 + static_cast<int>(
+            (index + 1) * 4.0 / m_files.size()));
     }
 
     const int metadataWidth = metadata.front().width;
@@ -1869,10 +1871,12 @@ void ProcessingWorker::runTimelapse() {
     const int radius = windowSize / 2;
     emit stageMessage("预分析邻近帧对齐...");
     for (int targetIndex = 0; targetIndex < m_files.size(); ++targetIndex) {
+        if (stopIfCancelled()) return;
         const int start = std::max(0, targetIndex - radius);
         const int end = std::min(
             static_cast<int>(m_files.size()) - 1, targetIndex + radius);
         for (int sourceIndex = start; sourceIndex <= end; ++sourceIndex) {
+            if (stopIfCancelled()) return;
             if (sourceIndex == targetIndex) continue;
             if (detectedStars[static_cast<size_t>(targetIndex)].size() < 3 ||
                 detectedStars[static_cast<size_t>(sourceIndex)].size() < 3) {
@@ -1883,10 +1887,12 @@ void ProcessingWorker::runTimelapse() {
             AlignmentOptions options;
             options.imageWidth = width;
             options.imageHeight = height;
-            if (aligner.align(
+            const bool aligned = aligner.align(
                     detectedStars[static_cast<size_t>(targetIndex)],
                     detectedStars[static_cast<size_t>(sourceIndex)],
-                    transform, &quality, options)) {
+                    transform, &quality, options);
+            if (stopIfCancelled()) return;
+            if (aligned) {
                 transforms[static_cast<size_t>(targetIndex)].push_back(
                     {sourceIndex, transform});
                 ++alignedPairCount;
@@ -1906,6 +1912,8 @@ void ProcessingWorker::runTimelapse() {
                 }
             }
         }
+        emit progress(25 + static_cast<int>(
+            (targetIndex + 1) * 3.0 / m_files.size()));
     }
     if (alignedPairCount == 0 && !protectGround) {
         m_errorString = "延时序列的邻近帧均无法完成星点对齐";
@@ -1914,6 +1922,7 @@ void ProcessingWorker::runTimelapse() {
 
     std::vector<uint8_t> skyMask;
     if (protectGround) {
+        if (stopIfCancelled()) return;
         const int maskFrameIndex = m_files.size() / 2;
         QImage preview;
         bool usedEmbeddedPreview =
@@ -1933,6 +1942,7 @@ void ProcessingWorker::runTimelapse() {
                     maskLuminance, width, height, skyMask,
                     m_params.featherRadius);
         }
+        if (stopIfCancelled()) return;
         if (!maskReady) {
             qWarning() << "延时地平线检测失败，本次按纯天空序列处理";
             protectGround = false;
@@ -1973,22 +1983,26 @@ void ProcessingWorker::runTimelapse() {
             PhotometricNormalizer::buildReferenceProfile(
                 anchorRgb, width, height, anchorProfile, 65536,
                 photometricMask, 160);
+        if (stopIfCancelled()) return;
         if (anchorReady) {
             sequencePhotometry[static_cast<size_t>(anchorIndex)].valid = true;
             for (int index = 0; index < m_files.size(); ++index) {
                 if (stopIfCancelled()) return;
-                if (index == anchorIndex) continue;
-                std::vector<uint16_t> frameRgb;
-                PhotometricModel model;
-                if (decodedCache.readFrame(
-                        index, rgbValueCount, frameRgb) &&
-                    PhotometricNormalizer::estimate(
-                        anchorProfile, frameRgb, model)) {
-                    auto& sample = sequencePhotometry[
-                        static_cast<size_t>(index)];
-                    sample.valid = true;
-                    sample.model = model;
+                if (index != anchorIndex) {
+                    std::vector<uint16_t> frameRgb;
+                    PhotometricModel model;
+                    if (decodedCache.readFrame(
+                            index, rgbValueCount, frameRgb) &&
+                        PhotometricNormalizer::estimate(
+                            anchorProfile, frameRgb, model)) {
+                        auto& sample = sequencePhotometry[
+                            static_cast<size_t>(index)];
+                        sample.valid = true;
+                        sample.model = model;
+                    }
                 }
+                emit progress(28 + static_cast<int>(
+                    (index + 1) * 2.0 / m_files.size()));
             }
         }
     }
@@ -2000,6 +2014,7 @@ void ProcessingWorker::runTimelapse() {
     const QString outputDirectory = QDir(rootOutput).filePath(
         QDateTime::currentDateTime().toString("yyyyMMdd_hhmmss_zzz") +
         "_timelapse");
+    if (stopIfCancelled()) return;
     if (!QDir().mkpath(outputDirectory)) {
         m_errorString = "无法创建延时序列输出目录";
         return;
@@ -2022,6 +2037,14 @@ void ProcessingWorker::runTimelapse() {
 
     emit stageMessage("逐帧滑动窗口降噪...");
     int writtenFrames = 0;
+    enum class NormalizationState {
+        NotAttempted,
+        Failed,
+        Succeeded
+    };
+    std::vector<NormalizationState> normalizationStates(
+        static_cast<size_t>(m_files.size()),
+        NormalizationState::NotAttempted);
     for (int targetIndex = 0; targetIndex < m_files.size(); ++targetIndex) {
         if (stopIfCancelled()) return;
         const int start = std::max(0, targetIndex - radius);
@@ -2039,20 +2062,34 @@ void ProcessingWorker::runTimelapse() {
             m_params.photometricNormalizationEnabled &&
             PhotometricNormalizer::buildReferenceProfile(
                 targetRgb, width, height, targetProfile);
-        auto normalizeToTarget = [&](std::vector<uint16_t>& rgb) {
+        auto normalizeToTarget = [&](std::vector<uint16_t>& rgb,
+                                     int sourceIndex) {
             if (!m_params.photometricNormalizationEnabled) return;
+            auto& state = normalizationStates[
+                static_cast<size_t>(sourceIndex)];
             if (!targetProfileReady) {
-                ++m_photometricSkippedFrameCount;
+                if (state != NormalizationState::Succeeded) {
+                    state = NormalizationState::Failed;
+                }
                 return;
             }
             PhotometricModel model;
             if (!PhotometricNormalizer::estimate(
                     targetProfile, rgb, model)) {
-                ++m_photometricSkippedFrameCount;
+                if (state != NormalizationState::Succeeded) {
+                    state = NormalizationState::Failed;
+                }
                 return;
             }
-            PhotometricNormalizer::applyInPlace(
-                rgb, width, height, model);
+            if (!PhotometricNormalizer::applyInPlace(
+                    rgb, width, height, model)) {
+                if (state != NormalizationState::Succeeded) {
+                    state = NormalizationState::Failed;
+                }
+                return;
+            }
+            if (state == NormalizationState::Succeeded) return;
+            state = NormalizationState::Succeeded;
             ++m_photometricNormalizedFrameCount;
             m_photometricGainSum += model.gain;
             if (m_photometricNormalizedFrameCount == 1) {
@@ -2084,6 +2121,7 @@ void ProcessingWorker::runTimelapse() {
         size_t groundTargetIndex = 0;
 
         for (int sourceIndex = start; sourceIndex <= end; ++sourceIndex) {
+            if (stopIfCancelled()) return;
             std::vector<uint16_t> sourceRgb;
             if (!decodedCache.readFrame(
                     sourceIndex, rgbValueCount, sourceRgb)) {
@@ -2109,7 +2147,7 @@ void ProcessingWorker::runTimelapse() {
                 // independent source copy so photometric matching for the
                 // fixed ground cannot be applied a second time to aligned sky.
                 std::vector<uint16_t> groundRgb = sourceRgb;
-                normalizeToTarget(groundRgb);
+                normalizeToTarget(groundRgb, sourceIndex);
                 groundFrames.push_back(std::move(groundRgb));
                 groundDistances.push_back(distance);
             }
@@ -2129,7 +2167,8 @@ void ProcessingWorker::runTimelapse() {
                     transformIt->transform, aligned)) {
                 continue;
             }
-            normalizeToTarget(aligned);
+            if (stopIfCancelled()) return;
+            normalizeToTarget(aligned, sourceIndex);
             skyFrames.push_back(std::move(aligned));
             skyDistances.push_back(distance);
         }
@@ -2147,6 +2186,7 @@ void ProcessingWorker::runTimelapse() {
         const auto skyViews = makeViews(skyFrames, skyDistances);
         TimelapseEngine::Result skyResult = TimelapseEngine::denoise(
             skyViews, width, height, skyTargetIndex, temporalOptions);
+        if (stopIfCancelled()) return;
         if (!skyResult) {
             m_errorString = QString("延时天空降噪失败: %1")
                 .arg(TimelapseEngine::errorMessage(skyResult.error));
@@ -2160,6 +2200,7 @@ void ProcessingWorker::runTimelapse() {
             const auto groundViews = makeViews(groundFrames, groundDistances);
             TimelapseEngine::Result groundResult = TimelapseEngine::denoise(
                 groundViews, width, height, groundTargetIndex, temporalOptions);
+            if (stopIfCancelled()) return;
             if (!groundResult || !ImageBufferUtils::blendSkyGroundInPlace(
                     resultRgb, groundResult.rgb, skyMask, width, height)) {
                 m_errorString = "延时天地分离融合失败";
@@ -2215,18 +2256,28 @@ void ProcessingWorker::runTimelapse() {
         const QString outputPath = QDir(outputDirectory).filePath(outputName);
         emit stageMessage(QString("输出第 %1/%2 张...")
                               .arg(targetIndex + 1).arg(m_files.size()));
+        if (stopIfCancelled()) return;
         if (!ImageExporter::exportRgb16(
                 resultRgb, width, height, outputPath,
-                png ? ImageExporter::Png8 : ImageExporter::Tiff16)) {
+                png ? ImageExporter::Png8 : ImageExporter::Tiff16,
+                [this]() { return stopIfCancelled(); })) {
+            if (m_wasCancelled) return;
             m_errorString = QString("延时序列导出失败: %1").arg(outputName);
             return;
         }
         ++writtenFrames;
+        m_frameCount = writtenFrames;
+        if (stopIfCancelled()) return;
         emit progress(30 + static_cast<int>(
             writtenFrames * 70.0 / m_files.size()));
     }
 
-    m_frameCount = writtenFrames;
+    if (m_params.photometricNormalizationEnabled) {
+        m_photometricSkippedFrameCount = static_cast<int>(std::count(
+            normalizationStates.begin(), normalizationStates.end(),
+            NormalizationState::Failed));
+    }
+    if (stopIfCancelled()) return;
     emit progress(100);
     emit stageMessage(QString("延时序列处理完成：已输出 %1 张").arg(writtenFrames));
 }
@@ -2449,8 +2500,10 @@ bool ProcessingWorker::finishResult(std::vector<uint16_t>& resultRgb,
         outputSuffix + extension;
     if (!ImageExporter::exportRgb16(m_stackedData, width, height,
                                     m_outputFile,
-                                    png ? ImageExporter::Png8 : ImageExporter::Tiff16)) {
+                                    png ? ImageExporter::Png8 : ImageExporter::Tiff16,
+                                    [this]() { return stopIfCancelled(); })) {
         m_outputFile.clear();
+        if (m_wasCancelled) return false;
         m_errorString = "导出失败";
         return false;
     }

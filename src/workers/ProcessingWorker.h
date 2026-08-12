@@ -108,6 +108,10 @@ public:
     int stackedHeight() const { return m_height; }
     int cropOffsetX() const { return m_cropOffsetX; }
     int cropOffsetY() const { return m_cropOffsetY; }
+    // In time-lapse mode this is the number of files successfully written;
+    // in stacking modes it is the number of frames included in the result.
+    int outputFrameCount() const { return m_frameCount; }
+    // Kept for source compatibility with the existing main-window code.
     int stackedFrameCount() const { return m_frameCount; }
     int selectedReferenceIndex() const { return m_selectedReferenceIndex; }
     QString selectedReferenceFrame() const { return m_selectedReferenceFrame; }

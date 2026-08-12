@@ -45,6 +45,9 @@ double standardDeviation(const std::vector<uint16_t>& values,
         const double delta = static_cast<double>(value) - center;
         sum += delta * delta;
     }
+    // Sigma clipping treats the active pixel samples as the complete stack
+    // population, so this intentionally uses the population divisor n rather
+    // than the sample estimator n - 1. Regression tests lock this behavior.
     return std::sqrt(sum / (end - begin));
 }
 

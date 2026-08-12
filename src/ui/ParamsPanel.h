@@ -24,7 +24,6 @@ class ParamsPanel : public QWidget {
 public:
     explicit ParamsPanel(QWidget* parent = nullptr);
 
-    QString alignMethod() const;
     QString stackMethod() const;
     double kappaValue() const;
     bool autoRejectLowQualityFrames() const;
@@ -122,7 +121,6 @@ private:
 
     // 对齐组
     QGroupBox* m_alignGroup = nullptr;
-    QComboBox* m_alignMethod = nullptr;
     QComboBox* m_refFrame = nullptr;
 
     // 堆栈组

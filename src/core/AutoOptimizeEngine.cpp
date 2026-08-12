@@ -1,4 +1,5 @@
 #include "AutoOptimizeEngine.h"
+#include "MinimumFilter.h"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -48,16 +49,18 @@ uint16_t clampToUint16(double value) {
 
 } // namespace
 
-static void normalizeToFloat(const std::vector<uint16_t>& src, std::vector<float>& dst, int w, int h) {
-    dst.resize(w * h);
-    for (int i = 0; i < w * h; ++i) {
+static void normalizeToFloat(const std::vector<uint16_t>& src,
+                             std::vector<float>& dst) {
+    dst.resize(src.size());
+    for (size_t i = 0; i < src.size(); ++i) {
         dst[i] = static_cast<float>(src[i]) / 65535.0f;
     }
 }
 
-static void convertToUint16(const std::vector<float>& src, std::vector<uint16_t>& dst, int w, int h) {
-    dst.resize(w * h);
-    for (int i = 0; i < w * h; ++i) {
+static void convertToUint16(const std::vector<float>& src,
+                            std::vector<uint16_t>& dst) {
+    dst.resize(src.size());
+    for (size_t i = 0; i < src.size(); ++i) {
         float v = std::max(0.0f, std::min(1.0f, src[i]));
         dst[i] = static_cast<uint16_t>(v * 65535.0f + 0.5f);
     }
@@ -804,7 +807,10 @@ bool AutoOptimizeEngine::dehazeRgb(const std::vector<uint16_t>& src,
                                    int w, int h, int strength,
                                    std::vector<uint16_t>& dst) {
     size_t pixelCount = 0;
-    if (!rgbPixelCount(src, w, h, pixelCount) || strength < 0) return false;
+    if (!rgbPixelCount(src, w, h, pixelCount) ||
+        strength < 0 || strength > 100) {
+        return false;
+    }
     if (strength == 0) {
         dst = src;
         return true;
@@ -815,7 +821,7 @@ bool AutoOptimizeEngine::dehazeRgb(const std::vector<uint16_t>& src,
         luminance[pixel] = luminanceAt(src, pixel);
     }
     std::vector<uint16_t> dehazed;
-    if (!dehaze(luminance, w, h, std::min(strength, 100), dehazed)) {
+    if (!dehaze(luminance, w, h, strength, dehazed)) {
         return false;
     }
 
@@ -834,39 +840,53 @@ bool AutoOptimizeEngine::dehazeRgb(const std::vector<uint16_t>& src,
     return true;
 }
 
-static void computeDarkChannel(const std::vector<float>& img, int w, int h, std::vector<float>& dark, int patchSize) {
-    dark.resize(w * h);
-    int half = patchSize / 2;
-    for (int y = 0; y < h; ++y) {
-        for (int x = 0; x < w; ++x) {
-            float minVal = 1.0f;
-            for (int dy = -half; dy <= half; ++dy) {
-                int yy = std::max(0, std::min(h - 1, y + dy));
-                for (int dx = -half; dx <= half; ++dx) {
-                    int xx = std::max(0, std::min(w - 1, x + dx));
-                    minVal = std::min(minVal, img[yy * w + xx]);
-                }
-            }
-            dark[y * w + x] = minVal;
-        }
-    }
+static uint16_t normalizedBucket(float value) {
+    return static_cast<uint16_t>(std::lround(
+        std::clamp(value, 0.0f, 1.0f) * 65535.0f));
 }
 
-static float estimateAtmosphericLight(const std::vector<float>& img, const std::vector<float>& dark, int w, int h) {
-    int total = w * h;
-    int topCount = std::max(1, static_cast<int>(total * 0.001));
-    std::vector<std::pair<float, int>> darkIndexed;
-    darkIndexed.reserve(total);
-    for (int i = 0; i < total; ++i) {
-        darkIndexed.emplace_back(dark[i], i);
+static float estimateAtmosphericLight(const std::vector<float>& img,
+                                      const std::vector<float>& dark) {
+    const size_t total = dark.size();
+    const size_t topCount = std::max<size_t>(1, total / 1000);
+    std::vector<uint32_t> histogram(65536, 0);
+    for (float value : dark) {
+        ++histogram[normalizedBucket(value)];
     }
-    std::partial_sort(darkIndexed.begin(), darkIndexed.begin() + topCount, darkIndexed.end(),
-        [](const auto& a, const auto& b) { return a.first > b.first; });
-    
-    double sum = 0.0;
-    for (int i = 0; i < topCount; ++i) {
-        sum += img[darkIndexed[i].second];
+
+    uint16_t threshold = 0;
+    size_t aboveThreshold = 0;
+    for (int bucket = 65535; bucket >= 0; --bucket) {
+        const size_t count = histogram[static_cast<size_t>(bucket)];
+        if (aboveThreshold + count >= topCount) {
+            threshold = static_cast<uint16_t>(bucket);
+            break;
+        }
+        aboveThreshold += count;
     }
+
+    size_t selectedAbove = 0;
+    size_t tiedCount = 0;
+    double sumAbove = 0.0;
+    double tiedSum = 0.0;
+    for (size_t i = 0; i < total; ++i) {
+        const uint16_t bucket = normalizedBucket(dark[i]);
+        if (bucket > threshold) {
+            sumAbove += img[i];
+            ++selectedAbove;
+        } else if (bucket == threshold) {
+            tiedSum += img[i];
+            ++tiedCount;
+        }
+    }
+    const size_t tiedNeeded = topCount - selectedAbove;
+    // All pixels in the threshold bucket have the same dark-channel rank.
+    // Use their mean rather than whichever tied pixels happen to occur first,
+    // avoiding a subtle top-left spatial bias in large flat regions.
+    const double sum = sumAbove +
+        (tiedCount > 0
+             ? tiedSum * static_cast<double>(tiedNeeded) / tiedCount
+             : 0.0);
     return static_cast<float>(sum / topCount);
 }
 
@@ -890,59 +910,85 @@ static void boxFilter(const std::vector<float>& src, std::vector<float>& dst, in
         }
     }
     
-    // Vertical pass
-    for (int x = 0; x < w; ++x) {
-        float sum = 0.0f;
-        for (int y = 0; y < r && y < h; ++y) {
-            sum += temp[y * w + x];
+    // Vertical pass. Column sums keep the write path row-contiguous, which is
+    // considerably friendlier to cache on full-resolution camera images.
+    std::vector<float> columnSums(static_cast<size_t>(w), 0.0f);
+    for (int y = 0; y < std::min(r, h); ++y) {
+        const float* row = temp.data() + static_cast<size_t>(y) * w;
+        for (int x = 0; x < w; ++x) columnSums[x] += row[x];
+    }
+    for (int y = 0; y < h; ++y) {
+        const int top = y - r - 1;
+        const int bottom = y + r;
+        if (top >= 0) {
+            const float* row = temp.data() + static_cast<size_t>(top) * w;
+            for (int x = 0; x < w; ++x) columnSums[x] -= row[x];
         }
-        for (int y = 0; y < h; ++y) {
-            int top = y - r - 1;
-            int bottom = y + r;
-            if (top >= 0) sum -= temp[top * w + x];
-            if (bottom < h) sum += temp[bottom * w + x];
-            int count = std::min(y + r, h - 1) - std::max(y - r, 0) + 1;
-            dst[y * w + x] = sum / count;
+        if (bottom < h) {
+            const float* row = temp.data() + static_cast<size_t>(bottom) * w;
+            for (int x = 0; x < w; ++x) columnSums[x] += row[x];
+        }
+        const int count = std::min(y + r, h - 1) -
+                          std::max(y - r, 0) + 1;
+        float* outputRow = dst.data() + static_cast<size_t>(y) * w;
+        for (int x = 0; x < w; ++x) {
+            outputRow[x] = columnSums[x] / count;
         }
     }
 }
 
 void AutoOptimizeEngine::guidedFilter(const std::vector<float>& guide, const std::vector<float>& input,
                                       std::vector<float>& output, int w, int h, int r, float eps) {
-    output.resize(w * h);
-    std::vector<float> mean_I(w * h), mean_p(w * h), mean_Ip(w * h);
-    std::vector<float> mean_II(w * h), a(w * h), b(w * h);
+    const size_t pixelCount = guide.size();
+    output.resize(pixelCount);
+    std::vector<float> mean_I;
+    std::vector<float> mean_p;
+    std::vector<float> a;
+    std::vector<float> b;
     
     boxFilter(guide, mean_I, w, h, r);
     boxFilter(input, mean_p, w, h, r);
     
-    std::vector<float> Ip(w * h), II(w * h);
-    for (int i = 0; i < w * h; ++i) {
-        Ip[i] = guide[i] * input[i];
-        II[i] = guide[i] * guide[i];
+    std::vector<float> product(pixelCount);
+    for (size_t i = 0; i < pixelCount; ++i) {
+        product[i] = guide[i] * input[i];
     }
-    boxFilter(Ip, mean_Ip, w, h, r);
-    boxFilter(II, mean_II, w, h, r);
-    
-    for (int i = 0; i < w * h; ++i) {
-        float cov = mean_Ip[i] - mean_I[i] * mean_p[i];
-        float var = mean_II[i] - mean_I[i] * mean_I[i];
-        a[i] = cov / (var + eps);
+    boxFilter(product, a, w, h, r);
+    for (size_t i = 0; i < pixelCount; ++i) {
+        product[i] = guide[i] * guide[i];
+    }
+    boxFilter(product, b, w, h, r);
+
+    for (size_t i = 0; i < pixelCount; ++i) {
+        const float covariance = a[i] - mean_I[i] * mean_p[i];
+        const float variance = b[i] - mean_I[i] * mean_I[i];
+        a[i] = covariance / (variance + eps);
         b[i] = mean_p[i] - a[i] * mean_I[i];
     }
-    
-    std::vector<float> mean_a(w * h), mean_b(w * h);
-    boxFilter(a, mean_a, w, h, r);
-    boxFilter(b, mean_b, w, h, r);
-    
-    for (int i = 0; i < w * h; ++i) {
-        output[i] = mean_a[i] * guide[i] + mean_b[i];
+
+    // Reuse the mean buffers for mean(a) and mean(b); the guide/input means
+    // are no longer needed. Releasing the product plane before the two final
+    // box filters saves one full float image at peak memory.
+    std::vector<float>().swap(product);
+    boxFilter(a, mean_I, w, h, r);
+    boxFilter(b, mean_p, w, h, r);
+
+    for (size_t i = 0; i < pixelCount; ++i) {
+        output[i] = mean_I[i] * guide[i] + mean_p[i];
     }
 }
 
 bool AutoOptimizeEngine::dehaze(const std::vector<uint16_t>& src, int w, int h,
                                  int strength, std::vector<uint16_t>& dst) {
-    if (src.empty() || w <= 0 || h <= 0 || static_cast<int>(src.size()) != w * h) {
+    if (strength < 0 || strength > 100 || w <= 0 || h <= 0 ||
+        static_cast<size_t>(w) > std::numeric_limits<size_t>::max() /
+                                     static_cast<size_t>(h)) {
+        return false;
+    }
+    const size_t pixelCount =
+        static_cast<size_t>(w) * static_cast<size_t>(h);
+    if (pixelCount > static_cast<size_t>(std::numeric_limits<int>::max()) ||
+        src.size() != pixelCount) {
         return false;
     }
     if (strength <= 0) {
@@ -951,88 +997,39 @@ bool AutoOptimizeEngine::dehaze(const std::vector<uint16_t>& src, int w, int h,
     }
     
     std::vector<float> img;
-    normalizeToFloat(src, img, w, h);
+    normalizeToFloat(src, img);
     
     // Dark Channel Prior
     std::vector<float> dark;
-    computeDarkChannel(img, w, h, dark, 15);
+    if (!MinimumFilter::applySquare(img, w, h, 15 / 2, dark)) return false;
     
     // Estimate atmospheric light
-    float A = estimateAtmosphericLight(img, dark, w, h);
+    float A = estimateAtmosphericLight(img, dark);
     A = std::max(A, 0.001f);
     
     // Estimate transmission
     constexpr float omega = 0.95f;
-    std::vector<float> t(w * h);
-    for (int i = 0; i < w * h; ++i) {
-        t[i] = 1.0f - omega * (dark[i] / A);
+    for (size_t i = 0; i < pixelCount; ++i) {
+        dark[i] = 1.0f - omega * (dark[i] / A);
     }
     
     // Guided Filter refine transmission
     std::vector<float> t_refined;
-    guidedFilter(img, t, t_refined, w, h, 40, 0.001f);
+    guidedFilter(img, dark, t_refined, w, h, 40, 0.001f);
     
     // Recover image
-    std::vector<float> result(w * h);
-    for (int i = 0; i < w * h; ++i) {
+    for (size_t i = 0; i < pixelCount; ++i) {
         float t_clamped = std::max(t_refined[i], 0.1f);
-        result[i] = (img[i] - A) / t_clamped + A;
-        result[i] = std::max(0.0f, std::min(1.0f, result[i]));
+        t_refined[i] = (img[i] - A) / t_clamped + A;
+        t_refined[i] = std::max(0.0f, std::min(1.0f, t_refined[i]));
     }
     
     // Blend based on strength
     float blend = static_cast<float>(strength) / 100.0f;
-    for (int i = 0; i < w * h; ++i) {
-        result[i] = img[i] * (1.0f - blend) + result[i] * blend;
+    for (size_t i = 0; i < pixelCount; ++i) {
+        t_refined[i] = img[i] * (1.0f - blend) + t_refined[i] * blend;
     }
     
-    convertToUint16(result, dst, w, h);
-    return true;
-}
-
-static float computePercentile(const std::vector<uint16_t>& data, float percentile) {
-    std::vector<uint16_t> sorted = data;
-    std::sort(sorted.begin(), sorted.end());
-    size_t idx = static_cast<size_t>(percentile / 100.0f * (sorted.size() - 1));
-    return static_cast<float>(sorted[idx]);
-}
-
-bool AutoOptimizeEngine::stretchCurve(const std::vector<uint16_t>& src, int w, int h,
-                                       std::vector<uint16_t>& dst) {
-    if (src.empty() || w <= 0 || h <= 0 || static_cast<int>(src.size()) != w * h) {
-        return false;
-    }
-    
-    float p1 = computePercentile(src, 1.0f);
-    float p99 = computePercentile(src, 99.0f);
-    
-    if (p99 <= p1) {
-        dst = src;
-        return true;
-    }
-    
-    float stretchFactor = 1.0f / (p99 - p1);
-    float maxVal = 65535.0f;
-    float asinhMax = std::asinh(maxVal * stretchFactor);
-    
-    dst.resize(w * h);
-    float softClipStart = maxVal * 0.95f;
-    float softClipRange = maxVal - softClipStart;
-    
-    for (int i = 0; i < w * h; ++i) {
-        float input = static_cast<float>(src[i]);
-        float shifted = std::max(0.0f, input - p1);
-        float stretched = std::asinh(shifted * stretchFactor) / asinhMax * maxVal;
-        
-        // Soft-clipping for highlights
-        if (stretched > softClipStart && softClipRange > 0.0f) {
-            float excess = stretched - softClipStart;
-            float compressed = softClipRange * (1.0f - std::exp(-excess / softClipRange));
-            stretched = softClipStart + compressed;
-        }
-        
-        dst[i] = static_cast<uint16_t>(std::max(0.0f, std::min(maxVal, stretched)) + 0.5f);
-    }
-    
+    convertToUint16(t_refined, dst);
     return true;
 }

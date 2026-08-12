@@ -119,11 +119,12 @@ uint64_t ProcessingMemoryEstimator::estimatePeakBytes(
         postProcessPeak = std::max(postProcessPeak, stage);
         return true;
     };
-    // Guided-filter dehaze owns many full-resolution float planes. The
-    // equivalent counts include caller RGB/channel buffers and library margin.
+    // The guided-filter implementation reuses its mean/product planes. Nine
+    // RGB16 frame equivalents conservatively cover the caller RGB data, mono
+    // channels, seven simultaneous float planes and filtering scratch space.
     if (!includeFrameEquivalents(options.noiseReduction, 6ULL) ||
         !includeFrameEquivalents(options.modifiedCameraColor, 2ULL) ||
-        !includeFrameEquivalents(options.dehaze, 15ULL) ||
+        !includeFrameEquivalents(options.dehaze, 9ULL) ||
         !includeFrameEquivalents(options.stretch, 4ULL) ||
         !includeFrameEquivalents(options.basicAdjustments, 2ULL) ||
         !includeFrameEquivalents(options.sharpening, 4ULL) ||

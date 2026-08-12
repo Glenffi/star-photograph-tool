@@ -43,6 +43,7 @@
 #include "core/RawImageLoader.h"
 #include "core/ImageExporter.h"
 #include "workers/MaskPreviewWorker.h"
+#include "workers/ExportWorker.h"
 #include "workers/ProcessingWorker.h"
 #include "workers/QuickPreviewWorker.h"
 
@@ -98,6 +99,10 @@ public:
         if (m_worker && m_worker->isRunning()) {
             m_worker->requestCancel();
             m_worker->wait();
+        }
+        if (m_exportWorker && m_exportWorker->isRunning()) {
+            m_exportWorker->requestCancel();
+            m_exportWorker->wait();
         }
         // 等待所有 MaskPreviewWorker 真正结束
         for (MaskPreviewWorker* w : m_activeMaskPreviewWorkers) {
@@ -711,7 +716,8 @@ private:
     }
 
     bool processingActive() const {
-        return m_worker && m_worker->isRunning();
+        return (m_worker && m_worker->isRunning()) ||
+               (m_exportWorker && m_exportWorker->isRunning());
     }
 
     QString effectiveReferenceFrame() const {
@@ -1355,7 +1361,7 @@ private slots:
                 m_cachedBeforeWhitePoint = worker->beforePreviewWhitePoint();
                 m_cachedWidth = worker->stackedWidth();
                 m_cachedHeight = worker->stackedHeight();
-                m_cachedFrameCount = worker->stackedFrameCount();
+                m_cachedFrameCount = worker->outputFrameCount();
                 std::vector<uint16_t> quickSource =
                     worker->takeQuickPreviewSource();
                 std::vector<uint8_t> quickMask =
@@ -1507,13 +1513,56 @@ private slots:
                     ? "_star_trail_export" : "_stacked_export") + ext;
         QString fullPath = outPath + "/" + fileName;
 
-        if (ImageExporter::exportRgb16(m_cachedStackedData, m_cachedWidth,
-                                      m_cachedHeight, fullPath, fmt)) {
-            QMessageBox::information(this, "导出成功", QString("已导出到：%1").arg(fullPath));
-            statusBar()->showMessage(QString("已导出：%1").arg(fileName), 5000);
-        } else {
-            QMessageBox::warning(this, "导出失败", "无法写入文件，请检查输出目录权限");
-        }
+        auto image = std::make_shared<std::vector<uint16_t>>(
+            std::move(m_cachedStackedData));
+        auto* worker = new ExportWorker(
+            image, m_cachedWidth, m_cachedHeight, fullPath, fmt, this);
+        m_exportWorker = worker;
+        m_projectPanel->setEnabled(false);
+        m_paramsPanel->setEnabled(false);
+        m_toolbar->setProcessing(true);
+        m_inlineProgress->setRange(0, 0);
+        m_inlineProgress->setVisible(true);
+        statusBar()->showMessage(QString::fromUtf8("正在导出 %1...").arg(fileName));
+
+        auto* dialog = new QProgressDialog(
+            QString::fromUtf8("正在导出完整分辨率图像..."),
+            QString::fromUtf8("取消"), 0, 0, this);
+        dialog->setWindowTitle(QString::fromUtf8("导出"));
+        dialog->setWindowModality(Qt::NonModal);
+        dialog->setMinimumDuration(0);
+        connect(dialog, &QProgressDialog::canceled,
+                worker, &ExportWorker::requestCancel);
+
+        connect(worker, &ExportWorker::finished, this,
+                [this, worker, image, fileName, dialog]() {
+                    dialog->close();
+                    dialog->deleteLater();
+                    m_cachedStackedData = std::move(*image);
+                    m_toolbar->setProcessing(false);
+                    m_toolbar->enableExport(true);
+                    m_projectPanel->setEnabled(true);
+                    m_paramsPanel->setEnabled(true);
+                    m_inlineProgress->setRange(0, 100);
+                    m_inlineProgress->setVisible(false);
+                    if (worker->succeeded()) {
+                        QMessageBox::information(
+                            this, QString::fromUtf8("导出成功"),
+                            QString::fromUtf8("已导出到：%1")
+                                .arg(worker->outputPath()));
+                        statusBar()->showMessage(
+                            QString::fromUtf8("已导出：%1").arg(fileName), 5000);
+                    } else if (worker->wasCancelled()) {
+                        statusBar()->showMessage(QString::fromUtf8("导出已取消"), 3000);
+                    } else {
+                        QMessageBox::warning(
+                            this, QString::fromUtf8("导出失败"),
+                            QString::fromUtf8("无法写入文件，请检查输出目录权限"));
+                    }
+                    if (m_exportWorker == worker) m_exportWorker = nullptr;
+                    worker->deleteLater();
+                });
+        worker->start();
     }
 
     void onSettingsClicked() {
@@ -1611,6 +1660,7 @@ private:
     MaskPreviewWorker* m_maskPreviewWorker = nullptr;
     QSet<MaskPreviewWorker*> m_activeMaskPreviewWorkers;
     QuickPreviewWorker* m_quickPreviewWorker = nullptr;
+    ExportWorker* m_exportWorker = nullptr;
     QTimer* m_quickPreviewTimer = nullptr;
     uint64_t m_quickPreviewGeneration = 0;
     bool m_quickPreviewPending = false;

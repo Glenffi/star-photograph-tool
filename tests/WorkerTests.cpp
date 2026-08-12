@@ -1,7 +1,10 @@
 #include "workers/ProcessingWorker.h"
 #include "workers/QuickPreviewWorker.h"
+#include "workers/ExportWorker.h"
 
 #include <QCoreApplication>
+#include <QFileInfo>
+#include <QTemporaryDir>
 
 #include <iostream>
 #include <memory>
@@ -36,6 +39,21 @@ void testCancellationBeforeStart() {
     check(worker.errorString().isEmpty(), "Cancellation should not be reported as an error");
 }
 
+void testExportWorkerLifecycle() {
+    QTemporaryDir directory;
+    check(directory.isValid(),
+          "Export-worker temporary directory should be available");
+    if (!directory.isValid()) return;
+
+    auto image = std::make_shared<std::vector<uint16_t>>(16 * 16 * 3, 4096);
+    const QString path = directory.filePath("background.png");
+    ExportWorker worker(image, 16, 16, path, ImageExporter::Png8);
+    worker.start();
+    check(worker.wait(3000), "Export worker should finish promptly");
+    check(worker.succeeded() && QFileInfo::exists(path),
+          "Export worker should write a valid image off the caller thread");
+}
+
 void testRawLoaderFitsWorkerStack() {
     ProcessingWorker::Params params;
     ProcessingWorker worker({"not-a-real-file.raw"}, "not-a-real-file.raw", params);
@@ -52,7 +70,7 @@ void testSingleFrameFailureUsesDedicatedPath() {
     check(worker.wait(3000), "Single-frame metadata failure should finish promptly");
     check(!worker.errorString().isEmpty(),
           "Unreadable single-frame input should expose an error");
-    check(worker.stackedFrameCount() == 0,
+    check(worker.outputFrameCount() == 0,
           "Failed single-frame processing should not report a completed frame");
 }
 
@@ -68,7 +86,7 @@ void testTimelapseRejectsTooFewFrames() {
           "Short timelapse input is an error, not cancellation");
     check(worker.errorString().contains("3"),
           "Timelapse input error should explain the three-frame minimum");
-    check(worker.stackedFrameCount() == 0,
+    check(worker.outputFrameCount() == 0,
           "Rejected timelapse input should not report output frames");
 }
 
@@ -84,7 +102,7 @@ void testStarTrailRejectsTooFewFrames() {
           "Short star-trail input is an error, not cancellation");
     check(worker.errorString().contains("3"),
           "Star-trail input error should explain the three-frame minimum");
-    check(worker.stackedFrameCount() == 0,
+    check(worker.outputFrameCount() == 0,
           "Rejected star-trail input should not report output frames");
 }
 
@@ -199,6 +217,7 @@ int main(int argc, char* argv[]) {
     QCoreApplication application(argc, argv);
     testEmptyInput();
     testCancellationBeforeStart();
+    testExportWorkerLifecycle();
     testRawLoaderFitsWorkerStack();
     testSingleFrameFailureUsesDedicatedPath();
     testTimelapseRejectsTooFewFrames();

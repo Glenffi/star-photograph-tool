@@ -3,6 +3,7 @@
 #include <QApplication>
 #include <QColor>
 #include <QLabel>
+#include <QMouseEvent>
 #include <QPixmap>
 
 #include <cmath>
@@ -61,6 +62,29 @@ int main(int argc, char** argv) {
           "Left pane should retain the complete before image");
     check(right.green() > 150 && right.red() < 70,
           "Right pane should retain the complete after image");
+
+    double selectedX = -1.0;
+    double selectedY = -1.0;
+    QObject::connect(&panel, &PreviewPanel::imagePointSelected,
+                     [&](double x, double y) {
+                         selectedX = x;
+                         selectedY = y;
+                     });
+    panel.setPointSelectionActive(true);
+    panel.setBeforeAfterMode(true);
+    processLayout();
+    const QPixmap selectionPixmap = imageLabel->pixmap();
+    const int paneWidth = (selectionPixmap.width() - 12) / 2;
+    const QPoint localPoint(paneWidth + 12 + paneWidth / 4,
+                            selectionPixmap.height() / 2);
+    const QPointF globalPoint = imageLabel->mapToGlobal(localPoint);
+    QMouseEvent click(QEvent::MouseButtonPress, QPointF(localPoint),
+                      QPointF(localPoint), globalPoint, Qt::LeftButton,
+                      Qt::LeftButton, Qt::NoModifier);
+    QApplication::sendEvent(imageLabel, &click);
+    check(std::abs(selectedX - 0.25) < 0.01 &&
+              std::abs(selectedY - 0.5) < 0.01,
+          "Manual gray-point selection should use pane-local split coordinates");
 
     std::vector<uint16_t> firstResult(
         static_cast<size_t>(width) * height * 3, 18000);

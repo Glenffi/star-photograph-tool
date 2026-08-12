@@ -97,6 +97,7 @@ set(CORE_SOURCES
     src/core/BasicAdjustmentEngine.cpp
     src/core/DeepSkyCalibrationPreflight.cpp
     src/core/ImageBufferUtils.cpp
+    src/core/MinimumFilter.cpp
     src/core/NoiseReductionEngine.cpp
     src/core/PhotometricNormalizer.cpp
     src/core/ProcessingMemoryEstimator.cpp
@@ -135,6 +136,7 @@ set(CORE_HEADERS
     src/core/BasicAdjustmentEngine.h
     src/core/DeepSkyCalibrationPreflight.h
     src/core/ImageBufferUtils.h
+    src/core/MinimumFilter.h
     src/core/NoiseReductionEngine.h
     src/core/PhotometricNormalizer.h
     src/core/ProcessingMemoryEstimator.h
@@ -206,6 +208,8 @@ target_link_libraries(StarProcessorCore PUBLIC
 add_library(StarProcessorWorkers STATIC
     src/workers/ProcessingWorker.cpp
     src/workers/ProcessingWorker.h
+    src/workers/ExportWorker.cpp
+    src/workers/ExportWorker.h
     src/workers/MaskPreviewWorker.cpp
     src/workers/MaskPreviewWorker.h
     src/workers/QuickPreviewWorker.cpp

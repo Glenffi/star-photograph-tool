@@ -930,58 +930,6 @@ void PreviewPanel::wheelEvent(QWheelEvent* event) {
     }
 }
 
-void PreviewPanel::mousePressEvent(QMouseEvent* event) {
-    if (!m_currentImage.isNull() && event->button() == Qt::LeftButton) {
-        m_panning = true;
-        m_lastPanPos = event->pos();
-        setCursor(Qt::ClosedHandCursor);
-    }
-    QWidget::mousePressEvent(event);
-}
-
-void PreviewPanel::mouseMoveEvent(QMouseEvent* event) {
-    if (m_panning) {
-        QPoint delta = event->pos() - m_lastPanPos;
-        m_lastPanPos = event->pos();
-
-        m_scrollArea->horizontalScrollBar()->setValue(
-            m_scrollArea->horizontalScrollBar()->value() - delta.x()
-        );
-        m_scrollArea->verticalScrollBar()->setValue(
-            m_scrollArea->verticalScrollBar()->value() - delta.y()
-        );
-    }
-
-    // 鼠标像素信息
-    if (!m_currentImage.isNull() && m_scrollArea->isVisible()) {
-        const QPoint labelPosition = m_imageLabel->mapFrom(this, event->pos());
-        const QImage* sampled = nullptr;
-        int x = -1;
-        int y = -1;
-        if (imageSampleAt(labelPosition, sampled, x, y)) {
-            const QRgb pixel = sampled->pixel(x, y);
-            emit mousePixelInfo(x, y, qRed(pixel), qGreen(pixel), qBlue(pixel));
-            m_mouseInfo->setText(
-                QString::fromUtf8("鼠标: %1,%2 | RGB: (%3, %4, %5)")
-                    .arg(x).arg(y)
-                    .arg(qRed(pixel)).arg(qGreen(pixel)).arg(qBlue(pixel))
-            );
-        } else {
-            m_mouseInfo->setText(QString::fromUtf8("鼠标: — | RGB: —"));
-        }
-    }
-
-    QWidget::mouseMoveEvent(event);
-}
-
-void PreviewPanel::mouseReleaseEvent(QMouseEvent* event) {
-    if (event->button() == Qt::LeftButton) {
-        m_panning = false;
-        setCursor(Qt::ArrowCursor);
-    }
-    QWidget::mouseReleaseEvent(event);
-}
-
 bool PreviewPanel::eventFilter(QObject* watched, QEvent* event) {
     if (m_scrollArea && watched == m_scrollArea->viewport()) {
         if (event->type() == QEvent::Resize && m_fitToView &&
@@ -1019,16 +967,15 @@ bool PreviewPanel::eventFilter(QObject* watched, QEvent* event) {
         }
         if (mouse->button() == Qt::LeftButton) {
             if (m_pointSelectionActive) {
-                const QPointF position = mouse->position();
-                const int labelWidth = std::max(1, m_imageLabel->width());
-                const int labelHeight = std::max(1, m_imageLabel->height());
-                if (position.x() >= 0.0 && position.x() < labelWidth &&
-                    position.y() >= 0.0 && position.y() < labelHeight) {
+                const QImage* sampled = nullptr;
+                int x = -1;
+                int y = -1;
+                if (imageSampleAt(mouse->position().toPoint(), sampled, x, y)) {
                     const double normalizedX = std::clamp(
-                        (position.x() + 0.5) / labelWidth, 0.0,
+                        (x + 0.5) / std::max(1, sampled->width()), 0.0,
                         std::nextafter(1.0, 0.0));
                     const double normalizedY = std::clamp(
-                        (position.y() + 0.5) / labelHeight, 0.0,
+                        (y + 0.5) / std::max(1, sampled->height()), 0.0,
                         std::nextafter(1.0, 0.0));
                     setPointSelectionActive(false);
                     emit imagePointSelected(normalizedX, normalizedY);
