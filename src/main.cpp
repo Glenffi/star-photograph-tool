@@ -330,9 +330,7 @@ private:
         const int count = m_projectPanel->includedFilePaths().size();
         const int required = requiredFrameCount();
         const bool calibrationReady = m_scene != ProcessingScene::DeepSky ||
-            (m_paramsPanel->darkFramePaths().size() >= 3 &&
-             m_paramsPanel->flatFramePaths().size() >= 3 &&
-             m_paramsPanel->biasFramePaths().size() >= 3);
+            m_paramsPanel->deepSkyCalibrationInputsComplete();
         m_toolbar->enableProcess(count >= required && calibrationReady);
         m_toolbar->setProjectSummary(
             count > 0
@@ -361,7 +359,7 @@ private:
                 QString::fromUtf8("还需要 %1 张照片").arg(remaining));
         } else {
             setWorkflowStage(0, QString::fromUtf8(
-                "请分别导入至少 3 张 Dark、Flat 和 Bias 校准帧"));
+                "请补齐 Dark、Flat，以及 Bias 或同曝光 Dark Flat；也可导入 Master"));
         }
     }
 
@@ -617,6 +615,16 @@ private:
         // 文件变化 -> 更新按钮状态 & 参考帧列表 & 智能推荐堆栈算法
         connect(m_projectPanel, &ProjectPanel::filesChanged, this, [this]() {
             const bool wasShowingResult = m_previewPanel->isShowingResult();
+            if (!m_editedSkyGroundMask.empty() &&
+                m_editedMaskProjectFiles != m_projectPanel->filePaths()) {
+                m_editedSkyGroundMask.clear();
+                m_editedSkyGroundMaskWidth = 0;
+                m_editedSkyGroundMaskHeight = 0;
+                m_editedMaskProjectFiles.clear();
+                m_editedMaskSourceFile.clear();
+                ++m_editedMaskRevision;
+                m_previewPanel->clearMaskOverlay();
+            }
             m_paramsPanel->clearModifiedCameraGrayPoint();
             invalidateCachedResult();
             updateProjectReadiness();
@@ -629,7 +637,24 @@ private:
 
         // 参考帧变化
         connect(m_projectPanel, &ProjectPanel::referenceFrameChanged, this, [this]() {
-            statusBar()->showMessage("参考帧已更新", 2000);
+            const QString projectReference =
+                m_projectPanel->referenceFramePath();
+            const bool referenceLeavesEditedMask =
+                !m_editedSkyGroundMask.empty() &&
+                !projectReference.isEmpty() &&
+                projectReference != m_editedMaskSourceFile;
+            // Keep the right-panel selector and context-menu reference as one
+            // user-visible setting. ParamsPanel emits its normal change signal,
+            // which also clears an edited mask tied to a different frame.
+            m_paramsPanel->setSelectedReferenceFrame(projectReference);
+            const bool discarded = referenceLeavesEditedMask ||
+                discardEditedMaskForDifferentReference();
+            statusBar()->showMessage(
+                discarded
+                    ? QString::fromUtf8(
+                          "参考帧已更新，请为新参考帧重新检测和修补地景")
+                    : QString::fromUtf8("参考帧已更新"),
+                discarded ? 5000 : 2000);
             handleProcessingParametersChanged();
         });
 
@@ -645,9 +670,59 @@ private:
                     const QSignalBlocker blocker(m_beforeAfterAction);
                     m_beforeAfterAction->setChecked(enabled);
                 });
+        connect(m_previewPanel, &PreviewPanel::editedMaskChanged,
+                this, [this]() {
+                    if (m_previewPanel->hasEditedMask()) {
+                        m_editedSkyGroundMask = m_previewPanel->editedMask();
+                        m_editedSkyGroundMaskWidth =
+                            m_previewPanel->editedMaskWidth();
+                        m_editedSkyGroundMaskHeight =
+                            m_previewPanel->editedMaskHeight();
+                        m_editedMaskProjectFiles =
+                            m_projectPanel->filePaths();
+                        m_editedMaskSourceFile = m_maskOverlaySourceFile;
+                        if (!m_editedMaskSourceFile.isEmpty()) {
+                            m_paramsPanel->setSelectedReferenceFrame(
+                                m_editedMaskSourceFile);
+                            if (m_projectPanel->referenceFramePath() !=
+                                m_editedMaskSourceFile) {
+                                m_projectPanel->setReferenceFrame(
+                                    m_editedMaskSourceFile);
+                            }
+                            statusBar()->showMessage(
+                                QString::fromUtf8(
+                                    "地景蒙版已绑定参考帧：%1")
+                                    .arg(QFileInfo(m_editedMaskSourceFile)
+                                             .fileName()),
+                                4000);
+                        }
+                    } else {
+                        m_editedSkyGroundMask.clear();
+                        m_editedSkyGroundMaskWidth = 0;
+                        m_editedSkyGroundMaskHeight = 0;
+                        m_editedMaskProjectFiles.clear();
+                        m_editedMaskSourceFile.clear();
+                    }
+                    ++m_editedMaskRevision;
+                    handleProcessingParametersChanged();
+                });
+        connect(m_previewPanel, &PreviewPanel::maskRefinementStarted,
+                this, [this]() {
+                    statusBar()->showMessage(
+                        QString::fromUtf8("正在根据笔迹贴合地景边缘..."));
+                });
+        connect(m_previewPanel, &PreviewPanel::maskRefinementFinished,
+                this, [this](bool success) {
+                    statusBar()->showMessage(
+                        success
+                            ? QString::fromUtf8("蒙版已贴合边缘，可继续修补或开始处理")
+                            : QString::fromUtf8("蒙版精修失败，已保留上一次结果"),
+                        4000);
+                });
 
         // 参数变化
         connect(m_paramsPanel, &ParamsPanel::paramsChanged, this, [this]() {
+            discardEditedMaskForDifferentReference();
             handleProcessingParametersChanged();
         });
 
@@ -681,6 +756,7 @@ private:
                     // 只处理最新 worker 的结果
                     if (worker == m_maskPreviewWorker &&
                         m_projectPanel->currentFilePath() == maskSourceFile) {
+                        m_maskOverlaySourceFile = maskSourceFile;
                         m_previewPanel->setMaskOverlay(worker->takeMask(),
                                                         worker->width(),
                                                         worker->height());
@@ -729,12 +805,31 @@ private:
         return files.contains(reference) ? reference : QString();
     }
 
+    bool discardEditedMaskForDifferentReference() {
+        if (m_editedSkyGroundMask.empty()) return false;
+        const QString reference = effectiveReferenceFrame();
+        if (reference.isEmpty() || reference == m_editedMaskSourceFile) {
+            return false;
+        }
+        m_editedSkyGroundMask.clear();
+        m_editedSkyGroundMaskWidth = 0;
+        m_editedSkyGroundMaskHeight = 0;
+        m_editedMaskProjectFiles.clear();
+        m_editedMaskSourceFile.clear();
+        ++m_editedMaskRevision;
+        m_previewPanel->clearMaskOverlay();
+        return true;
+    }
+
     QString currentUpstreamSignature() const {
         // ParamsPanel owns the algorithm settings, while ProjectPanel owns the
         // context-menu reference choice. Sign the effective value used by the
         // worker so cache/export validity follows both controls.
         return m_paramsPanel->upstreamSignature() +
-            QStringLiteral("|effective-reference=") + effectiveReferenceFrame();
+            QStringLiteral("|effective-reference=") + effectiveReferenceFrame() +
+            QStringLiteral("|edited-mask-source=") + m_editedMaskSourceFile +
+            QStringLiteral("|edited-mask-revision=") +
+            QString::number(m_editedMaskRevision);
     }
 
     QString currentProcessingSignature() const {
@@ -1103,6 +1198,11 @@ private slots:
             statusBar()->showMessage("已有处理任务正在运行", 3000);
             return;
         }
+        if (m_previewPanel->maskRefinementActive()) {
+            statusBar()->showMessage(
+                QString::fromUtf8("请等待地景蒙版精修完成"), 3000);
+            return;
+        }
 
         // 1. 收集文件
         auto files = m_projectPanel->includedFilePaths();
@@ -1124,14 +1224,12 @@ private slots:
             files = {source};
         }
         if (m_scene == ProcessingScene::DeepSky &&
-            (m_paramsPanel->darkFramePaths().size() < 3 ||
-             m_paramsPanel->flatFramePaths().size() < 3 ||
-             m_paramsPanel->biasFramePaths().size() < 3)) {
+            !m_paramsPanel->deepSkyCalibrationInputsComplete()) {
             QMessageBox::warning(
-                this, QString::fromUtf8("深空校准帧不足"),
+                this, QString::fromUtf8("深空校准来源不完整"),
                 QString::fromUtf8(
-                    "标准深空流程至少需要 3 张 Dark、3 张 Flat 和 3 张 Bias。\n"
-                    "建议每类拍摄 10–20 张，以降低主校准帧自身噪声。"));
+                    "Dark 与 Flat 各需要至少 3 张 RAW 或一个 Master；"
+                    "生成 Master Flat 时还需 Bias 或同曝光 Dark Flat 二选一。"));
             return;
         }
         if (m_scene == ProcessingScene::DeepSky) {
@@ -1139,6 +1237,7 @@ private slots:
             QString duplicatePath;
             auto addUniquePaths = [&](const QStringList& paths) {
                 for (const QString& path : paths) {
+                    if (path.isEmpty()) continue;
                     QString identity = QFileInfo(path).canonicalFilePath();
                     if (identity.isEmpty()) {
                         identity = QFileInfo(path).absoluteFilePath();
@@ -1154,11 +1253,16 @@ private slots:
             if (!addUniquePaths(files) ||
                 !addUniquePaths(m_paramsPanel->darkFramePaths()) ||
                 !addUniquePaths(m_paramsPanel->flatFramePaths()) ||
-                !addUniquePaths(m_paramsPanel->biasFramePaths())) {
+                !addUniquePaths(m_paramsPanel->biasFramePaths()) ||
+                !addUniquePaths(m_paramsPanel->darkFlatFramePaths()) ||
+                !addUniquePaths({m_paramsPanel->masterDarkPath()}) ||
+                !addUniquePaths({m_paramsPanel->masterFlatPath()}) ||
+                !addUniquePaths({m_paramsPanel->masterBiasPath()}) ||
+                !addUniquePaths({m_paramsPanel->masterDarkFlatPath()})) {
                 QMessageBox::warning(
                     this, QString::fromUtf8("校准素材重复"),
                     QString::fromUtf8(
-                        "同一张 RAW 不能同时作为 Light、Dark、Flat 或 Bias：\n%1")
+                        "同一个文件不能同时作为 Light 或多个校准角色：\n%1")
                         .arg(QFileInfo(duplicatePath).fileName()));
                 return;
             }
@@ -1176,6 +1280,23 @@ private slots:
         if (refFrame.isEmpty() || !files.contains(refFrame)) {
             refFrame = m_projectPanel->referenceFramePath();
         }
+        if (!m_editedSkyGroundMask.empty()) {
+            if (refFrame.isEmpty()) {
+                // The edited mask is expressed in one source frame's
+                // coordinates. Pin automatic selection to that frame so the
+                // previewed horizon and formal blend use the same geometry.
+                refFrame = m_editedMaskSourceFile;
+            } else if (refFrame != m_editedMaskSourceFile) {
+                QMessageBox::warning(
+                    this, QString::fromUtf8("地景蒙版参考帧已变化"),
+                    QString::fromUtf8(
+                        "当前修补蒙版来自 %1，但处理参考帧为 %2。"
+                        "请重新检测并修补地景。")
+                        .arg(QFileInfo(m_editedMaskSourceFile).fileName(),
+                             QFileInfo(refFrame).fileName()));
+                return;
+            }
+        }
 
         // 2. 构建参数
         ProcessingWorker::Params params;
@@ -1186,6 +1307,12 @@ private slots:
         params.darkFramePaths = m_paramsPanel->darkFramePaths();
         params.flatFramePaths = m_paramsPanel->flatFramePaths();
         params.biasFramePaths = m_paramsPanel->biasFramePaths();
+        params.darkFlatFramePaths = m_paramsPanel->darkFlatFramePaths();
+        params.masterDarkPath = m_paramsPanel->masterDarkPath();
+        params.masterFlatPath = m_paramsPanel->masterFlatPath();
+        params.masterBiasPath = m_paramsPanel->masterBiasPath();
+        params.masterDarkFlatPath = m_paramsPanel->masterDarkFlatPath();
+        params.saveGeneratedMasters = m_paramsPanel->saveGeneratedMasters();
         params.timelapseWindowSize = m_paramsPanel->timelapseWindowSize();
         params.timelapseStrength = m_paramsPanel->timelapseStrength();
         params.timelapseMotionProtection =
@@ -1235,6 +1362,15 @@ private slots:
         params.skyGroundMode = m_paramsPanel->skyGroundMode();
         params.userMaskPath = m_paramsPanel->userMaskPath();
         params.featherRadius = m_paramsPanel->featherRadius();
+        if (params.skyGroundSepEnabled &&
+            params.skyGroundMode == SkyGroundMask::AutoDetect &&
+            !m_editedSkyGroundMask.empty() &&
+            m_editedMaskProjectFiles == m_projectPanel->filePaths()) {
+            params.editedSkyGroundMask = m_editedSkyGroundMask;
+            params.editedSkyGroundMaskWidth = m_editedSkyGroundMaskWidth;
+            params.editedSkyGroundMaskHeight = m_editedSkyGroundMaskHeight;
+            params.editedSkyGroundMaskSourcePath = m_editedMaskSourceFile;
+        }
         params.groundStackMethod = m_paramsPanel->groundStackMethod();
         params.groundDetailStrength = params.starTrailMode
             ? 0 : m_paramsPanel->groundDetailStrength();
@@ -1438,6 +1574,17 @@ private slots:
                     5000);
                 const QStringList calibrationWarnings =
                     worker->calibrationPreflightWarnings();
+                const QStringList generatedMasters =
+                    worker->generatedMasterFiles();
+                if (!generatedMasters.isEmpty()) {
+                    statusBar()->showMessage(
+                        QString::fromUtf8(
+                            "处理完成，已保存 %1 个 Master 到 %2")
+                            .arg(generatedMasters.size())
+                            .arg(QFileInfo(generatedMasters.first())
+                                     .absolutePath()),
+                        7000);
+                }
                 if (m_scene == ProcessingScene::DeepSky &&
                     !calibrationWarnings.isEmpty()) {
                     auto* advice = new QMessageBox(
@@ -1663,6 +1810,13 @@ private:
     ExportWorker* m_exportWorker = nullptr;
     QTimer* m_quickPreviewTimer = nullptr;
     uint64_t m_quickPreviewGeneration = 0;
+    uint64_t m_editedMaskRevision = 0;
+    std::vector<uint8_t> m_editedSkyGroundMask;
+    int m_editedSkyGroundMaskWidth = 0;
+    int m_editedSkyGroundMaskHeight = 0;
+    QStringList m_editedMaskProjectFiles;
+    QString m_editedMaskSourceFile;
+    QString m_maskOverlaySourceFile;
     bool m_quickPreviewPending = false;
 
     // 缓存最后一次堆栈结果（用于导出）

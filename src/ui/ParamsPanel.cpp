@@ -470,41 +470,56 @@ void ParamsPanel::setupUI() {
     auto* calibrationNote = new QLabel(
         QString::fromUtf8(
             "Light 主帧在左侧素材栏导入。\n"
-            "Dark：同相机、ISO 和曝光；Flat：同相机和 ISO；"
-            "Bias：同相机、ISO，并使用最短曝光。\n"
-            "每类至少 3 张，建议 10–20 张。"),
+            "每类可使用一组 RAW 原片，或一个由 StarProcessor 生成的 "
+            ".spmaster，二者自动互斥。\n"
+            "生成 Master Flat 时，Bias 与 Dark Flat 选择一种；"
+            "每组 RAW 至少 3 张，建议 10–20 张。"),
         m_calibrationGroup);
     calibrationNote->setWordWrap(true);
     setRole(calibrationNote, "note");
     calibrationLayout->addWidget(calibrationNote);
 
+    // A raw group and its project Master represent the same calibration
+    // source. The two import actions share one status label and selecting one
+    // clears the other, so an ambiguous configuration cannot be created here.
     auto addCalibrationRow = [this, calibrationLayout](
                                  const QString& name,
                                  const QString& purpose,
                                  QStringList& paths,
-                                 QLabel*& countLabel,
-                                 QPushButton*& clearButton) {
+                                 QString& masterPath,
+                                 QLabel*& sourceLabel,
+                                 QPushButton*& clearButton,
+                                 bool confirmNormalizedFlat = false) {
         auto* row = new QHBoxLayout();
         row->setSpacing(6);
 
         auto* nameLabel = new QLabel(name, m_calibrationGroup);
-        nameLabel->setFixedWidth(34);
+        nameLabel->setFixedWidth(54);
         row->addWidget(nameLabel);
 
-        countLabel = new QLabel(QString::fromUtf8("0 张"), m_calibrationGroup);
-        countLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
-        setRole(countLabel, "muted");
-        row->addWidget(countLabel, 1);
+        sourceLabel = new QLabel(QString::fromUtf8("未选择"), m_calibrationGroup);
+        sourceLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+        sourceLabel->setTextFormat(Qt::PlainText);
+        sourceLabel->setMinimumWidth(44);
+        sourceLabel->setSizePolicy(
+            QSizePolicy::Ignored, QSizePolicy::Preferred);
+        setRole(sourceLabel, "muted");
+        row->addWidget(sourceLabel, 1);
 
-        auto* importButton = new QPushButton(m_calibrationGroup);
-        importButton->setIcon(
-            UiAssets::icon(UiAssets::Glyph::AddPhotos, QColor("#A7B8B4")));
-        importButton->setIconSize(QSize(16, 16));
-        importButton->setFixedSize(28, 28);
-        importButton->setToolTip(
-            QString::fromUtf8("导入%1：%2").arg(name, purpose));
-        importButton->setAccessibleName(importButton->toolTip());
-        row->addWidget(importButton);
+        auto* rawButton = new QPushButton(QStringLiteral("RAW"), m_calibrationGroup);
+        rawButton->setFixedSize(48, 28);
+        rawButton->setToolTip(
+            QString::fromUtf8("导入%1 RAW 原片组：%2").arg(name, purpose));
+        rawButton->setAccessibleName(rawButton->toolTip());
+        row->addWidget(rawButton);
+
+        auto* masterButton = new QPushButton(
+            QString::fromUtf8("主帧"), m_calibrationGroup);
+        masterButton->setFixedSize(48, 28);
+        masterButton->setToolTip(QString::fromUtf8(
+            "导入 StarProcessor %1（仅支持 .spmaster）").arg(name));
+        masterButton->setAccessibleName(masterButton->toolTip());
+        row->addWidget(masterButton);
 
         clearButton = new QPushButton(m_calibrationGroup);
         clearButton->setIcon(
@@ -516,16 +531,24 @@ void ParamsPanel::setupUI() {
         clearButton->setAccessibleName(clearButton->toolTip());
         clearButton->setEnabled(false);
         QStringList* const pathList = &paths;
-        connect(importButton, &QPushButton::clicked, this,
-                [this, pathList, countLabel, clearButton, name]() {
+        QString* const master = &masterPath;
+        connect(rawButton, &QPushButton::clicked, this,
+                [this, pathList, sourceLabel, clearButton, name]() {
                     importCalibrationFrames(
-                        *pathList, countLabel, clearButton,
+                        *pathList, sourceLabel, clearButton,
                         QString::fromUtf8("选择%1 RAW").arg(name));
                 });
+        connect(masterButton, &QPushButton::clicked, this,
+                [this, master, pathList, sourceLabel, clearButton, name,
+                 confirmNormalizedFlat]() {
+                    importCalibrationMaster(
+                        *master, *pathList, sourceLabel, clearButton, name,
+                        confirmNormalizedFlat);
+                });
         connect(clearButton, &QPushButton::clicked, this,
-                [this, pathList, countLabel, clearButton]() {
-                    clearCalibrationFrames(
-                        *pathList, countLabel, clearButton);
+                [this, pathList, master, sourceLabel, clearButton]() {
+                    clearCalibrationSource(
+                        *pathList, *master, sourceLabel, clearButton);
                 });
         row->addWidget(clearButton);
 
@@ -535,15 +558,34 @@ void ParamsPanel::setupUI() {
     addCalibrationRow(
         QString::fromUtf8("暗场"),
         QString::fromUtf8("校正热噪声、固定图样噪声和热像素"),
-        m_darkFramePaths, m_darkFrameCount, m_darkFrameClear);
+        m_darkFramePaths, m_masterDarkPath,
+        m_darkFrameCount, m_darkFrameClear);
     addCalibrationRow(
         QString::fromUtf8("平场"),
         QString::fromUtf8("校正暗角、灰尘阴影和像场亮度不均"),
-        m_flatFramePaths, m_flatFrameCount, m_flatFrameClear);
+        m_flatFramePaths, m_masterFlatPath,
+        m_flatFrameCount, m_flatFrameClear, true);
     addCalibrationRow(
         QString::fromUtf8("偏置场"),
         QString::fromUtf8("校正传感器读出偏置，并为平场标定零点"),
-        m_biasFramePaths, m_biasFrameCount, m_biasFrameClear);
+        m_biasFramePaths, m_masterBiasPath,
+        m_biasFrameCount, m_biasFrameClear);
+    addCalibrationRow(
+        QString::fromUtf8("暗平场"),
+        QString::fromUtf8("匹配 Flat 曝光，用于替代 Bias 校准平场"),
+        m_darkFlatFramePaths, m_masterDarkFlatPath,
+        m_darkFlatFrameCount, m_darkFlatFrameClear);
+
+    m_saveGeneratedMastersCheck = new QCheckBox(
+        QString::fromUtf8("保存本次生成的 Master"), m_calibrationGroup);
+    m_saveGeneratedMastersCheck->setToolTip(QString::fromUtf8(
+        "把本次由 RAW 原片组合成的 Master 保存为 .spmaster，便于以后直接复用"));
+    m_saveGeneratedMastersCheck->setChecked(false);
+    m_saveGeneratedMastersCheck->setVisible(false);
+    m_saveGeneratedMastersCheck->setEnabled(false);
+    connect(m_saveGeneratedMastersCheck, &QCheckBox::toggled,
+            this, [this]() { emitParamsChanged(); });
+    calibrationLayout->addWidget(m_saveGeneratedMastersCheck);
 
     m_calibrationStatus = new QLabel(m_calibrationGroup);
     m_calibrationStatus->setWordWrap(true);
@@ -1433,6 +1475,7 @@ void ParamsPanel::onGroupToggled(bool checked) {
         }
     }
     if (checked && group == m_stackGroup) updateSkyGroundControls();
+    if (checked && group == m_calibrationGroup) updateCalibrationStatus();
     group->setMinimumHeight(checked ? 0 : 28);
 }
 
@@ -1514,9 +1557,22 @@ void ParamsPanel::onRestoreDefaults() {
     m_darkFramePaths.clear();
     m_flatFramePaths.clear();
     m_biasFramePaths.clear();
-    updateCalibrationCount(m_darkFrameCount, m_darkFrameClear, 0);
-    updateCalibrationCount(m_flatFrameCount, m_flatFrameClear, 0);
-    updateCalibrationCount(m_biasFrameCount, m_biasFrameClear, 0);
+    m_darkFlatFramePaths.clear();
+    m_masterDarkPath.clear();
+    m_masterFlatPath.clear();
+    m_masterBiasPath.clear();
+    m_masterDarkFlatPath.clear();
+    if (m_saveGeneratedMastersCheck) {
+        m_saveGeneratedMastersCheck->setChecked(false);
+    }
+    updateCalibrationSource(m_darkFrameCount, m_darkFrameClear,
+                            m_darkFramePaths, m_masterDarkPath);
+    updateCalibrationSource(m_flatFrameCount, m_flatFrameClear,
+                            m_flatFramePaths, m_masterFlatPath);
+    updateCalibrationSource(m_biasFrameCount, m_biasFrameClear,
+                            m_biasFramePaths, m_masterBiasPath);
+    updateCalibrationSource(m_darkFlatFrameCount, m_darkFlatFrameClear,
+                            m_darkFlatFramePaths, m_masterDarkFlatPath);
     m_userMaskPath.clear();
     m_maskPathLabel->clear();
     m_maskPathLabel->setVisible(false);
@@ -2382,6 +2438,14 @@ void ParamsPanel::updateRefFrameList(const QStringList& fileNames) {
     if (idx >= 0) m_refFrame->setCurrentIndex(idx);
 }
 
+void ParamsPanel::setSelectedReferenceFrame(const QString& filePath) {
+    if (!m_refFrame || filePath.isEmpty()) return;
+    const int index = m_refFrame->findData(filePath);
+    if (index > 0 && index != m_refFrame->currentIndex()) {
+        m_refFrame->setCurrentIndex(index);
+    }
+}
+
 QString ParamsPanel::selectedReferenceFrame() const {
     return m_refFrame ? m_refFrame->currentData().toString() : QString();
 }
@@ -2457,6 +2521,76 @@ QStringList ParamsPanel::biasFramePaths() const {
     return m_biasFramePaths;
 }
 
+QStringList ParamsPanel::darkFlatFramePaths() const {
+    return m_darkFlatFramePaths;
+}
+
+QString ParamsPanel::masterDarkPath() const {
+    return m_masterDarkPath;
+}
+
+QString ParamsPanel::masterFlatPath() const {
+    return m_masterFlatPath;
+}
+
+QString ParamsPanel::masterBiasPath() const {
+    return m_masterBiasPath;
+}
+
+QString ParamsPanel::masterDarkFlatPath() const {
+    return m_masterDarkFlatPath;
+}
+
+bool ParamsPanel::saveGeneratedMasters() const {
+    return m_saveGeneratedMastersCheck &&
+        m_saveGeneratedMastersCheck->isEnabled() &&
+        m_saveGeneratedMastersCheck->isChecked();
+}
+
+bool ParamsPanel::deepSkyCalibrationInputsComplete() const {
+    auto sourceReady = [](const QStringList& rawPaths,
+                          const QString& masterPath) {
+        return (rawPaths.size() >= 3 && masterPath.isEmpty()) ||
+            (rawPaths.isEmpty() && !masterPath.isEmpty());
+    };
+
+    if (!sourceReady(m_darkFramePaths, m_masterDarkPath) ||
+        !sourceReady(m_flatFramePaths, m_masterFlatPath)) {
+        return false;
+    }
+
+    const bool biasReady = sourceReady(m_biasFramePaths, m_masterBiasPath);
+    const bool darkFlatReady = sourceReady(
+        m_darkFlatFramePaths, m_masterDarkFlatPath);
+    const bool hasAnyBias = !m_biasFramePaths.isEmpty() ||
+        !m_masterBiasPath.isEmpty();
+    const bool hasAnyDarkFlat = !m_darkFlatFramePaths.isEmpty() ||
+        !m_masterDarkFlatPath.isEmpty();
+
+    if (!m_masterFlatPath.isEmpty()) {
+        // A serialized Master Flat is already offset-corrected and normalized.
+        // Bias is still meaningful only when an imported Master Dark had its
+        // Bias pedestal removed and Light therefore needs a separate offset.
+        if (hasAnyDarkFlat) return false;
+        // Master Dark's internal metadata decides whether Light still needs a
+        // Bias source. The panel cannot infer that before the file is parsed,
+        // so an optional Bias is accepted and Worker performs the final rule.
+        if (m_masterDarkPath.isEmpty()) return !hasAnyBias;
+        return !hasAnyBias || biasReady;
+    }
+
+    // A raw Flat group needs exactly one offset source. Supplying both would
+    // make the calibration path ambiguous.
+    // A bias-corrected imported Master Dark may need Bias for Light while
+    // Dark Flat calibrates Flat. The panel cannot trust filenames to infer
+    // that internal state, so allow this combination and let preflight read
+    // the `.spmaster` metadata before processing starts.
+    if (hasAnyBias && hasAnyDarkFlat) return !m_masterDarkPath.isEmpty() &&
+        biasReady && darkFlatReady;
+    if (!hasAnyBias && !hasAnyDarkFlat) return false;
+    return hasAnyBias ? biasReady : darkFlatReady;
+}
+
 void ParamsPanel::importCalibrationFrames(QStringList& paths,
                                           QLabel* countLabel,
                                           QPushButton* clearButton,
@@ -2474,13 +2608,22 @@ void ParamsPanel::importCalibrationFrames(QStringList& paths,
         return QDir::cleanPath(identity);
     };
     QSet<QString> otherCalibrationPaths;
-    const std::array<const QStringList*, 3> lists = {
-        &m_darkFramePaths, &m_flatFramePaths, &m_biasFramePaths};
+    const std::array<const QStringList*, 4> lists = {
+        &m_darkFramePaths, &m_flatFramePaths, &m_biasFramePaths,
+        &m_darkFlatFramePaths};
     for (const QStringList* list : lists) {
         if (list == &paths) continue;
         for (const QString& path : *list) {
             otherCalibrationPaths.insert(pathIdentity(path));
         }
+    }
+    const std::array<const QString*, 4> masters = {
+        &m_masterDarkPath, &m_masterFlatPath, &m_masterBiasPath,
+        &m_masterDarkFlatPath};
+    QString* const ownMaster = masterPathForRawGroup(paths);
+    for (const QString* master : masters) {
+        if (master == ownMaster || master->isEmpty()) continue;
+        otherCalibrationPaths.insert(pathIdentity(*master));
     }
 
     QStringList merged = paths;
@@ -2511,49 +2654,200 @@ void ParamsPanel::importCalibrationFrames(QStringList& paths,
     if (merged == paths) return;
 
     paths = merged;
-    updateCalibrationCount(countLabel, clearButton, paths.size());
+    if (ownMaster) ownMaster->clear();
+    updateCalibrationSource(countLabel, clearButton, paths,
+                            ownMaster ? *ownMaster : QString());
     markPresetCustom();
     emitParamsChanged();
 }
 
-void ParamsPanel::clearCalibrationFrames(QStringList& paths,
-                                         QLabel* countLabel,
+void ParamsPanel::importCalibrationMaster(QString& masterPath,
+                                          QStringList& rawPaths,
+                                          QLabel* sourceLabel,
+                                          QPushButton* clearButton,
+                                          const QString& roleName,
+                                          bool confirmNormalizedFlat) {
+    const QString selected = QFileDialog::getOpenFileName(
+        this, QString::fromUtf8("选择 Master %1").arg(roleName), QString(),
+        QString::fromUtf8("StarProcessor Master (*.spmaster)"));
+    if (selected.isEmpty()) return;
+
+    const QFileInfo selectedInfo(selected);
+    if (selectedInfo.suffix().compare(
+            QStringLiteral("spmaster"), Qt::CaseInsensitive) != 0) {
+        QMessageBox::warning(
+            this, QString::fromUtf8("不支持的 Master 文件"),
+            QString::fromUtf8(
+                "Master 只能导入由 StarProcessor 生成的 .spmaster 文件。"));
+        return;
+    }
+    const QString absolutePath = QDir::cleanPath(selectedInfo.absoluteFilePath());
+    if (calibrationPathUsedElsewhere(
+            absolutePath, &rawPaths, &masterPath)) {
+        QMessageBox::warning(
+            this, QString::fromUtf8("Master 已被使用"),
+            QString::fromUtf8(
+                "同一个文件不能同时分配给多个校准角色。"));
+        return;
+    }
+
+    if (confirmNormalizedFlat) {
+        QMessageBox::information(
+            this, QString::fromUtf8("Master Flat 校验"),
+            QString::fromUtf8(
+                "StarProcessor 会读取 .spmaster 内的处理状态。只有已经"
+                "完成偏移校准并按 CFA phase 分相归一化的 Master Flat "
+                "才能通过正式预检。"));
+    }
+
+    rawPaths.clear();
+    masterPath = absolutePath;
+    updateCalibrationSource(sourceLabel, clearButton, rawPaths, masterPath);
+    markPresetCustom();
+    emitParamsChanged();
+}
+
+void ParamsPanel::clearCalibrationSource(QStringList& paths,
+                                         QString& masterPath,
+                                         QLabel* sourceLabel,
                                          QPushButton* clearButton) {
-    if (paths.isEmpty()) return;
+    if (paths.isEmpty() && masterPath.isEmpty()) return;
     paths.clear();
-    updateCalibrationCount(countLabel, clearButton, 0);
+    masterPath.clear();
+    updateCalibrationSource(sourceLabel, clearButton, paths, masterPath);
     markPresetCustom();
     emitParamsChanged();
 }
 
-void ParamsPanel::updateCalibrationCount(QLabel* label,
-                                         QPushButton* clearButton,
-                                         int count) {
-    if (!label) return;
-    label->setText(QString::fromUtf8("%1 张").arg(count));
-    if (clearButton) clearButton->setEnabled(count > 0);
+void ParamsPanel::updateCalibrationSource(
+    QLabel* label, QPushButton* clearButton,
+    const QStringList& rawPaths, const QString& masterPath) {
+    if (label) {
+        if (!masterPath.isEmpty()) {
+            label->setText(QFileInfo(masterPath).fileName());
+            label->setToolTip(masterPath);
+        } else if (!rawPaths.isEmpty()) {
+            label->setText(QString::fromUtf8("RAW %1 张").arg(rawPaths.size()));
+            label->setToolTip(rawPaths.join(QLatin1Char('\n')));
+        } else {
+            label->setText(QString::fromUtf8("未选择"));
+            label->setToolTip(QString());
+        }
+    }
+    if (clearButton) {
+        clearButton->setEnabled(!rawPaths.isEmpty() || !masterPath.isEmpty());
+    }
     updateCalibrationStatus();
+}
+
+QString* ParamsPanel::masterPathForRawGroup(const QStringList& paths) {
+    if (&paths == &m_darkFramePaths) return &m_masterDarkPath;
+    if (&paths == &m_flatFramePaths) return &m_masterFlatPath;
+    if (&paths == &m_biasFramePaths) return &m_masterBiasPath;
+    if (&paths == &m_darkFlatFramePaths) return &m_masterDarkFlatPath;
+    return nullptr;
+}
+
+QString ParamsPanel::calibrationPathIdentity(const QString& path) const {
+    const QFileInfo info(path);
+    const QString canonical = info.canonicalFilePath();
+    return QDir::cleanPath(
+        canonical.isEmpty() ? info.absoluteFilePath() : canonical);
+}
+
+bool ParamsPanel::calibrationPathUsedElsewhere(
+    const QString& path, const QStringList* ignoredRaw,
+    const QString* ignoredMaster) const {
+    const QString identity = calibrationPathIdentity(path);
+    const std::array<const QStringList*, 4> lists = {
+        &m_darkFramePaths, &m_flatFramePaths, &m_biasFramePaths,
+        &m_darkFlatFramePaths};
+    for (const QStringList* list : lists) {
+        if (list == ignoredRaw) continue;
+        for (const QString& existing : *list) {
+            if (calibrationPathIdentity(existing) == identity) return true;
+        }
+    }
+    const std::array<const QString*, 4> masters = {
+        &m_masterDarkPath, &m_masterFlatPath, &m_masterBiasPath,
+        &m_masterDarkFlatPath};
+    for (const QString* master : masters) {
+        if (master == ignoredMaster || master->isEmpty()) continue;
+        if (calibrationPathIdentity(*master) == identity) return true;
+    }
+    return false;
 }
 
 void ParamsPanel::updateCalibrationStatus() {
     if (!m_calibrationStatus) return;
-    const bool enough = m_darkFramePaths.size() >= 3 &&
-        m_flatFramePaths.size() >= 3 && m_biasFramePaths.size() >= 3;
-    if (enough) {
+    const bool ready = deepSkyCalibrationInputsComplete();
+    if (ready) {
         m_calibrationStatus->setText(QString::fromUtf8(
-            "数量门槛已满足。开始处理后会先检查相机、尺寸、ISO 和曝光，"
-            "同类问题会一次列出。"));
+            "校准来源已就绪。处理前仍会检查相机、尺寸、ISO、曝光、"
+            "CFA 和 Master 元数据。"));
     } else {
-        m_calibrationStatus->setText(QString::fromUtf8(
-            "请为 Dark、Flat 和 Bias 各导入至少 3 张 RAW。"));
+        QStringList missing;
+        auto sourceReady = [](const QStringList& rawPaths,
+                              const QString& masterPath) {
+            return (rawPaths.size() >= 3 && masterPath.isEmpty()) ||
+                (rawPaths.isEmpty() && !masterPath.isEmpty());
+        };
+        if (!sourceReady(m_darkFramePaths, m_masterDarkPath)) {
+            missing.append(QString::fromUtf8("Dark（≥3 RAW 或 Master）"));
+        }
+        if (!sourceReady(m_flatFramePaths, m_masterFlatPath)) {
+            missing.append(QString::fromUtf8("Flat（≥3 RAW 或 Master）"));
+        }
+        const bool hasBias = !m_biasFramePaths.isEmpty() ||
+            !m_masterBiasPath.isEmpty();
+        const bool hasDarkFlat = !m_darkFlatFramePaths.isEmpty() ||
+            !m_masterDarkFlatPath.isEmpty();
+        if (m_masterFlatPath.isEmpty() && hasBias == hasDarkFlat) {
+            missing.append(QString::fromUtf8(
+                "生成 Flat 时 Bias / Dark Flat 恰选一种"));
+        } else if (!m_masterFlatPath.isEmpty() && hasDarkFlat) {
+            missing.append(QString::fromUtf8(
+                "Master Flat 不再搭配 Dark Flat"));
+        }
+        if (!m_masterFlatPath.isEmpty() && m_masterDarkPath.isEmpty() &&
+            hasBias) {
+            missing.append(QString::fromUtf8(
+                "RAW Dark 含偏置基底，Master Flat 不再搭配 Bias"));
+        }
+        if (hasBias && !sourceReady(m_biasFramePaths, m_masterBiasPath)) {
+            missing.append(QString::fromUtf8(
+                "Bias（≥3 RAW 或 Master）"));
+        }
+        if (hasDarkFlat &&
+            !sourceReady(m_darkFlatFramePaths, m_masterDarkFlatPath)) {
+            missing.append(QString::fromUtf8(
+                "Dark Flat（≥3 RAW 或 Master）"));
+        }
+        m_calibrationStatus->setText(
+            missing.isEmpty()
+                ? QString::fromUtf8("校准来源尚未就绪，请检查各 RAW 组数量。")
+                : QString::fromUtf8("还需要：%1").arg(
+                      missing.join(QString::fromUtf8("；"))));
     }
     m_calibrationStatus->setProperty(
-        "status", enough ? "ready" : "waiting");
+        "status", ready ? "ready" : "waiting");
     if (m_calibrationStatus->style()) {
         m_calibrationStatus->style()->unpolish(m_calibrationStatus);
         m_calibrationStatus->style()->polish(m_calibrationStatus);
     }
     m_calibrationStatus->update();
+
+    const bool hasRawSources = !m_darkFramePaths.isEmpty() ||
+        !m_flatFramePaths.isEmpty() || !m_biasFramePaths.isEmpty() ||
+        !m_darkFlatFramePaths.isEmpty();
+    if (m_saveGeneratedMastersCheck) {
+        if (!hasRawSources && m_saveGeneratedMastersCheck->isChecked()) {
+            const QSignalBlocker blocker(m_saveGeneratedMastersCheck);
+            m_saveGeneratedMastersCheck->setChecked(false);
+        }
+        m_saveGeneratedMastersCheck->setVisible(hasRawSources);
+        m_saveGeneratedMastersCheck->setEnabled(hasRawSources);
+    }
 }
 
 QString ParamsPanel::upstreamSignature() const {
@@ -2574,7 +2868,14 @@ QString ParamsPanel::upstreamSignature() const {
         QString::number(starTrailProtectGround()),
         QStringLiteral("dark=") + m_darkFramePaths.join(QChar(0x1e)),
         QStringLiteral("flat=") + m_flatFramePaths.join(QChar(0x1e)),
-        QStringLiteral("bias=") + m_biasFramePaths.join(QChar(0x1e))
+        QStringLiteral("bias=") + m_biasFramePaths.join(QChar(0x1e)),
+        QStringLiteral("darkFlat=") + m_darkFlatFramePaths.join(QChar(0x1e)),
+        QStringLiteral("masterDark=") + m_masterDarkPath,
+        QStringLiteral("masterFlat=") + m_masterFlatPath,
+        QStringLiteral("masterBias=") + m_masterBiasPath,
+        QStringLiteral("masterDarkFlat=") + m_masterDarkFlatPath,
+        QStringLiteral("saveGeneratedMasters=") +
+            QString::number(saveGeneratedMasters())
     }.join('|');
 }
 

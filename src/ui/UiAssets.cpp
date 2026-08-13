@@ -196,6 +196,28 @@ void paintGlyph(QPainter& painter, UiAssets::Glyph glyph,
             painter.drawLine(QPointF(7.0, 16.5), QPointF(4.0, 19.5));
             painter.drawLine(QPointF(4.0, 19.5), QPointF(8.5, 18.5));
             break;
+        case UiAssets::Glyph::Brush:
+            painter.drawLine(QPointF(14.5, 4.0), QPointF(7.5, 14.0));
+            painter.drawLine(QPointF(18.5, 7.0), QPointF(10.5, 16.0));
+            painter.drawLine(QPointF(14.5, 4.0), QPointF(18.5, 7.0));
+            painter.drawRoundedRect(QRectF(4.0, 14.0, 7.0, 6.0), 2.5, 2.5);
+            break;
+        case UiAssets::Glyph::Undo:
+            painter.drawLine(QPointF(4.0, 9.0), QPointF(9.0, 5.0));
+            painter.drawLine(QPointF(4.0, 9.0), QPointF(9.0, 13.0));
+            painter.drawArc(QRectF(5.0, 6.0, 15.0, 13.0), 25 * 16,
+                            245 * 16);
+            break;
+        case UiAssets::Glyph::Reset:
+            painter.drawArc(QRectF(4.0, 4.0, 16.0, 16.0), 35 * 16,
+                            290 * 16);
+            painter.drawLine(QPointF(4.0, 5.0), QPointF(4.0, 10.0));
+            painter.drawLine(QPointF(4.0, 5.0), QPointF(9.0, 5.0));
+            break;
+        case UiAssets::Glyph::Done:
+            painter.drawLine(QPointF(4.0, 12.5), QPointF(9.5, 18.0));
+            painter.drawLine(QPointF(9.5, 18.0), QPointF(20.0, 6.0));
+            break;
         case UiAssets::Glyph::ChevronRight:
             painter.drawLine(QPointF(8.0, 5.0), QPointF(15.0, 12.0));
             painter.drawLine(QPointF(15.0, 12.0), QPointF(8.0, 19.0));

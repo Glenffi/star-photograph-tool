@@ -255,7 +255,7 @@ SceneLauncher::SceneLauncher(QWidget* parent)
     addCard(1, 0, QStringLiteral("03"), ProcessingScene::DeepSky,
             UiAssets::Glyph::DeepSky, QColor("#A6B4DE"),
             QString::fromUtf8("Light + 校准帧"), QString::fromUtf8("深空天体堆栈"),
-            QString::fromUtf8("使用 Bias、Dark 与 Flat 校准后完成稳健对齐和堆栈。"),
+            QString::fromUtf8("使用 Dark、Flat 与 Bias / Dark Flat 标准校准，也可复用 Master。"),
             QString::fromUtf8("校准  /  去马赛克  /  对齐  /  堆栈"));
     addCard(1, 1, QStringLiteral("04"), ProcessingScene::SkyGround,
             UiAssets::Glyph::SkyGround, QColor("#E4B86B"),

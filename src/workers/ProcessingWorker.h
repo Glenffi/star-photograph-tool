@@ -51,6 +51,12 @@ public:
         QStringList darkFramePaths;
         QStringList flatFramePaths;
         QStringList biasFramePaths;
+        QStringList darkFlatFramePaths;
+        QString masterDarkPath;
+        QString masterFlatPath;
+        QString masterBiasPath;
+        QString masterDarkFlatPath;
+        bool saveGeneratedMasters = false;
         int timelapseWindowSize = 5;
         int timelapseStrength = 80;
         int timelapseMotionProtection = 75;
@@ -80,6 +86,14 @@ public:
         int groundDetailStrength = 40;
         QString userMaskPath;
         int featherRadius = 20;
+        // A bounded hard mask produced by the interactive ground-hint editor.
+        // The worker expands and feathers it once at the RAW dimensions.
+        std::vector<uint8_t> editedSkyGroundMask;
+        int editedSkyGroundMaskWidth = 0;
+        int editedSkyGroundMaskHeight = 0;
+        // The edited mask is expressed in this source frame's pixel
+        // coordinates. It must match the final alignment reference.
+        QString editedSkyGroundMaskSourcePath;
         // Optional diagnostic artifact. The GUI leaves this empty; the sample
         // runner uses it to preserve the exact mask consumed by stacking.
         QString skyGroundMaskOutputPath;
@@ -182,6 +196,7 @@ public:
     QStringList calibrationPreflightWarnings() const {
         return m_calibrationPreflightWarnings;
     }
+    QStringList generatedMasterFiles() const { return m_generatedMasterFiles; }
 
     void requestCancel();
 
@@ -265,4 +280,5 @@ private:
     uint64_t m_calibrationClippedHighPixels = 0;
     uint64_t m_calibrationInvalidFlatPixels = 0;
     QStringList m_calibrationPreflightWarnings;
+    QStringList m_generatedMasterFiles;
 };

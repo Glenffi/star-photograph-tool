@@ -6,7 +6,7 @@ if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Darwin" AND
         "Minimum supported macOS version")
 endif()
 
-project(StarProcessor VERSION 0.9.1 LANGUAGES CXX)
+project(StarProcessor VERSION 0.10.0 LANGUAGES CXX)
 
 include(CTest)
 option(BUILD_SAMPLE_TOOLS "Build local RAW sample regression tools" ON)
@@ -97,6 +97,7 @@ set(CORE_SOURCES
     src/core/BasicAdjustmentEngine.cpp
     src/core/DeepSkyCalibrationPreflight.cpp
     src/core/ImageBufferUtils.cpp
+    src/core/MasterFrameIO.cpp
     src/core/MinimumFilter.cpp
     src/core/NoiseReductionEngine.cpp
     src/core/PhotometricNormalizer.cpp
@@ -136,6 +137,7 @@ set(CORE_HEADERS
     src/core/BasicAdjustmentEngine.h
     src/core/DeepSkyCalibrationPreflight.h
     src/core/ImageBufferUtils.h
+    src/core/MasterFrameIO.h
     src/core/MinimumFilter.h
     src/core/NoiseReductionEngine.h
     src/core/PhotometricNormalizer.h

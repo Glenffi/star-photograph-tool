@@ -2,6 +2,7 @@
 #include "UiAssets.h"
 #include "../core/PreviewToneMapper.h"
 #include "../core/RawImageLoader.h"
+#include "../core/SkyGroundMask.h"
 #include <QScrollArea>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -13,6 +14,7 @@
 #include <QWheelEvent>
 #include <QMouseEvent>
 #include <QScrollBar>
+#include <QSlider>
 #include <QFileInfo>
 #include <QDebug>
 #include <QPainter>
@@ -144,6 +146,72 @@ void PreviewPanel::setupTopBar() {
     m_zoomLabel->setAlignment(Qt::AlignCenter);
     m_zoomLabel->setStyleSheet("font-size: 10px; color: #81938F;");
     layout->addWidget(m_zoomLabel);
+
+    m_maskEditControls = new QWidget(m_topBar);
+    auto* maskLayout = new QHBoxLayout(m_maskEditControls);
+    maskLayout->setContentsMargins(8, 0, 0, 0);
+    maskLayout->setSpacing(4);
+    m_maskBrushBtn = createToolBtn(
+        QString::fromUtf8("修补地景"),
+        QString::fromUtf8("粗略涂过漏检地景，松手后自动贴合真实边缘"));
+    m_maskBrushBtn->setObjectName("maskGroundHintButton");
+    m_maskBrushBtn->setIcon(
+        UiAssets::icon(UiAssets::Glyph::Brush, QColor("#F2B65A")));
+    m_maskBrushBtn->setCheckable(true);
+    m_maskBrushBtn->setChecked(true);
+    connect(m_maskBrushBtn, &QPushButton::toggled, this,
+            [this](bool checked) {
+                m_maskEditingActive = checked && !m_initialMask.empty();
+                if (m_imageLabel) {
+                    m_imageLabel->setCursor(
+                        m_maskEditingActive ? Qt::CrossCursor : Qt::ArrowCursor);
+                }
+            });
+    maskLayout->addWidget(m_maskBrushBtn);
+
+    m_maskBrushSize = new QSlider(Qt::Horizontal, m_maskEditControls);
+    m_maskBrushSize->setObjectName("maskGroundHintSize");
+    m_maskBrushSize->setRange(8, 120);
+    m_maskBrushSize->setValue(36);
+    m_maskBrushSize->setFixedWidth(84);
+    m_maskBrushSize->setToolTip(QString::fromUtf8("粗略提示笔刷直径"));
+    maskLayout->addWidget(m_maskBrushSize);
+    m_maskBrushSizeLabel = new QLabel("36 px", m_maskEditControls);
+    m_maskBrushSizeLabel->setMinimumWidth(40);
+    m_maskBrushSizeLabel->setStyleSheet("font-size: 10px; color: #C8A866;");
+    connect(m_maskBrushSize, &QSlider::valueChanged, this,
+            [this](int value) {
+                m_maskBrushSizeLabel->setText(QString("%1 px").arg(value));
+            });
+    maskLayout->addWidget(m_maskBrushSizeLabel);
+
+    m_maskUndoBtn = createToolBtn(QString(), QString::fromUtf8("撤销上一笔"));
+    m_maskUndoBtn->setObjectName("maskGroundHintUndo");
+    m_maskUndoBtn->setIcon(
+        UiAssets::icon(UiAssets::Glyph::Undo, QColor("#A7B8B4")));
+    m_maskUndoBtn->setFixedWidth(30);
+    connect(m_maskUndoBtn, &QPushButton::clicked,
+            this, &PreviewPanel::undoGroundHint);
+    maskLayout->addWidget(m_maskUndoBtn);
+    m_maskResetBtn = createToolBtn(QString(), QString::fromUtf8("恢复自动检测"));
+    m_maskResetBtn->setObjectName("maskGroundHintReset");
+    m_maskResetBtn->setIcon(
+        UiAssets::icon(UiAssets::Glyph::Reset, QColor("#A7B8B4")));
+    m_maskResetBtn->setFixedWidth(30);
+    connect(m_maskResetBtn, &QPushButton::clicked,
+            this, &PreviewPanel::resetGroundHints);
+    maskLayout->addWidget(m_maskResetBtn);
+    m_maskDoneBtn = createToolBtn(QString(), QString::fromUtf8("完成蒙版修补"));
+    m_maskDoneBtn->setObjectName("maskGroundHintDone");
+    m_maskDoneBtn->setIcon(
+        UiAssets::icon(UiAssets::Glyph::Done, QColor("#4ED7AE")));
+    m_maskDoneBtn->setFixedWidth(30);
+    connect(m_maskDoneBtn, &QPushButton::clicked, this, [this]() {
+        m_maskBrushBtn->setChecked(false);
+    });
+    maskLayout->addWidget(m_maskDoneBtn);
+    m_maskEditControls->setVisible(false);
+    layout->addWidget(m_maskEditControls);
 
     layout->addStretch();
 
@@ -810,6 +878,15 @@ void PreviewPanel::applyZoom() {
         }
         painter.end();
     }
+    if (m_maskOverlayVisible && !m_groundHintOverlay.isNull()) {
+        QPainter painter(&pixmap);
+        const QImage scaledHints = m_groundHintOverlay.scaled(
+            w, h, Qt::IgnoreAspectRatio, Qt::FastTransformation);
+        painter.drawImage(0, 0, scaledHints);
+        if (m_viewMode == 2 && hasComparison()) {
+            painter.drawImage(w + kSplitGutter, 0, scaledHints);
+        }
+    }
 
     if (m_selectedPointX >= 0.0 && m_selectedPointY >= 0.0) {
         QPainter painter(&pixmap);
@@ -966,6 +1043,21 @@ bool PreviewPanel::eventFilter(QObject* watched, QEvent* event) {
             return true;
         }
         if (mouse->button() == Qt::LeftButton) {
+            if (m_maskEditingActive && !m_maskRefinementActive) {
+                QPoint maskPoint;
+                if (maskPositionAt(mouse->position().toPoint(), maskPoint)) {
+                    m_maskPainting = true;
+                    m_activeGroundHintStroke = {};
+                    m_activeGroundHintStroke.radius = std::max(
+                        1, m_maskBrushSize->value() / 2);
+                    m_activeGroundHintStroke.points.push_back(maskPoint);
+                    paintGroundHintSegment(
+                        maskPoint, maskPoint,
+                        m_activeGroundHintStroke.radius);
+                    scheduleMaskDisplayRefresh();
+                }
+                return true;
+            }
             if (m_pointSelectionActive) {
                 const QImage* sampled = nullptr;
                 int x = -1;
@@ -991,6 +1083,19 @@ bool PreviewPanel::eventFilter(QObject* watched, QEvent* event) {
 
     if (event->type() == QEvent::MouseMove) {
         auto* mouse = static_cast<QMouseEvent*>(event);
+        if (m_maskPainting && m_maskEditingActive) {
+            QPoint maskPoint;
+            if (maskPositionAt(mouse->position().toPoint(), maskPoint) &&
+                (m_activeGroundHintStroke.points.empty() ||
+                 m_activeGroundHintStroke.points.back() != maskPoint)) {
+                const QPoint previous = m_activeGroundHintStroke.points.back();
+                m_activeGroundHintStroke.points.push_back(maskPoint);
+                paintGroundHintSegment(
+                    previous, maskPoint, m_activeGroundHintStroke.radius);
+                scheduleMaskDisplayRefresh();
+            }
+            return true;
+        }
         if (m_panning) {
             const QPoint global = mouse->globalPosition().toPoint();
             const QPoint delta = global - m_lastPanPos;
@@ -1020,6 +1125,15 @@ bool PreviewPanel::eventFilter(QObject* watched, QEvent* event) {
     if (event->type() == QEvent::MouseButtonRelease) {
         auto* mouse = static_cast<QMouseEvent*>(event);
         if (mouse->button() == Qt::LeftButton) {
+            if (m_maskPainting) {
+                m_maskPainting = false;
+                if (!m_activeGroundHintStroke.points.empty()) {
+                    m_groundHintStrokes.push_back(m_activeGroundHintStroke);
+                    m_activeGroundHintStroke = {};
+                    startMaskRefinement();
+                }
+                return true;
+            }
             m_panning = false;
             m_imageLabel->setCursor(Qt::ArrowCursor);
             return true;
@@ -1117,30 +1231,224 @@ QImage PreviewPanel::currentImage() const {
 }
 
 void PreviewPanel::setMaskOverlay(const std::vector<uint8_t>& mask, int w, int h) {
-    if (w <= 0 || h <= 0 || mask.size() != static_cast<size_t>(w * h)) return;
-
-    m_maskOverlay = QImage(w, h, QImage::Format_ARGB32);
-    m_maskOverlay.fill(Qt::transparent);
-
-    for (int y = 0; y < h; ++y) {
-        for (int x = 0; x < w; ++x) {
-            uint8_t val = mask[y * w + x];
-            float a = val / 255.0f;
-            // 天空(255)=蓝色(68,136,255)，地景(0)=绿色(68,255,136)
-            int r = 68;
-            int g = static_cast<int>(255 + a * (136 - 255));
-            int b = static_cast<int>(136 + a * (255 - 136));
-            m_maskOverlay.setPixelColor(x, y, QColor(r, g, b, 77));
-        }
-    }
+    if (w <= 0 || h <= 0 ||
+        mask.size() != static_cast<size_t>(w) * h) return;
+    ++m_maskRefinementGeneration;
+    m_initialMask.resize(mask.size());
+    std::transform(mask.begin(), mask.end(), m_initialMask.begin(),
+                   [](uint8_t value) { return value >= 128 ? 255 : 0; });
+    m_editedMask = m_initialMask;
+    m_editedMaskWidth = w;
+    m_editedMaskHeight = h;
+    m_groundHints.assign(mask.size(), 0);
+    m_groundHintStrokes.clear();
+    m_groundHintOverlay = QImage(w, h, QImage::Format_ARGB32_Premultiplied);
+    m_groundHintOverlay.fill(Qt::transparent);
     m_maskOverlayVisible = true;
+    m_maskEditingActive = true;
+    m_maskHasUserEdits = false;
+    m_maskRefinementActive = false;
+    if (m_maskBrushBtn) m_maskBrushBtn->setChecked(true);
+    if (m_maskEditControls) m_maskEditControls->setVisible(true);
+    rebuildMaskOverlay();
     updateImageDisplay();
+    emit editedMaskChanged();
 }
 
 void PreviewPanel::clearMaskOverlay() {
+    ++m_maskRefinementGeneration;
     m_maskOverlay = QImage();
+    m_groundHintOverlay = QImage();
     m_maskOverlayVisible = false;
+    m_maskEditingActive = false;
+    m_maskHasUserEdits = false;
+    m_maskPainting = false;
+    m_maskRefinementActive = false;
+    m_initialMask.clear();
+    m_editedMask.clear();
+    m_groundHints.clear();
+    m_groundHintStrokes.clear();
+    m_editedMaskWidth = 0;
+    m_editedMaskHeight = 0;
+    if (m_maskEditControls) m_maskEditControls->setVisible(false);
     updateImageDisplay();
+}
+
+bool PreviewPanel::hasEditedMask() const {
+    return m_maskHasUserEdits && hasMaskData();
+}
+
+bool PreviewPanel::hasMaskData() const {
+    return !m_editedMask.empty() &&
+        m_editedMaskWidth > 0 && m_editedMaskHeight > 0;
+}
+
+bool PreviewPanel::maskPositionAt(const QPoint& labelPosition,
+                                  QPoint& maskPoint) const {
+    const QImage* sampled = nullptr;
+    int imageX = -1;
+    int imageY = -1;
+    if (!hasMaskData() ||
+        !imageSampleAt(labelPosition, sampled, imageX, imageY) ||
+        !sampled || sampled->isNull()) {
+        return false;
+    }
+    maskPoint.setX(std::clamp(
+        static_cast<int>(static_cast<int64_t>(imageX) * m_editedMaskWidth /
+                         sampled->width()), 0, m_editedMaskWidth - 1));
+    maskPoint.setY(std::clamp(
+        static_cast<int>(static_cast<int64_t>(imageY) * m_editedMaskHeight /
+                         sampled->height()), 0, m_editedMaskHeight - 1));
+    return true;
+}
+
+void PreviewPanel::rebuildMaskOverlay() {
+    if (!hasMaskData()) return;
+    m_maskOverlay = QImage(m_editedMaskWidth, m_editedMaskHeight,
+                           QImage::Format_ARGB32_Premultiplied);
+    for (int y = 0; y < m_editedMaskHeight; ++y) {
+        auto* row = reinterpret_cast<QRgb*>(m_maskOverlay.scanLine(y));
+        for (int x = 0; x < m_editedMaskWidth; ++x) {
+            const float sky = m_editedMask[
+                static_cast<size_t>(y) * m_editedMaskWidth + x] / 255.0f;
+            const int green = static_cast<int>(255 + sky * (136 - 255));
+            const int blue = static_cast<int>(136 + sky * (255 - 136));
+            row[x] = qPremultiply(qRgba(68, green, blue, 77));
+        }
+    }
+}
+
+void PreviewPanel::paintGroundHintSegment(const QPoint& from,
+                                           const QPoint& to, int radius) {
+    if (m_groundHints.empty() || m_groundHintOverlay.isNull()) return;
+    const int dx = to.x() - from.x();
+    const int dy = to.y() - from.y();
+    const int steps = std::max(1, static_cast<int>(
+        std::ceil(std::hypot(dx, dy) / std::max(1.0, radius * 0.35))));
+    for (int step = 0; step <= steps; ++step) {
+        const int cx = qRound(from.x() + dx * (step / static_cast<double>(steps)));
+        const int cy = qRound(from.y() + dy * (step / static_cast<double>(steps)));
+        const int minX = std::max(0, cx - radius);
+        const int maxX = std::min(m_editedMaskWidth - 1, cx + radius);
+        const int minY = std::max(0, cy - radius);
+        const int maxY = std::min(m_editedMaskHeight - 1, cy + radius);
+        for (int y = minY; y <= maxY; ++y) {
+            auto* overlay = reinterpret_cast<QRgb*>(
+                m_groundHintOverlay.scanLine(y));
+            for (int x = minX; x <= maxX; ++x) {
+                const int px = x - cx;
+                const int py = y - cy;
+                if (px * px + py * py > radius * radius) continue;
+                m_groundHints[static_cast<size_t>(y) * m_editedMaskWidth + x] = 255;
+                overlay[x] = qPremultiply(qRgba(242, 182, 90, 185));
+            }
+        }
+    }
+}
+
+void PreviewPanel::rebuildGroundHints() {
+    m_groundHints.assign(
+        static_cast<size_t>(m_editedMaskWidth) * m_editedMaskHeight, 0);
+    m_groundHintOverlay = QImage(
+        m_editedMaskWidth, m_editedMaskHeight,
+        QImage::Format_ARGB32_Premultiplied);
+    m_groundHintOverlay.fill(Qt::transparent);
+    for (const GroundHintStroke& stroke : m_groundHintStrokes) {
+        if (stroke.points.empty()) continue;
+        paintGroundHintSegment(stroke.points.front(), stroke.points.front(),
+                               stroke.radius);
+        for (int index = 1; index < stroke.points.size(); ++index) {
+            paintGroundHintSegment(stroke.points[index - 1],
+                                   stroke.points[index], stroke.radius);
+        }
+    }
+}
+
+void PreviewPanel::setMaskRefinementBusy(bool busy) {
+    m_maskRefinementActive = busy;
+    for (QWidget* control : {static_cast<QWidget*>(m_maskBrushBtn),
+                             static_cast<QWidget*>(m_maskBrushSize),
+                             static_cast<QWidget*>(m_maskUndoBtn),
+                             static_cast<QWidget*>(m_maskResetBtn),
+                             static_cast<QWidget*>(m_maskDoneBtn)}) {
+        if (control) control->setEnabled(!busy);
+    }
+    if (m_mouseInfo) {
+        m_mouseInfo->setText(busy
+            ? QString::fromUtf8("正在根据笔迹贴合地景边缘...")
+            : QString::fromUtf8("橙色=地景提示 | 蓝色=天空 | 绿色=地景"));
+    }
+}
+
+void PreviewPanel::startMaskRefinement() {
+    if (!hasMaskData() || m_groundHints.empty() ||
+        m_maskRefinementActive) return;
+    const uint64_t generation = ++m_maskRefinementGeneration;
+    const QImage preview = m_currentImage;
+    const std::vector<uint8_t> initial = m_initialMask;
+    const std::vector<uint8_t> hints = m_groundHints;
+    const int width = m_editedMaskWidth;
+    const int height = m_editedMaskHeight;
+    setMaskRefinementBusy(true);
+    emit maskRefinementStarted();
+    QPointer<PreviewPanel> safePanel(this);
+    m_previewPool.start([safePanel, generation, preview, initial, hints,
+                         width, height]() {
+        std::vector<uint8_t> refined;
+        const bool success = SkyGroundMask::refineWithGroundHints(
+            preview, initial, hints, width, height, refined);
+        if (!safePanel) return;
+        QMetaObject::invokeMethod(safePanel.data(),
+            [safePanel, generation, success, refined = std::move(refined)]() mutable {
+                if (!safePanel || generation !=
+                        safePanel->m_maskRefinementGeneration) return;
+                if (success && !refined.empty()) {
+                    safePanel->m_editedMask = std::move(refined);
+                    safePanel->m_maskHasUserEdits = true;
+                    safePanel->rebuildMaskOverlay();
+                    emit safePanel->editedMaskChanged();
+                }
+                safePanel->setMaskRefinementBusy(false);
+                safePanel->updateImageDisplay();
+                emit safePanel->maskRefinementFinished(success);
+            }, Qt::QueuedConnection);
+    });
+}
+
+void PreviewPanel::undoGroundHint() {
+    if (m_maskRefinementActive || m_groundHintStrokes.empty()) return;
+    m_groundHintStrokes.removeLast();
+    rebuildGroundHints();
+    if (m_groundHintStrokes.empty()) {
+        m_editedMask = m_initialMask;
+        m_maskHasUserEdits = false;
+        rebuildMaskOverlay();
+        updateImageDisplay();
+        emit editedMaskChanged();
+    } else {
+        startMaskRefinement();
+    }
+}
+
+void PreviewPanel::resetGroundHints() {
+    if (m_maskRefinementActive || m_initialMask.empty()) return;
+    ++m_maskRefinementGeneration;
+    m_groundHintStrokes.clear();
+    rebuildGroundHints();
+    m_editedMask = m_initialMask;
+    m_maskHasUserEdits = false;
+    rebuildMaskOverlay();
+    updateImageDisplay();
+    emit editedMaskChanged();
+}
+
+void PreviewPanel::scheduleMaskDisplayRefresh() {
+    if (m_maskDisplayRefreshPending) return;
+    m_maskDisplayRefreshPending = true;
+    QTimer::singleShot(32, this, [this]() {
+        m_maskDisplayRefreshPending = false;
+        if (m_maskOverlayVisible) updateImageDisplay();
+    });
 }
 
 QString PreviewPanel::formatExposureTime(double seconds) const {

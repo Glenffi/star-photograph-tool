@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <queue>
 
 // ---------------------------------------------------------------------------
 // 图像缩放（双线性插值）
@@ -79,6 +80,24 @@ static void resizeMask(const std::vector<uint8_t>& src, int srcW, int srcH,
 
             dst[y * dstW + x] = static_cast<uint8_t>(std::clamp(
                 static_cast<int>(val + 0.5f), 0, 255));
+        }
+    }
+}
+
+static void resizeMaskNearest(const std::vector<uint8_t>& src,
+                              int srcW, int srcH,
+                              std::vector<uint8_t>& dst,
+                              int dstW, int dstH) {
+    dst.resize(static_cast<size_t>(dstW) * dstH);
+    for (int y = 0; y < dstH; ++y) {
+        const int sourceY = std::min(
+            srcH - 1, static_cast<int>(static_cast<int64_t>(y) * srcH / dstH));
+        for (int x = 0; x < dstW; ++x) {
+            const int sourceX = std::min(
+                srcW - 1,
+                static_cast<int>(static_cast<int64_t>(x) * srcW / dstW));
+            dst[static_cast<size_t>(y) * dstW + x] =
+                src[static_cast<size_t>(sourceY) * srcW + sourceX];
         }
     }
 }
@@ -460,5 +479,222 @@ bool SkyGroundMask::loadUserMask(const QString& path, int width, int height,
     } else {
         mask = std::move(resizedMask);
     }
+    return true;
+}
+
+bool SkyGroundMask::prepareEditedMask(
+    const std::vector<uint8_t>& source, int sourceWidth, int sourceHeight,
+    int targetWidth, int targetHeight, std::vector<uint8_t>& mask,
+    int featherRadius) {
+    if (sourceWidth <= 0 || sourceHeight <= 0 ||
+        targetWidth <= 0 || targetHeight <= 0 || featherRadius < 0 ||
+        static_cast<size_t>(sourceWidth) >
+            std::numeric_limits<size_t>::max() /
+                static_cast<size_t>(sourceHeight) ||
+        sourceWidth > std::numeric_limits<int>::max() / sourceHeight ||
+        static_cast<size_t>(targetWidth) >
+            std::numeric_limits<size_t>::max() /
+                static_cast<size_t>(targetHeight) ||
+        targetWidth > std::numeric_limits<int>::max() / targetHeight ||
+        source.size() !=
+            static_cast<size_t>(sourceWidth) * sourceHeight) {
+        return false;
+    }
+
+    if (featherRadius <= 0) {
+        if (sourceWidth == targetWidth && sourceHeight == targetHeight) {
+            mask = source;
+        } else {
+            resizeMaskNearest(source, sourceWidth, sourceHeight, mask,
+                              targetWidth, targetHeight);
+        }
+        return true;
+    }
+
+    // Feather at one-quarter output dimensions, matching the existing user
+    // mask path while avoiding a large-kernel blur over a 40-60 MP mask.
+    const int smallWidth = std::max(1, targetWidth / 4);
+    const int smallHeight = std::max(1, targetHeight / 4);
+    std::vector<uint8_t> smallMask;
+    resizeMaskNearest(source, sourceWidth, sourceHeight, smallMask,
+                      smallWidth, smallHeight);
+    std::vector<uint8_t> blurred;
+    gaussianBlurMask(smallMask, smallWidth, smallHeight, blurred,
+                     static_cast<float>(std::max(1, featherRadius / 4)));
+    resizeMask(blurred, smallWidth, smallHeight, mask,
+               targetWidth, targetHeight);
+    return true;
+}
+
+bool SkyGroundMask::refineWithGroundHints(
+    const QImage& preview, const std::vector<uint8_t>& initialMask,
+    const std::vector<uint8_t>& groundHints, int width, int height,
+    std::vector<uint8_t>& refinedMask) {
+    if (preview.isNull() || width <= 1 || height <= 1 ||
+        preview.width() != width || preview.height() != height ||
+        static_cast<size_t>(width) >
+            std::numeric_limits<size_t>::max() /
+                static_cast<size_t>(height) ||
+        width > std::numeric_limits<int>::max() / height) {
+        return false;
+    }
+    const size_t pixelCount = static_cast<size_t>(width) * height;
+    if (initialMask.size() != pixelCount || groundHints.size() != pixelCount) {
+        return false;
+    }
+    const auto firstHint = std::find_if(
+        groundHints.begin(), groundHints.end(),
+        [](uint8_t value) { return value > 0; });
+    if (firstHint == groundHints.end()) {
+        refinedMask = initialMask;
+        return true;
+    }
+
+    constexpr int kWorkLongSide = 1100;
+    const double scale = std::min(
+        1.0, static_cast<double>(kWorkLongSide) / std::max(width, height));
+    const int workWidth = std::max(2, qRound(width * scale));
+    const int workHeight = std::max(2, qRound(height * scale));
+    const QImage workImage = preview.scaled(
+        workWidth, workHeight, Qt::IgnoreAspectRatio,
+        Qt::SmoothTransformation).convertToFormat(QImage::Format_RGB888);
+    std::vector<uint8_t> workInitial;
+    std::vector<uint8_t> workHints;
+    resizeMaskNearest(initialMask, width, height, workInitial,
+                      workWidth, workHeight);
+    resizeMaskNearest(groundHints, width, height, workHints,
+                      workWidth, workHeight);
+
+    int minX = workWidth;
+    int minY = workHeight;
+    int maxX = -1;
+    int maxY = -1;
+    for (int y = 0; y < workHeight; ++y) {
+        for (int x = 0; x < workWidth; ++x) {
+            if (workHints[static_cast<size_t>(y) * workWidth + x] == 0) {
+                continue;
+            }
+            minX = std::min(minX, x);
+            minY = std::min(minY, y);
+            maxX = std::max(maxX, x);
+            maxY = std::max(maxY, y);
+        }
+    }
+    if (maxX < minX || maxY < minY) return false;
+
+    // Keep refinement local enough to preserve a good automatic horizon, but
+    // large enough for a loose stroke inside a mountain to reach its outline.
+    const int hintSpan = std::max(maxX - minX + 1, maxY - minY + 1);
+    const int margin = std::clamp(hintSpan * 2 + 40, 56,
+                                  std::max(workWidth, workHeight));
+    minX = std::max(0, minX - margin);
+    minY = std::max(0, minY - margin);
+    maxX = std::min(workWidth - 1, maxX + margin);
+    maxY = std::min(workHeight - 1, maxY + margin);
+
+    const size_t workCount = static_cast<size_t>(workWidth) * workHeight;
+    std::vector<uint32_t> best(workCount,
+                               std::numeric_limits<uint32_t>::max());
+    std::vector<uint8_t> label(workCount, 2); // 0=ground, 1=sky, 2=unknown
+    struct Node {
+        uint32_t cost;
+        int index;
+        uint8_t label;
+    };
+    const auto compare = [](const Node& a, const Node& b) {
+        return a.cost > b.cost;
+    };
+    std::priority_queue<Node, std::vector<Node>, decltype(compare)> queue(compare);
+    const auto seed = [&](int x, int y, uint8_t value) {
+        const int index = y * workWidth + x;
+        if (best[static_cast<size_t>(index)] == 0 &&
+            label[static_cast<size_t>(index)] == 0) {
+            return;
+        }
+        best[static_cast<size_t>(index)] = 0;
+        label[static_cast<size_t>(index)] = value;
+        queue.push({0, index, value});
+    };
+
+    // The top and bottom of the ROI preserve the sky-over-ground topology.
+    // Do not seed the vertical edges: a missed ridge can legitimately continue
+    // through them, and copying the old label there would pin that same error.
+    // User strokes are inserted last and always win as ground.
+    for (int x = minX; x <= maxX; ++x) {
+        seed(x, minY,
+             workInitial[static_cast<size_t>(minY) * workWidth + x] >= 128);
+        seed(x, maxY,
+             workInitial[static_cast<size_t>(maxY) * workWidth + x] >= 128);
+    }
+    for (int y = minY; y <= maxY; ++y) {
+        for (int x = minX; x <= maxX; ++x) {
+            if (workHints[static_cast<size_t>(y) * workWidth + x] > 0) {
+                seed(x, y, 0);
+            }
+        }
+    }
+
+    const auto edgeCost = [&](int first, int second) {
+        const int firstY = first / workWidth;
+        const int firstX = first - firstY * workWidth;
+        const int secondY = second / workWidth;
+        const int secondX = second - secondY * workWidth;
+        const uchar* a = workImage.constScanLine(firstY) + firstX * 3;
+        const uchar* b = workImage.constScanLine(secondY) + secondX * 3;
+        const int dr = static_cast<int>(a[0]) - b[0];
+        const int dg = static_cast<int>(a[1]) - b[1];
+        const int db = static_cast<int>(a[2]) - b[2];
+        const int lumaA = 3 * a[0] + 6 * a[1] + a[2];
+        const int lumaB = 3 * b[0] + 6 * b[1] + b[2];
+        const int dl = (lumaA - lumaB) / 10;
+        return static_cast<uint32_t>(
+            1 + dr * dr + dg * dg + db * db + 2 * dl * dl);
+    };
+    constexpr int dx[4] = {-1, 1, 0, 0};
+    constexpr int dy[4] = {0, 0, -1, 1};
+    while (!queue.empty()) {
+        const Node node = queue.top();
+        queue.pop();
+        if (node.cost != best[static_cast<size_t>(node.index)] ||
+            node.label != label[static_cast<size_t>(node.index)]) {
+            continue;
+        }
+        const int y = node.index / workWidth;
+        const int x = node.index - y * workWidth;
+        for (int direction = 0; direction < 4; ++direction) {
+            const int nx = x + dx[direction];
+            const int ny = y + dy[direction];
+            if (nx < minX || nx > maxX || ny < minY || ny > maxY) continue;
+            const int next = ny * workWidth + nx;
+            if (workHints[static_cast<size_t>(next)] > 0 && node.label != 0) {
+                continue;
+            }
+            const uint32_t candidate = std::max(
+                node.cost, edgeCost(node.index, next));
+            const size_t nextIndex = static_cast<size_t>(next);
+            const bool better = candidate < best[nextIndex];
+            const bool tieFollowsInitial = candidate == best[nextIndex] &&
+                node.label ==
+                    static_cast<uint8_t>(workInitial[nextIndex] >= 128) &&
+                label[nextIndex] != node.label;
+            if (!better && !tieFollowsInitial) continue;
+            best[nextIndex] = candidate;
+            label[nextIndex] = node.label;
+            queue.push({candidate, next, node.label});
+        }
+    }
+
+    std::vector<uint8_t> workRefined(workInitial.size());
+    std::transform(workInitial.begin(), workInitial.end(),
+                   workRefined.begin(),
+                   [](uint8_t value) { return value >= 128 ? 255 : 0; });
+    for (int y = minY; y <= maxY; ++y) {
+        for (int x = minX; x <= maxX; ++x) {
+            const size_t index = static_cast<size_t>(y) * workWidth + x;
+            if (label[index] != 2) workRefined[index] = label[index] ? 255 : 0;
+        }
+    }
+    resizeMaskNearest(workRefined, workWidth, workHeight, refinedMask,
+                      width, height);
     return true;
 }

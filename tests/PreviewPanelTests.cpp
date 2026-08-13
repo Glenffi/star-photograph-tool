@@ -2,9 +2,12 @@
 
 #include <QApplication>
 #include <QColor>
+#include <QElapsedTimer>
 #include <QLabel>
 #include <QMouseEvent>
 #include <QPixmap>
+#include <QPushButton>
+#include <QThread>
 
 #include <cmath>
 #include <cstdlib>
@@ -110,6 +113,77 @@ int main(int argc, char** argv) {
     const QPixmap refreshedPixmap = imageLabel->pixmap();
     check(refreshedPixmap.width() >= width * 2,
           "Quick-preview refresh should preserve split comparison mode");
+
+    PreviewPanel maskPanel;
+    maskPanel.resize(1000, 640);
+    maskPanel.show();
+    QImage groundScene(width, height, QImage::Format_RGB888);
+    std::vector<uint8_t> automaticMask(
+        static_cast<size_t>(width) * height, 0);
+    for (int y = 0; y < height; ++y) {
+        uchar* row = groundScene.scanLine(y);
+        for (int x = 0; x < width; ++x) {
+            const int ridge = 96 + qRound(8.0 * std::sin(x * 0.03));
+            const bool sky = y < ridge;
+            row[x * 3] = static_cast<uchar>(sky ? 115 : 24);
+            row[x * 3 + 1] = static_cast<uchar>(sky ? 132 : 38);
+            row[x * 3 + 2] = static_cast<uchar>(sky ? 154 : 29);
+            automaticMask[static_cast<size_t>(y) * width + x] =
+                y < ridge + 26 ? 255 : 0;
+        }
+    }
+    maskPanel.loadImage(groundScene);
+    maskPanel.setMaskOverlay(automaticMask, width, height);
+    processLayout();
+    check(!maskPanel.hasEditedMask(),
+          "Automatic detection alone should not be treated as a user edit");
+    auto* maskImageLabel =
+        maskPanel.findChild<QLabel*>("previewImageLabel");
+    auto* undoButton =
+        maskPanel.findChild<QPushButton*>("maskGroundHintUndo");
+    check(maskImageLabel && undoButton && undoButton->isVisible(),
+          "Ground-hint editing controls should appear with a detected mask");
+
+    bool refinementFinished = false;
+    QObject::connect(&maskPanel, &PreviewPanel::maskRefinementFinished,
+                     [&](bool success) { refinementFinished = success; });
+    const QPixmap maskPixmap = maskImageLabel->pixmap();
+    const QPoint hintPoint(maskPixmap.width() / 2,
+                           qRound(maskPixmap.height() * 0.60));
+    const QPointF hintGlobal = maskImageLabel->mapToGlobal(hintPoint);
+    QMouseEvent hintPress(
+        QEvent::MouseButtonPress, QPointF(hintPoint), QPointF(hintPoint),
+        hintGlobal, Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
+    QApplication::sendEvent(maskImageLabel, &hintPress);
+    QMouseEvent hintRelease(
+        QEvent::MouseButtonRelease, QPointF(hintPoint), QPointF(hintPoint),
+        hintGlobal, Qt::LeftButton, Qt::NoButton, Qt::NoModifier);
+    QApplication::sendEvent(maskImageLabel, &hintRelease);
+
+    QElapsedTimer waitForRefinement;
+    waitForRefinement.start();
+    while (!refinementFinished && waitForRefinement.elapsed() < 3000) {
+        QApplication::processEvents();
+        QThread::msleep(5);
+    }
+    check(refinementFinished && maskPanel.hasEditedMask(),
+          "Releasing a rough ground stroke should asynchronously refine the mask");
+    const std::vector<uint8_t>& editedMask = maskPanel.editedMask();
+    check(editedMask[120U * width + width / 2] == 0,
+          "The painted missed-ground region should be classified as ground");
+
+    const QByteArray maskScreenshotPath = qgetenv(
+        "STARPROCESSOR_MASK_EDITOR_SCREENSHOT");
+    if (!maskScreenshotPath.isEmpty()) {
+        check(maskPanel.grab().save(QString::fromUtf8(maskScreenshotPath)),
+              "Mask editor test screenshot should be writable");
+    }
+
+    undoButton->click();
+    processLayout();
+    check(!maskPanel.hasEditedMask() &&
+              maskPanel.editedMask() == automaticMask,
+          "Undoing the only ground hint should restore automatic detection");
 
     const QByteArray screenshotPath = qgetenv(
         "STARPROCESSOR_PREVIEW_TEST_SCREENSHOT");

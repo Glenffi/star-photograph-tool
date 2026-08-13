@@ -6,6 +6,7 @@
 #include "core/ImageAligner.h"
 #include "core/ImageBufferUtils.h"
 #include "core/ImageExporter.h"
+#include "core/MasterFrameIO.h"
 #include "core/PhotometricNormalizer.h"
 #include "core/ProcessingMemoryEstimator.h"
 #include "core/PreviewToneMapper.h"
@@ -34,6 +35,7 @@
 #include <cstring>
 #include <functional>
 #include <limits>
+#include <memory>
 #include <new>
 #include <numeric>
 #include <utility>
@@ -467,38 +469,20 @@ bool ProcessingWorker::buildDeepSkyCalibration(
     RawImageLoader& loader,
     const RawImageLoader::CfaImageData& referenceLight,
     RawCalibrationEngine::MasterFrames& masters) {
-    if (m_params.biasFramePaths.size() < 3 ||
-        m_params.darkFramePaths.size() < 3 ||
-        m_params.flatFramePaths.size() < 3) {
-        m_errorString = "深空标准校准至少需要 3 张 Bias、3 张 Dark 和 3 张 Flat";
-        return false;
-    }
     const size_t pixelCount = referenceLight.data.size();
     if (pixelCount == 0) {
         m_errorString = "参考 Light 的 Bayer 数据为空";
         return false;
     }
-    QSet<QString> uniquePaths;
-    auto addUniqueSet = [&](const QStringList& paths) {
-        for (const QString& path : paths) {
-            QString identity = QFileInfo(path).canonicalFilePath();
-            if (identity.isEmpty()) identity = QFileInfo(path).absoluteFilePath();
-            if (uniquePaths.contains(identity)) return false;
-            uniquePaths.insert(identity);
-        }
-        return true;
-    };
-    if (!addUniqueSet(m_files) ||
-        !addUniqueSet(m_params.biasFramePaths) ||
-        !addUniqueSet(m_params.darkFramePaths) ||
-        !addUniqueSet(m_params.flatFramePaths)) {
-        m_errorString =
-            "同一个 RAW 不能同时作为 Light、Bias、Dark 或 Flat";
-        return false;
-    }
-
-    const int totalCalibrationFrames = m_params.biasFramePaths.size() +
-        m_params.darkFramePaths.size() + m_params.flatFramePaths.size();
+    const int totalCalibrationFrames = std::max(
+        1, static_cast<int>(m_params.biasFramePaths.size() +
+            m_params.darkFramePaths.size() +
+            m_params.flatFramePaths.size() +
+            m_params.darkFlatFramePaths.size()) +
+            static_cast<int>(!m_params.masterBiasPath.isEmpty()) +
+            static_cast<int>(!m_params.masterDarkPath.isEmpty()) +
+            static_cast<int>(!m_params.masterFlatPath.isEmpty()) +
+            static_cast<int>(!m_params.masterDarkFlatPath.isEmpty()));
     int processedCalibrationFrames = 0;
     auto reportCalibrationProgress = [&]() {
         ++processedCalibrationFrames;
@@ -519,6 +503,68 @@ bool ProcessingWorker::buildDeepSkyCalibration(
     masters.cfaPattern = referenceLight.cfaPattern;
     masters.saturation = referenceLight.saturation;
 
+    auto descriptorFrom = [](const RawImageLoader::CfaImageData& frame) {
+        RawImageLoader::CfaImageData descriptor = frame;
+        descriptor.data.clear();
+        descriptor.data.shrink_to_fit();
+        return descriptor;
+    };
+    auto makeMaster = [](RawCalibrationEngine::MasterRole role,
+                         const RawImageLoader::CfaImageData& source,
+                         std::vector<float>&& data, bool normalizedFlat,
+                         bool darkIncludesBias = true) {
+        RawCalibrationEngine::MasterFrame master;
+        master.role = role;
+        master.width = source.width;
+        master.height = source.height;
+        master.rawWidth = source.rawWidth;
+        master.rawHeight = source.rawHeight;
+        master.topMargin = source.topMargin;
+        master.leftMargin = source.leftMargin;
+        master.iso = source.iso;
+        master.exposureTime = source.exposureTime;
+        master.cameraModel = source.cameraModel;
+        master.cfaPattern = source.cfaPattern;
+        master.saturation = source.saturation;
+        master.normalizedFlat = normalizedFlat;
+        master.darkIncludesBiasPedestal = darkIncludesBias;
+        master.data = std::move(data);
+        return master;
+    };
+
+    QString outputRoot = m_params.outputPath;
+    if (outputRoot.isEmpty()) {
+        outputRoot = QDir::homePath() + "/StarProcessor/Output";
+    }
+    std::unique_ptr<QTemporaryDir> pendingMasters;
+    std::vector<QString> pendingMasterNames;
+    if (m_params.saveGeneratedMasters) {
+        if (!QDir().mkpath(outputRoot)) {
+            m_errorString = "无法创建 Master 输出目录";
+            return false;
+        }
+        pendingMasters = std::make_unique<QTemporaryDir>(
+            QDir(outputRoot).filePath(".starprocessor-masters-XXXXXX"));
+        if (!pendingMasters->isValid()) {
+            m_errorString = "无法创建 Master 临时目录";
+            return false;
+        }
+    }
+    auto saveGenerated = [&](RawCalibrationEngine::MasterFrame& master,
+                             const QString& roleName) {
+        if (!pendingMasters) return true;
+        const QString fileName = "master_" + roleName + ".spmaster";
+        QString error;
+        if (!MasterFrameIO::save(
+                pendingMasters->filePath(fileName), master, error)) {
+            m_errorString = QString("保存 Master %1 失败: %2")
+                                .arg(roleName, error);
+            return false;
+        }
+        pendingMasterNames.push_back(fileName);
+        return true;
+    };
+
     auto loadCompatible = [&](const QString& path, const QString& kind,
                               RawImageLoader::CfaImageData& frame) {
         if (!loader.loadRawCfa(path, frame)) {
@@ -537,9 +583,44 @@ bool ProcessingWorker::buildDeepSkyCalibration(
         return true;
     };
 
-    emit stageMessage("生成 Master Bias...");
-    {
+    auto loadMaster = [&](const QString& path,
+                          RawCalibrationEngine::MasterRole expectedRole,
+                          RawCalibrationEngine::MasterFrame& master) {
+        QString error;
+        if (!MasterFrameIO::load(path, master, error)) {
+            m_errorString = QString("无法读取 %1: %2")
+                                .arg(QFileInfo(path).fileName(), error);
+            return false;
+        }
+        if (master.role != expectedRole) {
+            m_errorString = QString("Master 类型不匹配: %1")
+                                .arg(QFileInfo(path).fileName());
+            return false;
+        }
+        reportCalibrationProgress();
+        return true;
+    };
+    auto installMaster = [&](RawCalibrationEngine::MasterFrame& master) {
+        std::string reason;
+        if (!RawCalibrationEngine::installMasterFrame(
+                referenceLight, master, masters, reason)) {
+            m_errorString = QString("Master 与 Light 不兼容: %1")
+                                .arg(QString::fromStdString(reason));
+            return false;
+        }
+        return true;
+    };
+
+    if (!m_params.masterBiasPath.isEmpty()) {
+        emit stageMessage("加载 Master Bias...");
+        RawCalibrationEngine::MasterFrame master;
+        if (!loadMaster(m_params.masterBiasPath,
+                        RawCalibrationEngine::MasterRole::Bias, master) ||
+            !installMaster(master)) return false;
+    } else if (!m_params.biasFramePaths.isEmpty()) {
+        emit stageMessage("生成 Master Bias...");
         RawCalibrationEngine::MeanAccumulator biasAccumulator(pixelCount);
+        RawImageLoader::CfaImageData descriptor;
         for (const QString& path : m_params.biasFramePaths) {
             if (stopIfCancelled()) return false;
             RawImageLoader::CfaImageData frame;
@@ -560,17 +641,31 @@ bool ProcessingWorker::buildDeepSkyCalibration(
                     .arg(frame.exposureTime, 0, 'g', 6);
                 return false;
             }
+            if (descriptor.width == 0) descriptor = descriptorFrom(frame);
             reportCalibrationProgress();
         }
-        if (!biasAccumulator.finish(masters.bias)) {
+        std::vector<float> generated;
+        if (!biasAccumulator.finish(generated)) {
             m_errorString = "Master Bias 生成失败";
             return false;
         }
+        RawCalibrationEngine::MasterFrame master = makeMaster(
+            RawCalibrationEngine::MasterRole::Bias, descriptor,
+            std::move(generated), false);
+        if (!master.complete() || !saveGenerated(master, "bias")) return false;
+        masters.bias = std::move(master.data);
     }
 
-    emit stageMessage("生成 Master Dark...");
-    {
+    if (!m_params.masterDarkPath.isEmpty()) {
+        emit stageMessage("加载 Master Dark...");
+        RawCalibrationEngine::MasterFrame master;
+        if (!loadMaster(m_params.masterDarkPath,
+                        RawCalibrationEngine::MasterRole::Dark, master) ||
+            !installMaster(master)) return false;
+    } else {
+        emit stageMessage("生成 Master Dark...");
         RawCalibrationEngine::MeanAccumulator darkAccumulator(pixelCount);
+        RawImageLoader::CfaImageData descriptor;
         for (const QString& path : m_params.darkFramePaths) {
             if (stopIfCancelled()) return false;
             RawImageLoader::CfaImageData frame;
@@ -588,42 +683,137 @@ bool ProcessingWorker::buildDeepSkyCalibration(
                 m_errorString = "Master Dark 累加失败";
                 return false;
             }
+            if (descriptor.width == 0) descriptor = descriptorFrom(frame);
             reportCalibrationProgress();
         }
-        if (!darkAccumulator.finish(masters.dark)) {
+        std::vector<float> generated;
+        if (!darkAccumulator.finish(generated)) {
             m_errorString = "Master Dark 生成失败";
             return false;
         }
+        RawCalibrationEngine::MasterFrame master = makeMaster(
+            RawCalibrationEngine::MasterRole::Dark, descriptor,
+            std::move(generated), false, true);
+        if (!master.complete() || !saveGenerated(master, "dark")) return false;
+        masters.dark = std::move(master.data);
+        masters.darkIncludesBiasPedestal = true;
     }
 
-    emit stageMessage("校准并生成 Master Flat...");
-    {
+    if (!m_params.masterFlatPath.isEmpty()) {
+        emit stageMessage("加载 Master Flat...");
+        RawCalibrationEngine::MasterFrame master;
+        if (!loadMaster(m_params.masterFlatPath,
+                        RawCalibrationEngine::MasterRole::Flat, master) ||
+            !installMaster(master)) return false;
+    } else {
+        RawCalibrationEngine::MasterFrame darkFlatMaster;
+        if (!m_params.masterDarkFlatPath.isEmpty()) {
+            emit stageMessage("加载 Master Dark Flat...");
+            if (!loadMaster(m_params.masterDarkFlatPath,
+                            RawCalibrationEngine::MasterRole::DarkFlat,
+                            darkFlatMaster)) return false;
+            std::string reason;
+            if (!RawCalibrationEngine::validateMasterFrame(
+                    referenceLight, darkFlatMaster, reason)) {
+                m_errorString = QString(
+                    "Master Dark Flat 与 Light 不兼容: %1")
+                                    .arg(QString::fromStdString(reason));
+                return false;
+            }
+        } else if (!m_params.darkFlatFramePaths.isEmpty()) {
+            emit stageMessage("生成 Master Dark Flat...");
+            RawCalibrationEngine::MeanAccumulator darkFlatAccumulator(
+                pixelCount);
+            RawImageLoader::CfaImageData descriptor;
+            for (const QString& path : m_params.darkFlatFramePaths) {
+                if (stopIfCancelled()) return false;
+                RawImageLoader::CfaImageData frame;
+                if (!loadCompatible(path, "Dark Flat", frame) ||
+                    !darkFlatAccumulator.add(frame.data)) {
+                    if (m_errorString.isEmpty()) {
+                        m_errorString = "Master Dark Flat 累加失败";
+                    }
+                    return false;
+                }
+                if (descriptor.width == 0) descriptor = descriptorFrom(frame);
+                reportCalibrationProgress();
+            }
+            std::vector<float> generated;
+            if (!darkFlatAccumulator.finish(generated)) {
+                m_errorString = "Master Dark Flat 生成失败";
+                return false;
+            }
+            darkFlatMaster = makeMaster(
+                RawCalibrationEngine::MasterRole::DarkFlat, descriptor,
+                std::move(generated), false, true);
+            if (!darkFlatMaster.complete() ||
+                !saveGenerated(darkFlatMaster, "dark_flat")) return false;
+        }
+
+        emit stageMessage("校准并生成 Master Flat...");
         RawCalibrationEngine::MeanAccumulator flatAccumulator(pixelCount);
+        RawImageLoader::CfaImageData descriptor;
         for (const QString& path : m_params.flatFramePaths) {
             if (stopIfCancelled()) return false;
             RawImageLoader::CfaImageData frame;
             if (!loadCompatible(path, "Flat", frame)) return false;
             std::vector<float> normalized;
-            if (!RawCalibrationEngine::normalizeFlat(
-                    frame, masters.bias, normalized) ||
+            const bool normalizedOk = !darkFlatMaster.data.empty()
+                ? RawCalibrationEngine::normalizeFlat(
+                      frame, darkFlatMaster, normalized)
+                : RawCalibrationEngine::normalizeFlat(
+                      frame, masters.bias, normalized);
+            if (!normalizedOk ||
                 !flatAccumulator.add(normalized)) {
                 m_errorString = QString(
                     "Flat 曝光不足、接近饱和或无法归一化: %1")
                     .arg(QFileInfo(path).fileName());
                 return false;
             }
+            if (descriptor.width == 0) descriptor = descriptorFrom(frame);
             reportCalibrationProgress();
         }
-        if (!flatAccumulator.finish(masters.flat)) {
+        std::vector<float> generated;
+        if (!flatAccumulator.finish(generated) ||
+            !RawCalibrationEngine::finalizeMasterFlat(
+                generated, referenceLight.width, referenceLight.height)) {
             m_errorString = "Master Flat 累加失败";
             return false;
         }
+        RawCalibrationEngine::MasterFrame master = makeMaster(
+            RawCalibrationEngine::MasterRole::Flat, descriptor,
+            std::move(generated), true);
+        if (!master.complete() || !saveGenerated(master, "flat")) return false;
+        masters.flat = std::move(master.data);
     }
-    if (!RawCalibrationEngine::finalizeMasterFlat(
-            masters.flat, masters.width, masters.height) ||
-        !masters.complete()) {
-        m_errorString = "Master Flat 生成失败";
+
+    if (!masters.complete()) {
+        m_errorString = "深空 Master 组合不完整或彼此不兼容";
         return false;
+    }
+
+    // Publish a generated set only after every source and the final calibration
+    // combination have passed. Renaming one directory on the same volume keeps
+    // a failed run from leaving a half-written set in the user's output.
+    if (pendingMasters && !pendingMasterNames.empty()) {
+        const QString mastersRoot = QDir(outputRoot).filePath("Masters");
+        if (!QDir().mkpath(mastersRoot)) {
+            m_errorString = "无法创建 Masters 文件夹";
+            return false;
+        }
+        const QString destination = QDir(mastersRoot).filePath(
+            QDateTime::currentDateTime().toString("yyyyMMdd_hhmmss_zzz"));
+        const QString stagingPath = pendingMasters->path();
+        if (QFileInfo::exists(destination) ||
+            !QDir().rename(stagingPath, destination)) {
+            m_errorString = "无法提交生成的 Master 文件集";
+            return false;
+        }
+        pendingMasters->setAutoRemove(false);
+        for (const QString& fileName : pendingMasterNames) {
+            m_generatedMasterFiles.append(
+                QDir(destination).filePath(fileName));
+        }
     }
     return true;
 }
@@ -709,6 +899,7 @@ void ProcessingWorker::run() {
     m_calibrationClippedHighPixels = 0;
     m_calibrationInvalidFlatPixels = 0;
     m_calibrationPreflightWarnings.clear();
+    m_generatedMasterFiles.clear();
     emit progress(0);
 
     if (m_files.isEmpty()) {
@@ -741,22 +932,30 @@ void ProcessingWorker::run() {
         return;
     }
 
-    if (m_params.deepSkyMode &&
-        (m_params.biasFramePaths.size() < 3 ||
-         m_params.darkFramePaths.size() < 3 ||
-         m_params.flatFramePaths.size() < 3)) {
-        m_errorString = "深空标准校准至少需要 3 张 Bias、3 张 Dark 和 3 张 Flat";
-        return;
-    }
-
     emit stageMessage("检查图像与内存预算...");
     RawImageLoader loader;
     if (m_params.deepSkyMode) {
-        emit stageMessage("预检 Light、Dark、Flat 和 Bias...");
+        emit stageMessage("预检 Light 与校准来源...");
+        DeepSkyCalibrationPreflight::Inputs inputs;
+        inputs.lightPaths = m_files;
+        inputs.darkPaths = m_params.darkFramePaths;
+        inputs.flatPaths = m_params.flatFramePaths;
+        inputs.biasPaths = m_params.biasFramePaths;
+        inputs.darkFlatPaths = m_params.darkFlatFramePaths;
+        if (!m_params.masterDarkPath.isEmpty()) {
+            inputs.masterDarkPaths = {m_params.masterDarkPath};
+        }
+        if (!m_params.masterFlatPath.isEmpty()) {
+            inputs.masterFlatPaths = {m_params.masterFlatPath};
+        }
+        if (!m_params.masterBiasPath.isEmpty()) {
+            inputs.masterBiasPaths = {m_params.masterBiasPath};
+        }
+        if (!m_params.masterDarkFlatPath.isEmpty()) {
+            inputs.masterDarkFlatPaths = {m_params.masterDarkFlatPath};
+        }
         const DeepSkyCalibrationPreflight::Report preflight =
-            DeepSkyCalibrationPreflight::inspect(
-                loader, m_files, m_params.darkFramePaths,
-                m_params.flatFramePaths, m_params.biasFramePaths);
+            DeepSkyCalibrationPreflight::inspect(loader, inputs);
         m_calibrationPreflightWarnings = preflight.warningMessages();
         if (preflight.hasErrors()) {
             m_errorString = preflight.userMessage();
@@ -847,6 +1046,17 @@ void ProcessingWorker::run() {
     }
     m_selectedReferenceIndex = static_cast<int>(referenceIndex);
     m_selectedReferenceFrame = m_files[m_selectedReferenceIndex];
+    if (!m_params.editedSkyGroundMask.empty()) {
+        const QString maskSource = QFileInfo(
+            m_params.editedSkyGroundMaskSourcePath).absoluteFilePath();
+        const QString selectedSource = QFileInfo(
+            m_selectedReferenceFrame).absoluteFilePath();
+        if (maskSource.isEmpty() || maskSource != selectedSource) {
+            m_errorString =
+                "修补后的天地蒙版不属于最终参考帧，请重新检测并修补";
+            return;
+        }
+    }
     if (automaticReference) {
         emit stageMessage(QString("自动参考帧：%1")
                               .arg(QFileInfo(m_selectedReferenceFrame).fileName()));
@@ -1047,7 +1257,16 @@ void ProcessingWorker::run() {
     if (m_params.skyGroundSepEnabled) {
         emit stageMessage("生成天地蒙版...");
         bool maskReady = false;
-        if (m_params.skyGroundMode == SkyGroundMask::AutoDetect) {
+        const bool editedMaskProvided =
+            !m_params.editedSkyGroundMask.empty();
+        if (editedMaskProvided) {
+            maskReady = SkyGroundMask::prepareEditedMask(
+                m_params.editedSkyGroundMask,
+                m_params.editedSkyGroundMaskWidth,
+                m_params.editedSkyGroundMaskHeight,
+                width, height, mask, m_params.featherRadius);
+            if (maskReady) m_skyGroundMaskSource = "guided-preview";
+        } else if (m_params.skyGroundMode == SkyGroundMask::AutoDetect) {
             QImage preview;
             if (loadMaskPreview(m_selectedReferenceFrame, preview)) {
                 maskReady = SkyGroundMask::autoDetectPreview(
@@ -1068,8 +1287,10 @@ void ProcessingWorker::run() {
             if (maskReady) m_skyGroundMaskSource = "user-mask";
         }
         if (!maskReady) {
-            m_errorString = m_params.skyGroundMode == SkyGroundMask::AutoDetect
-                ? "天地蒙版自动检测失败" : "无法加载用户蒙版";
+            m_errorString = editedMaskProvided
+                ? "修补后的天地蒙版尺寸或数据无效"
+                : m_params.skyGroundMode == SkyGroundMask::AutoDetect
+                    ? "天地蒙版自动检测失败" : "无法加载用户蒙版";
             return;
         }
         const double maskSum = std::accumulate(mask.begin(), mask.end(), 0.0);

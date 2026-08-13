@@ -63,6 +63,31 @@ public:
                              std::vector<uint8_t>& mask, int featherRadius = 0);
 
     /**
+     * @brief Use rough user-painted ground hints to refine an automatic mask.
+     *
+     * The hints are markers, not final mask pixels. A marker-controlled
+     * watershed follows colour/luminance ridges in the rendered preview so a
+     * loose stroke over a missed mountain or building produces an edge-fitted
+     * binary mask. All inputs share the preview dimensions.
+     */
+    static bool refineWithGroundHints(
+        const QImage& preview, const std::vector<uint8_t>& initialMask,
+        const std::vector<uint8_t>& groundHints, int width, int height,
+        std::vector<uint8_t>& refinedMask);
+
+    /**
+     * @brief Resize a hard edited mask and apply the requested output feather.
+     *
+     * Interactive edits stay at bounded preview resolution. Formal processing
+     * calls this once to reproduce them at the RAW dimensions without keeping
+     * a full-resolution editable mask resident in the UI.
+     */
+    static bool prepareEditedMask(
+        const std::vector<uint8_t>& source, int sourceWidth, int sourceHeight,
+        int targetWidth, int targetHeight, std::vector<uint8_t>& mask,
+        int featherRadius = 0);
+
+    /**
      * @brief 应用羽化到蒙版边缘
      *
      * 对蒙版边缘 ±featherRadius 内做高斯模糊平滑。

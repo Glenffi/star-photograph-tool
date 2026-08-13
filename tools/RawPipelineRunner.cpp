@@ -30,6 +30,11 @@ QStringList rawFiles(const QString& directory) {
         "nef", "cr2", "cr3", "arw", "dng", "raw", "orf", "raf", "pef", "rw2"
     };
     QStringList files;
+    // QDirIterator treats an empty path as the current working directory.
+    // Master-only calibration deliberately leaves the corresponding RAW
+    // directory empty, so returning here prevents unrelated fixtures from
+    // being pulled into a run.
+    if (directory.trimmed().isEmpty()) return files;
     QDirIterator iterator(directory, QDir::Files, QDirIterator::Subdirectories);
     while (iterator.hasNext()) {
         const QString path = iterator.next();
@@ -138,6 +143,25 @@ int main(int argc, char* argv[]) {
     const QCommandLineOption biasDirectoryOption(
         "bias-dir", "Directory containing Bias RAW frames.",
         "directory");
+    const QCommandLineOption darkFlatDirectoryOption(
+        "dark-flat-dir",
+        "Directory containing Dark Flat RAW frames matched to Flat exposure.",
+        "directory");
+    const QCommandLineOption masterDarkOption(
+        "master-dark", "Reusable StarProcessor Master Dark (.spmaster).",
+        "path");
+    const QCommandLineOption masterFlatOption(
+        "master-flat", "Reusable normalized Master Flat (.spmaster).",
+        "path");
+    const QCommandLineOption masterBiasOption(
+        "master-bias", "Reusable StarProcessor Master Bias (.spmaster).",
+        "path");
+    const QCommandLineOption masterDarkFlatOption(
+        "master-dark-flat",
+        "Reusable StarProcessor Master Dark Flat (.spmaster).", "path");
+    const QCommandLineOption saveGeneratedMastersOption(
+        "save-generated-masters",
+        "Save masters generated from RAW calibration groups under the output directory.");
     const QCommandLineOption timelapseWindowOption(
         "timelapse-window", "Temporal window size: 3 or 5.", "count", "5");
     const QCommandLineOption timelapseStrengthOption(
@@ -255,6 +279,9 @@ int main(int argc, char* argv[]) {
                        startIndexOption, singleOption,
                        timelapseOption, darkDirectoryOption,
                        flatDirectoryOption, biasDirectoryOption,
+                       darkFlatDirectoryOption,
+                       masterDarkOption, masterFlatOption, masterBiasOption,
+                       masterDarkFlatOption, saveGeneratedMastersOption,
                        timelapseWindowOption,
                        timelapseStrengthOption,
                        timelapseMotionProtectionOption,
@@ -389,8 +416,16 @@ int main(int argc, char* argv[]) {
     const QString darkDirectory = parser.value(darkDirectoryOption);
     const QString flatDirectory = parser.value(flatDirectoryOption);
     const QString biasDirectory = parser.value(biasDirectoryOption);
+    const QString darkFlatDirectory = parser.value(darkFlatDirectoryOption);
+    const QString masterDarkPath = parser.value(masterDarkOption);
+    const QString masterFlatPath = parser.value(masterFlatOption);
+    const QString masterBiasPath = parser.value(masterBiasOption);
+    const QString masterDarkFlatPath = parser.value(masterDarkFlatOption);
     const bool deepSkyCalibration = !darkDirectory.isEmpty() ||
-        !flatDirectory.isEmpty() || !biasDirectory.isEmpty();
+        !flatDirectory.isEmpty() || !biasDirectory.isEmpty() ||
+        !darkFlatDirectory.isEmpty() || !masterDarkPath.isEmpty() ||
+        !masterFlatPath.isEmpty() || !masterBiasPath.isEmpty() ||
+        !masterDarkFlatPath.isEmpty();
     const bool timelapseProtectGround =
         !parser.isSet(timelapseNoGroundOption);
     bool timelapseWindowOk = false;
@@ -414,17 +449,30 @@ int main(int argc, char* argv[]) {
     const int groundDetailStrength =
         parser.value(groundDetailOption).toInt(&groundDetailOk);
     const QString method = parser.value(methodOption).toLower();
-    if (deepSkyCalibration &&
-        (darkDirectory.isEmpty() || flatDirectory.isEmpty() ||
-         biasDirectory.isEmpty())) {
-        std::cerr << "Deep-sky calibration requires --dark-dir, --flat-dir, "
-                     "and --bias-dir together.\n";
+    const auto directoryExists = [](const QString& path) {
+        return path.isEmpty() || QDir(path).exists();
+    };
+    if (!directoryExists(darkDirectory) ||
+        !directoryExists(flatDirectory) ||
+        !directoryExists(biasDirectory) ||
+        !directoryExists(darkFlatDirectory)) {
+        std::cerr << "Every specified calibration RAW directory must exist.\n";
         return 2;
     }
-    if (deepSkyCalibration &&
-        (!QDir(darkDirectory).exists() || !QDir(flatDirectory).exists() ||
-         !QDir(biasDirectory).exists())) {
-        std::cerr << "Every Dark, Flat, and Bias directory must exist.\n";
+    const auto masterExists = [](const QString& path) {
+        return path.isEmpty() || QFileInfo(path).isFile();
+    };
+    if (!masterExists(masterDarkPath) || !masterExists(masterFlatPath) ||
+        !masterExists(masterBiasPath) || !masterExists(masterDarkFlatPath)) {
+        std::cerr << "Every specified .spmaster file must exist.\n";
+        return 2;
+    }
+    if ((!darkDirectory.isEmpty() && !masterDarkPath.isEmpty()) ||
+        (!flatDirectory.isEmpty() && !masterFlatPath.isEmpty()) ||
+        (!biasDirectory.isEmpty() && !masterBiasPath.isEmpty()) ||
+        (!darkFlatDirectory.isEmpty() && !masterDarkFlatPath.isEmpty())) {
+        std::cerr << "Choose either a RAW group or an imported Master for each "
+                     "calibration role, not both.\n";
         return 2;
     }
     if (deepSkyCalibration &&
@@ -532,11 +580,18 @@ int main(int argc, char* argv[]) {
         ? rawFiles(flatDirectory) : QStringList();
     const QStringList biasFrames = deepSkyCalibration
         ? rawFiles(biasDirectory) : QStringList();
-    if (deepSkyCalibration &&
-        (darkFrames.size() < 3 || flatFrames.size() < 3 ||
-         biasFrames.size() < 3)) {
-        std::cerr << "Deep-sky calibration requires at least three RAW files "
-                     "in each Dark, Flat, and Bias directory.\n";
+    const QStringList darkFlatFrames = deepSkyCalibration
+        ? rawFiles(darkFlatDirectory) : QStringList();
+    const auto rawGroupTooSmall = [](const QString& directory,
+                                     const QStringList& frames) {
+        return !directory.isEmpty() && frames.size() < 3;
+    };
+    if (rawGroupTooSmall(darkDirectory, darkFrames) ||
+        rawGroupTooSmall(flatDirectory, flatFrames) ||
+        rawGroupTooSmall(biasDirectory, biasFrames) ||
+        rawGroupTooSmall(darkFlatDirectory, darkFlatFrames)) {
+        std::cerr << "Every specified calibration RAW group requires at least "
+                     "three files.\n";
         return 2;
     }
 
@@ -582,6 +637,13 @@ int main(int argc, char* argv[]) {
     params.darkFramePaths = darkFrames;
     params.flatFramePaths = flatFrames;
     params.biasFramePaths = biasFrames;
+    params.darkFlatFramePaths = darkFlatFrames;
+    params.masterDarkPath = masterDarkPath;
+    params.masterFlatPath = masterFlatPath;
+    params.masterBiasPath = masterBiasPath;
+    params.masterDarkFlatPath = masterDarkFlatPath;
+    params.saveGeneratedMasters =
+        parser.isSet(saveGeneratedMastersOption);
     params.timelapseWindowSize = timelapseWindow;
     params.timelapseStrength = timelapseStrength;
     params.timelapseMotionProtection = timelapseMotionProtection;
@@ -673,7 +735,7 @@ int main(int argc, char* argv[]) {
     worker.wait();
 
     QJsonObject report;
-    report["schemaVersion"] = 17;
+    report["schemaVersion"] = 18;
     report["toolVersion"] = QCoreApplication::applicationVersion();
     report["generatedAt"] = QDateTime::currentDateTimeUtc().toString(Qt::ISODate);
     report["input"] = input;
@@ -689,6 +751,16 @@ int main(int argc, char* argv[]) {
     report["darkFrames"] = darkFrames.size();
     report["flatFrames"] = flatFrames.size();
     report["biasFrames"] = biasFrames.size();
+    report["darkFlatFrames"] = darkFlatFrames.size();
+    report["masterDark"] = masterDarkPath;
+    report["masterFlat"] = masterFlatPath;
+    report["masterBias"] = masterBiasPath;
+    report["masterDarkFlat"] = masterDarkFlatPath;
+    QJsonArray generatedMasters;
+    for (const QString& path : worker.generatedMasterFiles()) {
+        generatedMasters.append(path);
+    }
+    report["generatedMasters"] = generatedMasters;
     report["calibratedLightFrames"] = worker.calibratedLightFrameCount();
     report["calibrationClippedLowPixels"] = QString::number(
         worker.calibrationClippedLowPixels());

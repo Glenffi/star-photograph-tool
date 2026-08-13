@@ -3,14 +3,18 @@
 #include <QWidget>
 #include <QImage>
 #include <QThreadPool>
+#include <QVector>
 
 #include <atomic>
+#include <cstdint>
+#include <vector>
 
 class QScrollArea;
 class QLabel;
 class QPushButton;
 class QTimer;
 class QButtonGroup;
+class QSlider;
 
 class PreviewPanel : public QWidget {
     Q_OBJECT
@@ -50,6 +54,11 @@ public:
 
     void setMaskOverlay(const std::vector<uint8_t>& mask, int w, int h);
     void clearMaskOverlay();
+    bool hasEditedMask() const;
+    bool maskRefinementActive() const { return m_maskRefinementActive; }
+    const std::vector<uint8_t>& editedMask() const { return m_editedMask; }
+    int editedMaskWidth() const { return m_editedMaskWidth; }
+    int editedMaskHeight() const { return m_editedMaskHeight; }
 
     QImage currentImage() const;
 
@@ -65,6 +74,9 @@ signals:
                             int iso, double exposureTime, double aperture,
                             int focalLength);
     void sourcePreviewFailed(const QString& filePath);
+    void editedMaskChanged();
+    void maskRefinementStarted();
+    void maskRefinementFinished(bool success);
 
 protected:
     void wheelEvent(QWheelEvent* event) override;
@@ -78,6 +90,8 @@ private slots:
     void onZoomIn();
     void onZoomOut();
     void onViewModeChanged(int id);
+    void undoGroundHint();
+    void resetGroundHints();
 
 private:
     void setupUI();
@@ -92,6 +106,15 @@ private:
     double fitZoomForViewport() const;
     bool imageSampleAt(const QPoint& labelPosition, const QImage*& image,
                        int& x, int& y) const;
+    bool maskPositionAt(const QPoint& labelPosition, QPoint& maskPoint) const;
+    bool hasMaskData() const;
+    void rebuildMaskOverlay();
+    void rebuildGroundHints();
+    void paintGroundHintSegment(const QPoint& from, const QPoint& to,
+                                int radius);
+    void startMaskRefinement();
+    void setMaskRefinementBusy(bool busy);
+    void scheduleMaskDisplayRefresh();
     double maximumSafeZoom() const;
     const QImage& displayedImage() const;
     void resetComparison();
@@ -118,6 +141,13 @@ private:
     QPushButton* m_zoomInBtn = nullptr;
     QPushButton* m_zoomOutBtn = nullptr;
     QPushButton* m_resultBtn = nullptr;
+    QWidget* m_maskEditControls = nullptr;
+    QPushButton* m_maskBrushBtn = nullptr;
+    QPushButton* m_maskUndoBtn = nullptr;
+    QPushButton* m_maskResetBtn = nullptr;
+    QPushButton* m_maskDoneBtn = nullptr;
+    QSlider* m_maskBrushSize = nullptr;
+    QLabel* m_maskBrushSizeLabel = nullptr;
     QWidget* m_compareControl = nullptr;
     QButtonGroup* m_viewModeGroup = nullptr;
     QPushButton* m_beforeBtn = nullptr;
@@ -154,7 +184,25 @@ private:
 
     // 蒙版叠加
     QImage m_maskOverlay;
+    QImage m_groundHintOverlay;
     bool m_maskOverlayVisible = false;
+    struct GroundHintStroke {
+        QVector<QPoint> points;
+        int radius = 0;
+    };
+    std::vector<uint8_t> m_initialMask;
+    std::vector<uint8_t> m_editedMask;
+    std::vector<uint8_t> m_groundHints;
+    QVector<GroundHintStroke> m_groundHintStrokes;
+    GroundHintStroke m_activeGroundHintStroke;
+    int m_editedMaskWidth = 0;
+    int m_editedMaskHeight = 0;
+    bool m_maskEditingActive = false;
+    bool m_maskHasUserEdits = false;
+    bool m_maskPainting = false;
+    bool m_maskRefinementActive = false;
+    bool m_maskDisplayRefreshPending = false;
+    uint64_t m_maskRefinementGeneration = 0;
 
     QThreadPool m_previewPool;
     std::atomic<uint64_t> m_previewGeneration{0};

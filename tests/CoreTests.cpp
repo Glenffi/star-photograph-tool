@@ -1,6 +1,7 @@
 #include "core/ImageAligner.h"
 #include "core/ImageBufferUtils.h"
 #include "core/ImageExporter.h"
+#include "core/MasterFrameIO.h"
 #include "core/MinimumFilter.h"
 #include "core/AutoOptimizeEngine.h"
 #include "core/DeepSkyCalibrationPreflight.h"
@@ -310,6 +311,28 @@ void testRawCalibration() {
               std::abs(masterValue[0] - 100.0f) < 1e-6f,
           "Five-frame calibration masters should reject one extreme sample");
 
+    RawCalibrationEngine::MeanAccumulator transactionalMaster(2);
+    check(transactionalMaster.add(std::vector<float>{10.0f, 20.0f}) &&
+              !transactionalMaster.add(std::vector<float>{30.0f, NAN}) &&
+              transactionalMaster.frameCount() == 1,
+          "A non-finite master frame should be rejected transactionally");
+    std::vector<float> transactionalMean;
+    check(transactionalMaster.finish(transactionalMean) &&
+              transactionalMean == std::vector<float>({10.0f, 20.0f}),
+          "A rejected float frame must not partially alter the master accumulator");
+
+    std::vector<float> invalidFinalFlat = {1.0f, 1.0f, 1.0f, NAN};
+    const std::vector<float> preservedInvalidFlat = invalidFinalFlat;
+    check(!RawCalibrationEngine::finalizeMasterFlat(
+              invalidFinalFlat, 2, 2) &&
+              std::equal(invalidFinalFlat.begin(), invalidFinalFlat.end(),
+                         preservedInvalidFlat.begin(),
+                         [](float first, float second) {
+                             return (std::isnan(first) && std::isnan(second)) ||
+                                 first == second;
+                         }),
+          "Invalid Master Flat finalization should fail without modifying input");
+
     constexpr int width = 4;
     constexpr int height = 4;
     constexpr size_t pixelCount = static_cast<size_t>(width) * height;
@@ -384,6 +407,217 @@ void testRawCalibration() {
     check(!RawCalibrationEngine::compatible(light, incompatible, reason) &&
               reason == "ISO/gain differs",
           "Calibration frames with a different ISO/gain should be rejected");
+
+    // A long-exposure Flat may use a matching Dark Flat instead of Bias. The
+    // offset includes both the sensor pedestal and Flat-exposure dark current.
+    RawImageLoader::CfaImageData longFlat = geometry;
+    longFlat.exposureTime = 2.0;
+    constexpr float darkFlatOffset = 130.0f;
+    for (int y = 0; y < height; ++y) {
+        for (int x = 0; x < width; ++x) {
+            const size_t pixel = static_cast<size_t>(y) * width + x;
+            const size_t phase = static_cast<size_t>(
+                (y & 1) * 2 + (x & 1));
+            longFlat.data[pixel] = static_cast<uint16_t>(std::lround(
+                darkFlatOffset + phaseLevels[phase] * response[pixel]));
+        }
+    }
+    std::vector<float> darkFlat(pixelCount, darkFlatOffset);
+    RawCalibrationEngine::MasterFrame masterDarkFlat;
+    check(RawCalibrationEngine::createMasterFrame(
+              RawCalibrationEngine::MasterRole::DarkFlat, longFlat,
+              darkFlat, false, masterDarkFlat),
+          "A valid CFA Dark Flat master should preserve its sensor metadata");
+    std::vector<float> darkFlatNormalized;
+    check(RawCalibrationEngine::normalizeFlat(
+              longFlat, masterDarkFlat, darkFlatNormalized, nullptr,
+              &reason) &&
+              RawCalibrationEngine::finalizeMasterFlat(
+                  darkFlatNormalized, width, height),
+          "A matching Master Dark Flat should calibrate a long Flat");
+    check(std::equal(darkFlatNormalized.begin(), darkFlatNormalized.end(),
+                     masterFlat.begin(),
+                     [](float first, float second) {
+                         return std::abs(first - second) < 1e-5f;
+                     }),
+          "Bias and Dark Flat offset subtraction should produce the same flat response");
+
+    RawCalibrationEngine::MasterFrame wrongExposureDarkFlat = masterDarkFlat;
+    wrongExposureDarkFlat.exposureTime = 1.0;
+    std::vector<float> preservedOutput = {42.0f};
+    check(!RawCalibrationEngine::normalizeFlat(
+              longFlat, wrongExposureDarkFlat, preservedOutput, nullptr,
+              &reason) &&
+              reason == "Master Dark Flat exposure differs from Flat" &&
+              preservedOutput == std::vector<float>{42.0f},
+          "Rejected Dark Flat metadata must not overwrite an existing output buffer");
+
+    // Imported masters carry their own geometry/CFA metadata. A calibrated,
+    // normalized Master Flat removes the runtime dependency on Master Bias.
+    RawCalibrationEngine::MasterFrame importedDark;
+    RawCalibrationEngine::MasterFrame importedFlat;
+    check(RawCalibrationEngine::createMasterFrame(
+              RawCalibrationEngine::MasterRole::Dark, light, dark, false,
+              importedDark) &&
+              RawCalibrationEngine::createMasterFrame(
+                  RawCalibrationEngine::MasterRole::Flat, longFlat,
+                  masterFlat, true, importedFlat),
+          "Imported Dark and normalized Flat masters should be representable");
+    RawCalibrationEngine::MasterFrames importedMasters;
+    check(RawCalibrationEngine::installMasterFrame(
+              light, importedDark, importedMasters, reason) &&
+              RawCalibrationEngine::installMasterFrame(
+                  light, importedFlat, importedMasters, reason) &&
+              importedMasters.complete() && importedMasters.bias.empty(),
+          "Imported Master Dark plus Master Flat should form a complete calibration set");
+    RawImageLoader::CfaImageData importedCalibrated;
+    check(RawCalibrationEngine::calibrateLight(
+              light, importedMasters, importedCalibrated) &&
+              importedCalibrated.data == calibrated.data,
+          "Imported masters should calibrate Light identically to generated masters");
+
+    RawCalibrationEngine::MasterFrame correctedDark = importedDark;
+    correctedDark.darkIncludesBiasPedestal = false;
+    std::fill(correctedDark.data.begin(), correctedDark.data.end(), 10.0f);
+    RawCalibrationEngine::MasterFrame importedBias;
+    RawImageLoader::CfaImageData shortBias = geometry;
+    shortBias.exposureTime = 0.001;
+    check(RawCalibrationEngine::createMasterFrame(
+              RawCalibrationEngine::MasterRole::Bias, shortBias, bias,
+              false, importedBias),
+          "An imported Master Bias should retain short-exposure metadata");
+    RawCalibrationEngine::MasterFrames correctedDarkMasters;
+    check(RawCalibrationEngine::installMasterFrame(
+              light, correctedDark, correctedDarkMasters, reason) &&
+              RawCalibrationEngine::installMasterFrame(
+                  light, importedBias, correctedDarkMasters, reason) &&
+              RawCalibrationEngine::installMasterFrame(
+                  light, importedFlat, correctedDarkMasters, reason) &&
+              correctedDarkMasters.complete(),
+          "A bias-corrected Master Dark should require and accept Master Bias");
+    RawImageLoader::CfaImageData correctedDarkCalibrated;
+    check(RawCalibrationEngine::calibrateLight(
+              light, correctedDarkMasters, correctedDarkCalibrated) &&
+              correctedDarkCalibrated.data == calibrated.data,
+          "Bias-corrected Master Dark plus Bias should subtract the same total offset");
+
+    RawCalibrationEngine::MasterFrames missingImportedBias;
+    check(RawCalibrationEngine::installMasterFrame(
+              light, correctedDark, missingImportedBias, reason) &&
+              RawCalibrationEngine::installMasterFrame(
+                  light, importedFlat, missingImportedBias, reason) &&
+              !missingImportedBias.complete(),
+          "A bias-corrected Master Dark must not be complete without Master Bias");
+
+    RawCalibrationEngine::MasterFrame wrongCfaMaster = importedFlat;
+    wrongCfaMaster.cfaPattern = {2, 1, 1, 0};
+    const RawCalibrationEngine::MasterFrames preservedMasters =
+        importedMasters;
+    check(!RawCalibrationEngine::installMasterFrame(
+              light, wrongCfaMaster, importedMasters, reason) &&
+              reason == "Bayer pattern differs" &&
+              importedMasters.flat == preservedMasters.flat &&
+              importedMasters.dark == preservedMasters.dark,
+          "A mismatched imported master must not mutate the installed master set");
+
+    RawCalibrationEngine::MasterFrame invalidGeometryMaster = importedFlat;
+    invalidGeometryMaster.leftMargin = invalidGeometryMaster.rawWidth;
+    check(!RawCalibrationEngine::installMasterFrame(
+              light, invalidGeometryMaster, importedMasters, reason) &&
+              reason == "master frame is incomplete",
+          "An imported master whose active area exceeds RAW bounds should be rejected");
+
+    RawCalibrationEngine::MasterFrame unnormalizedFlat = importedFlat;
+    unnormalizedFlat.normalizedFlat = false;
+    check(!RawCalibrationEngine::installMasterFrame(
+              light, unnormalizedFlat, importedMasters, reason) &&
+              reason == "Master Flat is not calibrated and normalized",
+          "An imported Master Flat must declare completed CFA-phase normalization");
+}
+
+void testMasterFrameIO() {
+    constexpr int width = 4;
+    constexpr int height = 4;
+    RawImageLoader::CfaImageData source;
+    source.width = width;
+    source.height = height;
+    source.rawWidth = 6;
+    source.rawHeight = 6;
+    source.leftMargin = 1;
+    source.topMargin = 1;
+    source.iso = 800;
+    source.exposureTime = 30.0;
+    source.cameraModel = "Synthetic Master Camera";
+    source.cfaPattern = {0, 1, 1, 2};
+    source.saturation = 15000;
+    source.data.assign(static_cast<size_t>(width) * height, 1000);
+    std::vector<float> pixels(source.data.size());
+    for (size_t index = 0; index < pixels.size(); ++index) {
+        pixels[index] = 120.5f + static_cast<float>(index) * 0.25f;
+    }
+    RawCalibrationEngine::MasterFrame original;
+    check(RawCalibrationEngine::createMasterFrame(
+              RawCalibrationEngine::MasterRole::Dark, source, pixels,
+              false, original),
+          "A synthetic master should be representable before serialization");
+    original.darkIncludesBiasPedestal = false;
+
+    QTemporaryDir directory;
+    check(directory.isValid(), "Temporary master directory should be available");
+    if (!directory.isValid()) return;
+    const QString path = directory.filePath("master-dark.spmaster");
+    QString error;
+    check(MasterFrameIO::save(path, original, error),
+          "A complete master should serialize atomically");
+    RawCalibrationEngine::MasterFrame header;
+    check(MasterFrameIO::loadHeader(path, header, error) &&
+              header.data.empty() && header.role == original.role &&
+              header.width == width && header.height == height,
+          "Header-only master inspection should avoid loading its pixel payload");
+    RawCalibrationEngine::MasterFrame loaded;
+    check(MasterFrameIO::load(path, loaded, error) &&
+              loaded.role == original.role &&
+              loaded.cameraModel == original.cameraModel &&
+              loaded.cfaPattern == original.cfaPattern &&
+              !loaded.darkIncludesBiasPedestal && loaded.data == original.data,
+          "A master file should preserve pixels and calibration metadata exactly");
+
+    QFile damagedHeader(path);
+    check(damagedHeader.open(QIODevice::ReadWrite) && damagedHeader.seek(13),
+          "A saved master fixture should expose its authenticated flags byte");
+    if (damagedHeader.isOpen()) {
+        const QByteArray byte = damagedHeader.read(1);
+        check(byte.size() == 1 && damagedHeader.seek(13) &&
+                  damagedHeader.write(QByteArray(
+                      1, static_cast<char>(byte[0] ^ 0x02))) == 1,
+              "Header corruption test should flip the Dark Bias-state flag");
+        damagedHeader.close();
+        RawCalibrationEngine::MasterFrame rejectedHeader = original;
+        check(!MasterFrameIO::loadHeader(path, rejectedHeader, error) &&
+                  error.contains(QString::fromUtf8("元数据校验失败")) &&
+                  rejectedHeader.data == original.data,
+              "Header-only preflight must reject a changed calibration-state flag");
+        check(MasterFrameIO::save(path, original, error),
+              "The valid fixture should be restorable after header corruption");
+    }
+
+    QFile damaged(path);
+    check(damaged.open(QIODevice::ReadWrite),
+          "A saved master fixture should be reopenable for corruption testing");
+    if (damaged.isOpen()) {
+        check(damaged.seek(damaged.size() - 33),
+              "Corruption test should reach the final payload byte");
+        const QByteArray byte = damaged.read(1);
+        check(byte.size() == 1 && damaged.seek(damaged.pos() - 1) &&
+                  damaged.write(QByteArray(1, static_cast<char>(byte[0] ^ 0x01))) == 1,
+              "Corruption test should alter one payload byte");
+        damaged.close();
+        RawCalibrationEngine::MasterFrame rejected = original;
+        check(!MasterFrameIO::load(path, rejected, error) &&
+                  error.contains(QString::fromUtf8("校验失败")) &&
+                  rejected.data == original.data,
+              "A damaged master must fail checksum validation transactionally");
+    }
 }
 
 void testDeepSkyCalibrationPreflight() {
@@ -427,6 +661,111 @@ void testDeepSkyCalibrationPreflight() {
           "Matched deep-sky metadata should pass calibration preflight");
     check(validReport.warningMessages().size() == 3,
           "Small calibration sets should produce one recommendation per role");
+
+    std::vector<Preflight::FrameRecord> darkFlatValid;
+    darkFlatValid.push_back(valid[0]);
+    darkFlatValid.push_back(valid[1]);
+    for (const Preflight::FrameRecord& item : valid) {
+        if (item.role == Preflight::Role::Dark ||
+            item.role == Preflight::Role::Flat) {
+            darkFlatValid.push_back(item);
+        }
+    }
+    for (int i = 0; i < 3; ++i) {
+        darkFlatValid.push_back(frame(
+            QString("/tmp/dark-flat-%1.cr2").arg(i),
+            Preflight::Role::DarkFlat, 1600, 0.25));
+    }
+    const Preflight::Report darkFlatReport =
+        Preflight::validate(darkFlatValid);
+    check(!darkFlatReport.hasErrors() && darkFlatReport.darkFlatCount == 3,
+          "A matched Dark Flat group should replace Bias during preflight");
+
+    std::vector<Preflight::FrameRecord> wrongDarkFlat = darkFlatValid;
+    for (Preflight::FrameRecord& item : wrongDarkFlat) {
+        if (item.role == Preflight::Role::DarkFlat) {
+            item.metadata.exposureTime = 0.5;
+        }
+    }
+    const Preflight::Report wrongDarkFlatReport =
+        Preflight::validate(wrongDarkFlat);
+    check(wrongDarkFlatReport.hasErrors() &&
+              wrongDarkFlatReport.userMessage().contains(
+                  QString::fromUtf8("Dark Flat 曝光不匹配")),
+          "Dark Flat exposure must match the Flat group");
+
+    std::vector<Preflight::FrameRecord> mixedFlatExposure = darkFlatValid;
+    for (Preflight::FrameRecord& item : mixedFlatExposure) {
+        if (item.role == Preflight::Role::Flat &&
+            item.path.endsWith(QStringLiteral("1.cr2"))) {
+            item.metadata.exposureTime = 0.5;
+            break;
+        }
+    }
+    const Preflight::Report mixedFlatExposureReport =
+        Preflight::validate(mixedFlatExposure);
+    check(mixedFlatExposureReport.hasErrors() &&
+              mixedFlatExposureReport.userMessage().contains(
+                  QString::fromUtf8("所有 Flat 曝光一致")),
+          "Dark Flat mode should reject mixed Flat exposure times");
+
+    std::vector<Preflight::FrameRecord> importedMasters = {
+        valid[0], valid[1],
+        frame("/tmp/master-dark.cr2", Preflight::Role::MasterDark,
+              1600, 30.0),
+        frame("/tmp/master-flat.cr2", Preflight::Role::MasterFlat,
+              1600, 0.25)
+    };
+    const Preflight::Report importedMasterReport =
+        Preflight::validate(importedMasters);
+    check(!importedMasterReport.hasErrors() &&
+              importedMasterReport.masterDarkCount == 1 &&
+              importedMasterReport.masterFlatCount == 1 &&
+              importedMasterReport.biasCount == 0,
+          "Master Dark plus normalized Master Flat should not require raw calibration groups");
+
+    std::vector<Preflight::FrameRecord> correctedMasterWithoutBias =
+        importedMasters;
+    for (Preflight::FrameRecord& item : correctedMasterWithoutBias) {
+        if (item.role == Preflight::Role::MasterDark) {
+            item.masterDarkIncludesBiasPedestal = false;
+        }
+    }
+    const Preflight::Report correctedMasterWithoutBiasReport =
+        Preflight::validate(correctedMasterWithoutBias);
+    check(correctedMasterWithoutBiasReport.hasErrors() &&
+              correctedMasterWithoutBiasReport.userMessage().contains(
+                  QString::fromUtf8("已减 Bias 的 Master Dark")),
+          "Preflight should require Bias for a bias-corrected imported Master Dark");
+
+    std::vector<Preflight::FrameRecord> mixedSources = importedMasters;
+    for (int i = 0; i < 3; ++i) {
+        mixedSources.push_back(frame(
+            QString("/tmp/mixed-dark-%1.cr2").arg(i),
+            Preflight::Role::Dark, 1600, 30.0));
+    }
+    const Preflight::Report mixedSourcesReport =
+        Preflight::validate(mixedSources);
+    check(mixedSourcesReport.hasErrors() &&
+              mixedSourcesReport.userMessage().contains(
+                  QString::fromUtf8("原片组和 Master Dark 不能同时使用")),
+          "Raw Dark frames and an imported Master Dark must be mutually exclusive");
+
+    std::vector<Preflight::FrameRecord> missingFlatOffset;
+    missingFlatOffset.push_back(valid[0]);
+    missingFlatOffset.push_back(valid[1]);
+    for (const Preflight::FrameRecord& item : valid) {
+        if (item.role == Preflight::Role::Dark ||
+            item.role == Preflight::Role::Flat) {
+            missingFlatOffset.push_back(item);
+        }
+    }
+    const Preflight::Report missingOffsetReport =
+        Preflight::validate(missingFlatOffset);
+    check(missingOffsetReport.hasErrors() &&
+              missingOffsetReport.userMessage().contains(
+                  QString::fromUtf8("Bias 或与 Flat 匹配的 Dark Flat")),
+          "Building Master Flat should require one unambiguous offset source");
 
     std::vector<Preflight::FrameRecord> incompatible = valid;
     for (Preflight::FrameRecord& item : incompatible) {
@@ -2554,8 +2893,70 @@ void testSkyGroundHorizonDetection() {
         check(alphaMask.save(path), "Alpha mask fixture should be writable");
         check(SkyGroundMask::loadUserMask(path, 2, 1, mask, 0) &&
                   mask == std::vector<uint8_t>({0, 255}),
-              "Transparent user-mask pixels should mean ground, not sky");
+                  "Transparent user-mask pixels should mean ground, not sky");
     }
+
+    // A rough ground hint is not copied into the final mask as a painted blob.
+    // It seeds an edge-aware segmentation that should recover the real ridge.
+    constexpr int guidedWidth = 180;
+    constexpr int guidedHeight = 120;
+    QImage guidedPreview(guidedWidth, guidedHeight, QImage::Format_RGB888);
+    std::vector<uint8_t> initialMask(
+        static_cast<size_t>(guidedWidth) * guidedHeight, 0);
+    std::vector<uint8_t> groundHints(initialMask.size(), 0);
+    for (int y = 0; y < guidedHeight; ++y) {
+        uchar* row = guidedPreview.scanLine(y);
+        for (int x = 0; x < guidedWidth; ++x) {
+            const int ridge = 57 + qRound(6.0 * std::sin(x * 0.055));
+            const bool sky = y < ridge;
+            row[x * 3] = static_cast<uchar>(sky ? 112 : 28);
+            row[x * 3 + 1] = static_cast<uchar>(sky ? 133 : 40);
+            row[x * 3 + 2] = static_cast<uchar>(sky ? 151 : 31);
+            // Deliberately miss about 18 pixels of the mountain in the initial
+            // automatic result.
+            initialMask[static_cast<size_t>(y) * guidedWidth + x] =
+                y < ridge + 18 ? 255 : 0;
+        }
+    }
+    for (int y = 68; y <= 75; ++y) {
+        for (int x = 80; x <= 100; ++x) {
+            groundHints[static_cast<size_t>(y) * guidedWidth + x] = 255;
+        }
+    }
+    std::vector<uint8_t> refinedMask;
+    check(SkyGroundMask::refineWithGroundHints(
+              guidedPreview, initialMask, groundHints,
+              guidedWidth, guidedHeight, refinedMask) &&
+              refinedMask.size() == initialMask.size(),
+          "A rough ground hint should produce a complete refined mask");
+    if (refinedMask.size() == initialMask.size()) {
+        check(refinedMask[72U * guidedWidth + 90] == 0,
+              "Every painted ground hint must remain ground after refinement");
+        check(refinedMask[42U * guidedWidth + 90] == 255 &&
+                  refinedMask[62U * guidedWidth + 90] == 0,
+              "Guided refinement should snap the missed mountain to its image edge");
+        check(refinedMask[42U * guidedWidth + 8] ==
+                  initialMask[42U * guidedWidth + 8],
+              "Guided refinement should preserve distant unaffected regions");
+    }
+
+    const std::vector<uint8_t> smallHardMask = {
+        255, 255, 255, 255,
+        0, 0, 0, 0
+    };
+    std::vector<uint8_t> expandedMask;
+    check(SkyGroundMask::prepareEditedMask(
+              smallHardMask, 4, 2, 8, 4, expandedMask, 0) &&
+              expandedMask.size() == 32 &&
+              expandedMask.front() == 255 && expandedMask.back() == 0,
+          "An edited preview mask should resize without changing hard labels");
+    const std::vector<uint8_t> preservedMask = {17};
+    expandedMask = preservedMask;
+    check(!SkyGroundMask::prepareEditedMask(
+              smallHardMask, 4, 2,
+              std::numeric_limits<int>::max(), 2, expandedMask, 0) &&
+              expandedMask == preservedMask,
+          "Oversized edited-mask dimensions should fail transactionally");
 }
 
 void testUpdateManifest() {
@@ -2618,6 +3019,7 @@ int main(int argc, char* argv[]) {
     testMinimumFilter();
     testStacking();
     testRawCalibration();
+    testMasterFrameIO();
     testDeepSkyCalibrationPreflight();
     testTimelapseDenoise();
     testTemporalPhotometricSmoothing();

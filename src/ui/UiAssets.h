@@ -29,6 +29,10 @@ enum class Glyph {
     StarTrail,
     Timelapse,
     Eyedropper,
+    Brush,
+    Undo,
+    Reset,
+    Done,
     ChevronRight
 };
 
