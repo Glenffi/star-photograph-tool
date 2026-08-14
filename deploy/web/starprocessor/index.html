@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="StarProcessor 星空摄影 RAW 处理工具客户端下载">
+    <meta name="theme-color" content="#102321">
+    <title>StarProcessor 客户端下载</title>
+    <link rel="icon" href="assets/StarProcessor.png">
+    <link rel="stylesheet" href="assets/download.css">
+</head>
+<body>
+    <header class="hero" id="top">
+        <img class="hero__image" src="assets/app-workspace.png"
+             alt="StarProcessor 星空摄影处理工作台">
+        <div class="hero__veil" aria-hidden="true"></div>
+
+        <nav class="nav" aria-label="主导航">
+            <a class="brand" href="#top" aria-label="StarProcessor 首页">
+                <img src="assets/StarProcessor.png" alt="">
+                <span>StarProcessor</span>
+            </a>
+            <div class="nav__links">
+                <a href="#downloads">客户端下载</a>
+                <a href="https://github.com/Glenffi/star-photograph-tool/releases"
+                   target="_blank" rel="noreferrer">发布记录</a>
+            </div>
+        </nav>
+
+        <div class="hero__content">
+            <p class="kicker">星空摄影 RAW 处理工具</p>
+            <h1>StarProcessor</h1>
+            <p class="hero__lead">
+                从单张精修到银河、深空与天地分离堆栈，
+                在一个清晰的桌面工作流里完成。
+            </p>
+            <div class="hero__actions">
+                <a class="button button--primary" data-download="recommended"
+                   href="#downloads">下载当前版本</a>
+                <a class="button button--quiet" href="#workspace">查看工作台</a>
+            </div>
+            <div class="hero__meta" aria-live="polite">
+                <span data-version>v0.10.1</span>
+                <span>Windows 10/11 x64</span>
+                <span>macOS 14+ Apple Silicon</span>
+            </div>
+        </div>
+    </header>
+
+    <main>
+        <section class="download-section" id="downloads">
+            <div class="section-heading">
+                <div>
+                    <p class="section-index">01 / DOWNLOAD</p>
+                    <h2>选择你的客户端</h2>
+                </div>
+                <p class="section-copy">
+                    安装包由项目服务器直接提供，并与应用内自动更新使用同一份 SHA-256 清单。
+                </p>
+            </div>
+
+            <div class="download-grid">
+                <article class="download-item" data-platform-card="windows-x64">
+                    <div class="download-item__topline">
+                        <span class="platform-mark">WIN</span>
+                        <span class="recommendation" data-recommendation="windows-x64">推荐</span>
+                    </div>
+                    <h3>Windows</h3>
+                    <p>Windows 10 / 11 · x64 便携版</p>
+                    <div class="download-item__footer">
+                        <span data-size="windows-x64">约 54 MiB</span>
+                        <a class="button button--download"
+                           data-download="windows-x64"
+                           href="downloads/StarProcessor-Windows-x64-v0.10.1.zip">
+                            下载 ZIP <span aria-hidden="true">↓</span>
+                        </a>
+                    </div>
+                </article>
+
+                <article class="download-item" data-platform-card="macos-arm64">
+                    <div class="download-item__topline">
+                        <span class="platform-mark platform-mark--mac">MAC</span>
+                        <span class="recommendation" data-recommendation="macos-arm64">推荐</span>
+                    </div>
+                    <h3>macOS</h3>
+                    <p>macOS 14+ · Apple Silicon</p>
+                    <div class="download-item__footer">
+                        <span data-size="macos-arm64">约 24 MiB</span>
+                        <a class="button button--download"
+                           data-download="macos-arm64"
+                           href="downloads/StarProcessor-v0.10.1-macOS-arm64.dmg">
+                            下载 DMG <span aria-hidden="true">↓</span>
+                        </a>
+                    </div>
+                </article>
+            </div>
+
+            <div class="release-note">
+                <div>
+                    <p class="release-note__label">当前版本</p>
+                    <strong data-version>v0.10.1</strong>
+                </div>
+                <p data-release-notes>
+                    修复 Windows 更新包保存问题，并让更新网络遵循系统代理配置。
+                </p>
+                <time data-published-at datetime="2026-08-14">2026-08-14 发布</time>
+            </div>
+        </section>
+
+        <section class="capability-band" aria-label="主要工作流">
+            <div class="capability-band__inner">
+                <div>
+                    <span>01</span>
+                    <strong>银河星景</strong>
+                    <p>星空对齐、堆栈降噪与固定地景融合。</p>
+                </div>
+                <div>
+                    <span>02</span>
+                    <strong>深空校准</strong>
+                    <p>Light、Dark、Flat、Bias 与可复用 Master。</p>
+                </div>
+                <div>
+                    <span>03</span>
+                    <strong>精细收尾</strong>
+                    <p>降噪、曲线、色彩、缩星和 16-bit TIFF。</p>
+                </div>
+            </div>
+        </section>
+
+        <section class="workspace" id="workspace">
+            <div class="section-heading section-heading--workspace">
+                <div>
+                    <p class="section-index">02 / WORKSPACE</p>
+                    <h2>按拍摄任务开始，而不是从参数堆里迷路</h2>
+                </div>
+                <p class="section-copy">
+                    六类工作流分别准备素材要求和处理步骤，让第一次使用也能找到入口。
+                </p>
+            </div>
+            <figure class="workspace__figure">
+                <img src="assets/app-workspace.png"
+                     alt="StarProcessor 的六类星空摄影处理工作流">
+                <figcaption>StarProcessor 桌面工作台</figcaption>
+            </figure>
+        </section>
+    </main>
+
+    <footer>
+        <div class="footer__brand">
+            <img src="assets/StarProcessor.png" alt="">
+            <div>
+                <strong>StarProcessor</strong>
+                <span>MIT License · Windows + macOS</span>
+            </div>
+        </div>
+        <div class="footer__links">
+            <a href="https://github.com/Glenffi/star-photograph-tool"
+               target="_blank" rel="noreferrer">GitHub</a>
+            <a href="update.json">更新清单</a>
+            <a href="#top">返回顶部</a>
+        </div>
+    </footer>
+
+    <script src="assets/download.js" defer></script>
+</body>
+</html>

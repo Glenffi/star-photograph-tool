@@ -10,6 +10,12 @@
 
 Windows 的杀毒软件或文件索引器可能在下载刚结束时短暂保留临时文件句柄。客户端会先重试原子改名；仍失败时，复制到不覆盖已有文件的唯一名称，并对落盘结果重新校验字节数和 SHA-256。两种方式都失败时，对话框会显示目标路径和底层文件错误。
 
+公开下载页位于 `https://di.nexusgen.net/starprocessor/`。页面从同目录的 `update.json` 读取当前版本、更新说明、平台安装包、文件大小与下载地址，因此发布客户端后不需要同步修改 HTML。页面源码位于 `deploy/web/starprocessor`，独立部署命令为：
+
+```bash
+./scripts/publish-download-page.sh
+```
+
 当前平台键：
 
 | 平台键 | 安装包 |
@@ -43,7 +49,7 @@ Windows 的杀毒软件或文件索引器可能在下载刚结束时短暂保留
 
 ## 首次服务器配置
 
-服务器复用现有 Nginx 与 `di.nexusgen.net` 证书，不启动额外服务。将 [`deploy/nginx/starprocessor-updates.conf`](../deploy/nginx/starprocessor-updates.conf) 的两个 `location` 放入该域名的 HTTPS `server` 块，并在重载前执行：
+服务器复用现有 Nginx 与 `di.nexusgen.net` 证书，不启动额外服务。将 [`deploy/nginx/starprocessor-updates.conf`](../deploy/nginx/starprocessor-updates.conf) 的下载页、静态资源、清单和安装包 `location` 放入该域名的 HTTPS `server` 块，并在重载前执行：
 
 ```bash
 nginx -t
