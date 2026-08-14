@@ -58,6 +58,10 @@ uint64_t ProcessingMemoryEstimator::estimatePeakBytes(
     }
 
     // Decode/alignment keeps only a reference and current source frame resident.
+    // The eight-frame baseline also covers automatic chromatic-aberration
+    // estimation: RGB input, two uint16_t mono planes, two float blur planes,
+    // and the temporary corrected RGB never all coexist at their individual
+    // maxima.
     uint64_t alignmentPeak = 0;
     uint64_t alignmentFrameEquivalents =
         options.skyGroundSeparation ? 10ULL : 8ULL;

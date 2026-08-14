@@ -5,6 +5,8 @@
 #include <vector>
 #include "StarDetector.h"
 
+struct ChromaticAberrationModel;
+
 /**
  * @brief 图像对齐变换矩阵
  *
@@ -138,6 +140,17 @@ public:
                            std::vector<uint16_t>& dst);
 
     /**
+     * Applies geometric alignment and lateral chromatic correction in one
+     * interpolation pass. Green follows the ordinary inverse transform; red
+     * and blue add the model's small radial source-coordinate scale.
+     */
+    bool applyTransformRgbCorrected(
+        const std::vector<uint16_t>& src, int w, int h,
+        const AlignmentTransform& t,
+        const ChromaticAberrationModel& chromaticModel,
+        std::vector<uint16_t>& dst);
+
+    /**
      * @brief Apply the same inverse-mapped transform to an 8-bit mask.
      *
      * This keeps per-frame sky validity in the same coordinates as an aligned
@@ -150,10 +163,13 @@ public:
     /**
      * Finds a conservative axis-aligned rectangle covered by every accepted
      * source-to-reference transform. The result excludes resampling borders.
+     * When a chromatic model is provided, every active RGB channel is checked
+     * in source coordinates for both source frames and the reference frame.
      */
     bool commonValidBounds(const std::vector<AlignmentTransform>& transforms,
                            int width, int height,
-                           AlignmentBounds& bounds) const;
+                           AlignmentBounds& bounds,
+                           const ChromaticAberrationModel* chromaticModel = nullptr) const;
 
 private:
     bool triangleMatch(const std::vector<StarPoint>& refStars,

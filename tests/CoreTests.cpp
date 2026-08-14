@@ -1,6 +1,7 @@
 #include "core/ImageAligner.h"
 #include "core/ImageBufferUtils.h"
 #include "core/ImageExporter.h"
+#include "core/ChromaticAberrationCorrector.h"
 #include "core/MasterFrameIO.h"
 #include "core/MinimumFilter.h"
 #include "core/AutoOptimizeEngine.h"
@@ -1575,6 +1576,16 @@ void testRgbTransform() {
     check(!aligner.applyTransformRgb({1, 2, 3}, width, height, identity, transformed),
           "Interleaved RGB transform should reject a truncated buffer");
 
+    std::vector<uint16_t> green;
+    check(ImageBufferUtils::extractChannel(rgb, width, height, 1, green) &&
+              green == std::vector<uint16_t>({2, 5, 8, 11, 14, 17}),
+          "RGB channel extraction should preserve the requested channel");
+    const std::vector<uint16_t> preservedChannel = {42};
+    green = preservedChannel;
+    check(!ImageBufferUtils::extractChannel(rgb, width, height, 3, green) &&
+              green == preservedChannel,
+          "Invalid RGB channel extraction should leave output unchanged");
+
     const std::vector<uint8_t> mask = {0, 64, 128, 192, 224, 255};
     std::vector<uint8_t> transformedMask;
     check(aligner.applyTransformMask(
@@ -1636,6 +1647,173 @@ void testRgbTransform() {
     checkMaskMatchesImageTransform(
         projective,
         "Homography mask and image transforms should sample the same coordinates");
+}
+
+void testChromaticAberrationCorrection() {
+    constexpr int width = 640;
+    constexpr int height = 480;
+    constexpr double centerX = (width - 1) * 0.5;
+    constexpr double centerY = (height - 1) * 0.5;
+    constexpr double redScale = 1.0030;
+    constexpr double blueScale = 0.9975;
+
+    auto makeField = [&](double requestedRedScale,
+                         double requestedBlueScale,
+                         bool oneQuadrantOnly,
+                         double redOffsetX = 0.0,
+                         double redOffsetY = 0.0,
+                         double blueOffsetX = 0.0,
+                         double blueOffsetY = 0.0) {
+        std::vector<uint16_t> rgb(
+            static_cast<size_t>(width) * height * 3, 900);
+        auto addChannelStar = [&](int channel, double cx, double cy,
+                                  double peak) {
+            constexpr double sigma = 1.45;
+            constexpr int radius = 6;
+            for (int y = std::max(0, static_cast<int>(cy) - radius);
+                 y <= std::min(height - 1,
+                              static_cast<int>(cy) + radius); ++y) {
+                for (int x = std::max(0, static_cast<int>(cx) - radius);
+                     x <= std::min(width - 1,
+                                  static_cast<int>(cx) + radius); ++x) {
+                    const double dx = x - cx;
+                    const double dy = y - cy;
+                    const double signal = peak * std::exp(
+                        -(dx * dx + dy * dy) /
+                        (2.0 * sigma * sigma));
+                    const size_t index =
+                        (static_cast<size_t>(y) * width + x) * 3 + channel;
+                    rgb[index] = static_cast<uint16_t>(std::min(
+                        64000.0, rgb[index] + signal));
+                }
+            }
+        };
+
+        for (int y = 48; y < height - 40; y += 58) {
+            for (int x = 52; x < width - 40; x += 67) {
+                if (oneQuadrantOnly &&
+                    (x >= centerX || y >= centerY)) {
+                    continue;
+                }
+                const double dx = x - centerX;
+                const double dy = y - centerY;
+                addChannelStar(0, centerX + dx * requestedRedScale + redOffsetX,
+                               centerY + dy * requestedRedScale + redOffsetY,
+                               17000.0);
+                addChannelStar(1, x, y, 19000.0);
+                addChannelStar(2, centerX + dx * requestedBlueScale + blueOffsetX,
+                               centerY + dy * requestedBlueScale + blueOffsetY,
+                               16000.0);
+            }
+        }
+        return rgb;
+    };
+
+    std::vector<uint16_t> distorted = makeField(redScale, blueScale, false);
+    ChromaticAberrationModel model;
+    ChromaticAberrationStats stats;
+    check(ChromaticAberrationCorrector::estimate(
+              distorted, width, height, model, &stats),
+          "Chromatic-aberration estimation should accept valid RGB16");
+    check(model.correctRed && model.correctBlue && stats.red.reliable &&
+              stats.blue.reliable,
+          "A spatially covered radial RGB offset should pass reliability gates");
+    check(std::abs(model.redSourceScale - redScale) < 0.00045 &&
+              std::abs(model.blueSourceScale - blueScale) < 0.00045,
+          "Estimated radial channel scales should recover the synthetic lens model");
+
+    std::vector<uint16_t> corrected;
+    check(ChromaticAberrationCorrector::apply(
+              distorted, width, height, model, corrected) &&
+              corrected.size() == distorted.size(),
+          "Reliable chromatic correction should produce a complete RGB frame");
+    auto channelCentroid = [&](const std::vector<uint16_t>& image,
+                               int channel, double expectedX,
+                               double expectedY) {
+        double weightedX = 0.0;
+        double weightedY = 0.0;
+        double weight = 0.0;
+        for (int y = static_cast<int>(expectedY) - 7;
+             y <= static_cast<int>(expectedY) + 7; ++y) {
+            for (int x = static_cast<int>(expectedX) - 7;
+                 x <= static_cast<int>(expectedX) + 7; ++x) {
+                const size_t base =
+                    (static_cast<size_t>(y) * width + x) * 3 + channel;
+                const double signal = std::max(
+                    0.0, static_cast<double>(image[base]) - 900.0);
+                weightedX += signal * x;
+                weightedY += signal * y;
+                weight += signal;
+            }
+        }
+        return std::array<double, 2>{weightedX / weight, weightedY / weight};
+    };
+    const auto redBefore = channelCentroid(distorted, 0, 52.0, 48.0);
+    const auto greenBefore = channelCentroid(distorted, 1, 52.0, 48.0);
+    const auto redAfter = channelCentroid(corrected, 0, 52.0, 48.0);
+    const auto greenAfter = channelCentroid(corrected, 1, 52.0, 48.0);
+    const double beforeDistance = std::hypot(
+        redBefore[0] - greenBefore[0], redBefore[1] - greenBefore[1]);
+    const double afterDistance = std::hypot(
+        redAfter[0] - greenAfter[0], redAfter[1] - greenAfter[1]);
+    check(beforeDistance > 0.6 && afterDistance < 0.12,
+          "Chromatic correction should move channel centroids onto the green geometry");
+    check(corrected[0] == 0 && corrected[1] == 0 && corrected[2] == 0,
+          "Out-of-bounds chromatic samples should invalidate one complete RGB triplet");
+    ImageAligner aligner;
+    AlignmentTransform identity;
+    std::vector<uint16_t> combined;
+    bool combinedMatches = aligner.applyTransformRgbCorrected(
+        distorted, width, height, identity, model, combined);
+    for (int y = 3; combinedMatches && y < height - 3; ++y) {
+        for (int x = 3; combinedMatches && x < width - 3; ++x) {
+            const size_t base =
+                (static_cast<size_t>(y) * width + x) * 3;
+            for (int channel = 0; channel < 3; ++channel) {
+                combinedMatches =
+                    combined[base + channel] == corrected[base + channel];
+            }
+        }
+    }
+    check(combinedMatches,
+          "Combined alignment and chromatic correction should match one-pass identity correction");
+    AlignmentBounds correctedBounds;
+    check(aligner.commonValidBounds(
+              {identity}, width, height, correctedBounds, &model) &&
+              correctedBounds.x >= 2 && correctedBounds.y >= 2 &&
+              correctedBounds.x + correctedBounds.width <= width - 2 &&
+              correctedBounds.y + correctedBounds.height <= height - 2,
+          "Chromatic common bounds should exclude every invalid channel sample");
+
+    const std::vector<uint16_t> neutral = makeField(1.0, 1.0, false);
+    ChromaticAberrationModel neutralModel;
+    ChromaticAberrationStats neutralStats;
+    check(ChromaticAberrationCorrector::estimate(
+              neutral, width, height, neutralModel, &neutralStats) &&
+              !neutralModel.active(),
+          "A field without measurable lateral color offset must be left alone");
+    corrected.clear();
+    check(ChromaticAberrationCorrector::apply(
+              neutral, width, height, neutralModel, corrected) &&
+              corrected == neutral,
+          "An inactive correction model must preserve every input sample");
+
+    const std::vector<uint16_t> oneSided =
+        makeField(redScale, blueScale, true);
+    ChromaticAberrationModel oneSidedModel;
+    check(ChromaticAberrationCorrector::estimate(
+              oneSided, width, height, oneSidedModel) &&
+              !oneSidedModel.active(),
+          "One-sided stars must not authorize a full-frame lens correction");
+
+    const std::vector<uint16_t> translatedChannels =
+        makeField(1.0, 1.0, false, 0.8, -0.4, -0.6, 0.7);
+    ChromaticAberrationModel translatedModel;
+    ChromaticAberrationStats translatedStats;
+    check(ChromaticAberrationCorrector::estimate(
+              translatedChannels, width, height, translatedModel,
+              &translatedStats) && !translatedModel.active(),
+          "A constant channel translation must not be mistaken for radial lens aberration");
 }
 
 void testMemoryEstimator() {
@@ -3178,6 +3356,7 @@ int main(int argc, char* argv[]) {
     testImageBufferUtils();
     testRgbAutoOptimize();
     testRgbTransform();
+    testChromaticAberrationCorrection();
     testMemoryEstimator();
     testPreviewToneMapper();
     testTransformDirection();

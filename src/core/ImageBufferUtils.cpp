@@ -38,6 +38,22 @@ bool extractLuminance(const std::vector<uint16_t>& rgb, int width, int height,
     return true;
 }
 
+bool extractChannel(const std::vector<uint16_t>& rgb, int width, int height,
+                    int channel, std::vector<uint16_t>& samples) {
+    size_t pixelCount = 0;
+    if (channel < 0 || channel > 2 ||
+        !checkedPixelCount(width, height, pixelCount) ||
+        rgb.size() != pixelCount * 3) {
+        return false;
+    }
+    std::vector<uint16_t> output(pixelCount);
+    for (size_t pixel = 0; pixel < pixelCount; ++pixel) {
+        output[pixel] = rgb[pixel * 3 + static_cast<size_t>(channel)];
+    }
+    samples = std::move(output);
+    return true;
+}
+
 bool splitRgb(const std::vector<uint16_t>& rgb, int width, int height,
               RgbChannels& channels) {
     size_t pixelCount = 0;

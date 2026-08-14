@@ -1,5 +1,6 @@
 #include "ProcessingWorker.h"
 
+#include "core/ChromaticAberrationCorrector.h"
 #include "core/DeepSkyCalibrationPreflight.h"
 #include "core/FinishingPipeline.h"
 #include "core/FrameQualityEvaluator.h"
@@ -818,6 +819,7 @@ void ProcessingWorker::run() {
     m_starReductionStats = {};
     m_starDefringeStats = {};
     m_modifiedCameraColorStats = {};
+    m_chromaticAberrationStats = {};
     m_skyGroundSkyFraction = 0.0;
     m_skyGroundMaskSource.clear();
     m_timelapseMotionProtectedPixelEvaluations = 0;
@@ -1140,6 +1142,56 @@ void ProcessingWorker::run() {
         return;
     }
 
+    ChromaticAberrationModel chromaticModel;
+    if (m_params.autoLensChromaticAberration) {
+        emit stageMessage("检测镜头径向色差...");
+        if (!ChromaticAberrationCorrector::estimate(
+                referenceImage.data, width, height, chromaticModel,
+                &m_chromaticAberrationStats)) {
+            m_errorString = "镜头径向色差检测失败";
+            return;
+        }
+        if (chromaticModel.active()) {
+            if (!ChromaticAberrationCorrector::correctInPlace(
+                    referenceImage.data, width, height, chromaticModel)) {
+                m_errorString = "参考帧镜头径向色差校正失败";
+                return;
+            }
+            m_chromaticAberrationStats.applied = true;
+            const QString redSummary = chromaticModel.correctRed
+                ? QString("%1 px").arg(
+                      m_chromaticAberrationStats.red.edgeShiftPixels,
+                      0, 'f', 2)
+                : QString::fromUtf8("未校正");
+            const QString blueSummary = chromaticModel.correctBlue
+                ? QString("%1 px").arg(
+                      m_chromaticAberrationStats.blue.edgeShiftPixels,
+                      0, 'f', 2)
+                : QString::fromUtf8("未校正");
+            emit stageMessage(QString(
+                "已自动校正镜头径向色差：红 %1，蓝 %2")
+                .arg(redSummary, blueSummary));
+        } else {
+            emit stageMessage("未发现可靠的镜头径向色差，保持原图");
+        }
+    }
+
+    // The correction model uses green as its geometric reference. Detecting
+    // alignment stars on the same channel avoids carrying the RGB-weighted
+    // chromatic centroid offset into the geometric transform.
+    std::vector<uint16_t> referenceAlignmentPlane;
+    const std::vector<uint16_t>* referenceDetectionPlane =
+        &referenceLuminance;
+    if (chromaticModel.active()) {
+        if (!ImageBufferUtils::extractChannel(
+                referenceImage.data, width, height, 1,
+                referenceAlignmentPlane)) {
+            m_errorString = "参考帧绿色通道数据无效";
+            return;
+        }
+        referenceDetectionPlane = &referenceAlignmentPlane;
+    }
+
     PhotometricReferenceProfile photometricReference;
     bool photometricReferenceReady = false;
     if (m_params.photometricNormalizationEnabled) {
@@ -1159,7 +1211,7 @@ void ProcessingWorker::run() {
     evaluationDetectionOptions.maxCandidates = 300;
     evaluationDetectionOptions.maxStars = 250;
     std::vector<StarPoint> referenceDetectedStars;
-    if (!detector.detect(referenceLuminance, width, height,
+    if (!detector.detect(*referenceDetectionPlane, width, height,
                          referenceDetectedStars, evaluationDetectionOptions)) {
         m_errorString = "参考帧星点检测失败";
         return;
@@ -1258,6 +1310,8 @@ void ProcessingWorker::run() {
     referenceImage.data.shrink_to_fit();
     referenceLuminance.clear();
     referenceLuminance.shrink_to_fit();
+    referenceAlignmentPlane.clear();
+    referenceAlignmentPlane.shrink_to_fit();
 
     emit stageMessage("逐帧加载与对齐...");
     ImageAligner aligner;
@@ -1293,8 +1347,12 @@ void ProcessingWorker::run() {
         }
 
         std::vector<uint16_t> sourceLuminance;
-        if (!ImageBufferUtils::extractLuminance(sourceImage.data, width, height,
-                                                sourceLuminance)) {
+        const bool sourcePlaneReady = chromaticModel.active()
+            ? ImageBufferUtils::extractChannel(
+                  sourceImage.data, width, height, 1, sourceLuminance)
+            : ImageBufferUtils::extractLuminance(
+                  sourceImage.data, width, height, sourceLuminance);
+        if (!sourcePlaneReady) {
             m_errorString = QString("RGB 数据无效: %1")
                                 .arg(QFileInfo(m_files[i]).fileName());
             return;
@@ -1398,8 +1456,13 @@ void ProcessingWorker::run() {
         sourceLuminance.shrink_to_fit();
 
         std::vector<uint16_t> alignedFrame;
-        if (!aligner.applyTransformRgb(sourceImage.data, width, height, transform,
-                                       alignedFrame)) {
+        const bool resampled = chromaticModel.active()
+            ? aligner.applyTransformRgbCorrected(
+                  sourceImage.data, width, height, transform,
+                  chromaticModel, alignedFrame)
+            : aligner.applyTransformRgb(
+                  sourceImage.data, width, height, transform, alignedFrame);
+        if (!resampled) {
             SkippedFrameInfo skipped;
             skipped.filePath = m_files[i];
             skipped.stage = "resampling";
@@ -1408,6 +1471,16 @@ void ProcessingWorker::run() {
             qWarning() << "变换应用失败，跳过:" << m_files[i];
             continue;
         }
+        std::vector<uint16_t> correctedOriginal;
+        if (m_params.skyGroundSepEnabled && chromaticModel.active() &&
+            !ChromaticAberrationCorrector::apply(
+                sourceImage.data, width, height, chromaticModel,
+                correctedOriginal)) {
+            m_errorString = "原位地景镜头径向色差校正失败";
+            return;
+        }
+        std::vector<uint16_t>& originalForStack = correctedOriginal.empty()
+            ? sourceImage.data : correctedOriginal;
         if (photometricReferenceReady) {
             PhotometricModel model;
             if (PhotometricNormalizer::estimate(
@@ -1418,7 +1491,7 @@ void ProcessingWorker::run() {
                 const bool originalNormalized =
                     !m_params.skyGroundSepEnabled ||
                     PhotometricNormalizer::applyInPlace(
-                        sourceImage.data, width, height, model);
+                        originalForStack, width, height, model);
                 if (!alignedNormalized || !originalNormalized) {
                     m_errorString = "帧间光度匹配应用失败";
                     return;
@@ -1448,7 +1521,7 @@ void ProcessingWorker::run() {
             ++m_photometricSkippedFrameCount;
         }
         if (m_params.skyGroundSepEnabled) {
-            if (!originalCache.append(sourceImage.data)) {
+            if (!originalCache.append(originalForStack)) {
                 m_errorString = "无法写入原位地景临时缓存（请检查磁盘空间）";
                 return;
             }
@@ -1563,8 +1636,14 @@ void ProcessingWorker::run() {
     }
 
     AlignmentBounds commonBounds;
-    if (aligner.commonValidBounds(
-            acceptedTransforms, width, height, commonBounds) &&
+    const bool commonBoundsReady = aligner.commonValidBounds(
+        acceptedTransforms, width, height, commonBounds,
+        chromaticModel.active() ? &chromaticModel : nullptr);
+    if (chromaticModel.active() && !commonBoundsReady) {
+        m_errorString = "无法计算镜头色差校正后的共同有效区域";
+        return;
+    }
+    if (commonBounds.width > 0 && commonBounds.height > 0 &&
         (commonBounds.x != 0 || commonBounds.y != 0 ||
          commonBounds.width != width || commonBounds.height != height)) {
         emit stageMessage("裁切共同有效区域...");
@@ -2499,6 +2578,59 @@ void ProcessingWorker::runSingleFrame() {
     emit progress(45);
 
     std::vector<uint16_t> resultRgb = std::move(image.data);
+    if (m_params.autoLensChromaticAberration) {
+        emit stageMessage("检测镜头径向色差...");
+        ChromaticAberrationModel chromaticModel;
+        if (!ChromaticAberrationCorrector::estimate(
+                resultRgb, m_width, m_height, chromaticModel,
+                &m_chromaticAberrationStats)) {
+            m_errorString = "镜头径向色差检测失败";
+            return;
+        }
+        if (chromaticModel.active()) {
+            if (!ChromaticAberrationCorrector::correctInPlace(
+                    resultRgb, m_width, m_height, chromaticModel)) {
+                m_errorString = "镜头径向色差校正失败";
+                return;
+            }
+            m_chromaticAberrationStats.applied = true;
+            const QString redSummary = chromaticModel.correctRed
+                ? QString("%1 px").arg(
+                      m_chromaticAberrationStats.red.edgeShiftPixels,
+                      0, 'f', 2)
+                : QString::fromUtf8("未校正");
+            const QString blueSummary = chromaticModel.correctBlue
+                ? QString("%1 px").arg(
+                      m_chromaticAberrationStats.blue.edgeShiftPixels,
+                      0, 'f', 2)
+                : QString::fromUtf8("未校正");
+            emit stageMessage(QString(
+                "已自动校正镜头径向色差：红 %1，蓝 %2")
+                .arg(redSummary, blueSummary));
+            ImageAligner aligner;
+            AlignmentTransform identity;
+            AlignmentBounds validBounds;
+            if (!aligner.commonValidBounds(
+                    {identity}, m_width, m_height, validBounds,
+                    &chromaticModel)) {
+                m_errorString = "无法计算镜头色差校正后的有效区域";
+                return;
+            }
+            std::vector<uint16_t> cropped;
+            if (!cropRgb(resultRgb, m_width, m_height,
+                         validBounds, cropped)) {
+                m_errorString = "镜头色差校正边界裁切失败";
+                return;
+            }
+            resultRgb = std::move(cropped);
+            m_cropOffsetX = validBounds.x;
+            m_cropOffsetY = validBounds.y;
+            m_width = validBounds.width;
+            m_height = validBounds.height;
+        } else {
+            emit stageMessage("未发现可靠的镜头径向色差，保持原图");
+        }
+    }
     std::vector<uint8_t> noMask;
     if (!finishResult(resultRgb, m_width, m_height, noMask)) return;
 }

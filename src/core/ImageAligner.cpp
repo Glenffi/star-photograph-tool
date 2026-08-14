@@ -1,4 +1,5 @@
 #include "ImageAligner.h"
+#include "ChromaticAberrationCorrector.h"
 #include <array>
 #include <cmath>
 #include <algorithm>
@@ -1333,6 +1334,96 @@ bool ImageAligner::applyTransformRgb(const std::vector<uint16_t>& src, int w, in
     return true;
 }
 
+bool ImageAligner::applyTransformRgbCorrected(
+    const std::vector<uint16_t>& src, int w, int h,
+    const AlignmentTransform& t,
+    const ChromaticAberrationModel& chromaticModel,
+    std::vector<uint16_t>& dst) {
+    if (!chromaticModel.active()) {
+        return applyTransformRgb(src, w, h, t, dst);
+    }
+    if (w <= 1 || h <= 1 ||
+        static_cast<size_t>(w) > std::numeric_limits<size_t>::max() /
+                                     static_cast<size_t>(h) ||
+        !std::isfinite(chromaticModel.centerX) ||
+        !std::isfinite(chromaticModel.centerY) ||
+        !std::isfinite(chromaticModel.redSourceScale) ||
+        !std::isfinite(chromaticModel.blueSourceScale) ||
+        chromaticModel.redSourceScale <= 0.0 ||
+        chromaticModel.blueSourceScale <= 0.0) {
+        return false;
+    }
+    const size_t pixelCount = static_cast<size_t>(w) * h;
+    if (pixelCount > std::numeric_limits<size_t>::max() / 3 ||
+        src.size() != pixelCount * 3) {
+        return false;
+    }
+
+    AlignmentTransform inverse;
+    if (!invertTransform(t, inverse)) return false;
+
+    const auto sample = [&](double sx, double sy, int channel) {
+        const int ix = static_cast<int>(std::floor(sx));
+        const int iy = static_cast<int>(std::floor(sy));
+        const double fx = sx - ix;
+        const double fy = sy - iy;
+        const size_t topLeft =
+            (static_cast<size_t>(iy) * w + ix) * 3 + channel;
+        const size_t topRight = topLeft + 3;
+        const size_t bottomLeft = topLeft + static_cast<size_t>(w) * 3;
+        const size_t bottomRight = bottomLeft + 3;
+        const double value =
+            (1.0 - fx) * (1.0 - fy) * src[topLeft] +
+            fx * (1.0 - fy) * src[topRight] +
+            (1.0 - fx) * fy * src[bottomLeft] +
+            fx * fy * src[bottomRight];
+        return static_cast<uint16_t>(std::clamp(
+            std::lround(value), 0L, 65535L));
+    };
+
+    dst.assign(pixelCount * 3, 0);
+    for (int y = 0; y < h; ++y) {
+        for (int x = 0; x < w; ++x) {
+            double greenX = 0.0;
+            double greenY = 0.0;
+            const size_t destination =
+                (static_cast<size_t>(y) * w + x) * 3;
+            if (!mapPoint(inverse, x, y, greenX, greenY)) continue;
+
+            const double dx = greenX - chromaticModel.centerX;
+            const double dy = greenY - chromaticModel.centerY;
+            const std::array<double, 3> scales = {
+                chromaticModel.correctRed
+                    ? chromaticModel.redSourceScale : 1.0,
+                1.0,
+                chromaticModel.correctBlue
+                    ? chromaticModel.blueSourceScale : 1.0
+            };
+            std::array<double, 3> sourceX = {};
+            std::array<double, 3> sourceY = {};
+            bool valid = true;
+            for (int channel = 0; channel < 3; ++channel) {
+                sourceX[channel] =
+                    chromaticModel.centerX + dx * scales[channel];
+                sourceY[channel] =
+                    chromaticModel.centerY + dy * scales[channel];
+                valid = valid && sourceX[channel] >= 0.0 &&
+                    sourceX[channel] < static_cast<double>(w - 1) &&
+                    sourceY[channel] >= 0.0 &&
+                    sourceY[channel] < static_cast<double>(h - 1);
+            }
+            // Invalid geometry is always one all-zero RGB triplet. The stacking
+            // engine relies on this invariant when excluding resampling borders.
+            if (!valid) continue;
+            for (int channel = 0; channel < 3; ++channel) {
+                dst[destination + channel] =
+                    sample(sourceX[channel], sourceY[channel], channel);
+            }
+        }
+    }
+    return true;
+}
+
 bool ImageAligner::applyTransformMask(const std::vector<uint8_t>& src,
                                       int w, int h,
                                       const AlignmentTransform& t,
@@ -1380,8 +1471,18 @@ bool ImageAligner::applyTransformMask(const std::vector<uint8_t>& src,
 
 bool ImageAligner::commonValidBounds(
     const std::vector<AlignmentTransform>& transforms,
-    int width, int height, AlignmentBounds& bounds) const {
+    int width, int height, AlignmentBounds& bounds,
+    const ChromaticAberrationModel* chromaticModel) const {
     if (transforms.empty() || width <= 2 || height <= 2) return false;
+    if (chromaticModel && chromaticModel->active() &&
+        (!std::isfinite(chromaticModel->centerX) ||
+         !std::isfinite(chromaticModel->centerY) ||
+         !std::isfinite(chromaticModel->redSourceScale) ||
+         !std::isfinite(chromaticModel->blueSourceScale) ||
+         chromaticModel->redSourceScale <= 0.0 ||
+         chromaticModel->blueSourceScale <= 0.0)) {
+        return false;
+    }
 
     std::vector<AlignmentTransform> inverses;
     inverses.reserve(transforms.size());
@@ -1391,17 +1492,40 @@ bool ImageAligner::commonValidBounds(
         inverses.push_back(inverse);
     }
 
+    auto validSourcePoint = [&](double sourceX, double sourceY) {
+        if (sourceX < 0.0 || sourceX >= static_cast<double>(width - 1) ||
+            sourceY < 0.0 || sourceY >= static_cast<double>(height - 1)) {
+            return false;
+        }
+        if (!chromaticModel || !chromaticModel->active()) return true;
+        const double dx = sourceX - chromaticModel->centerX;
+        const double dy = sourceY - chromaticModel->centerY;
+        const auto channelValid = [&](bool enabled, double scale) {
+            if (!enabled) return true;
+            const double channelX = chromaticModel->centerX + dx * scale;
+            const double channelY = chromaticModel->centerY + dy * scale;
+            return channelX >= 0.0 &&
+                channelX < static_cast<double>(width - 1) &&
+                channelY >= 0.0 &&
+                channelY < static_cast<double>(height - 1);
+        };
+        return channelValid(chromaticModel->correctRed,
+                            chromaticModel->redSourceScale) &&
+            channelValid(chromaticModel->correctBlue,
+                         chromaticModel->blueSourceScale);
+    };
+
     auto validPoint = [&](double x, double y) {
         for (const AlignmentTransform& inverse : inverses) {
             double sourceX = 0.0;
             double sourceY = 0.0;
             if (!mapPoint(inverse, x, y, sourceX, sourceY) ||
-                sourceX < 0.0 || sourceX >= static_cast<double>(width - 1) ||
-                sourceY < 0.0 || sourceY >= static_cast<double>(height - 1)) {
+                !validSourcePoint(sourceX, sourceY)) {
                 return false;
             }
         }
-        return true;
+        // The reference frame is corrected too, but is not part of transforms.
+        return validSourcePoint(x, y);
     };
 
     constexpr int kGridLimit = 256;

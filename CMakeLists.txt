@@ -95,6 +95,7 @@ endif()
 # 核心算法单独成库：GUI 与测试复用同一份实现，避免测试只覆盖复制代码。
 set(CORE_SOURCES
     src/core/BasicAdjustmentEngine.cpp
+    src/core/ChromaticAberrationCorrector.cpp
     src/core/DeepSkyCalibrationPreflight.cpp
     src/core/ImageBufferUtils.cpp
     src/core/MasterFrameIO.cpp
@@ -136,6 +137,7 @@ set(APP_SOURCES
 
 set(CORE_HEADERS
     src/core/BasicAdjustmentEngine.h
+    src/core/ChromaticAberrationCorrector.h
     src/core/DeepSkyCalibrationPreflight.h
     src/core/ImageBufferUtils.h
     src/core/MasterFrameIO.h

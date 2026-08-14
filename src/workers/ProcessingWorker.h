@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/ChromaticAberrationCorrector.h"
 #include "core/FinishingPipeline.h"
 #include "core/FrameQualityEvaluator.h"
 #include "core/RawCalibrationEngine.h"
@@ -68,6 +69,10 @@ public:
         double kappaValue = 2.5;
         bool autoRejectLowQualityFrames = true;
         bool photometricNormalizationEnabled = true;
+        // Automatically estimate lateral lens chromatic aberration from the
+        // reference frame. Conservative quality gates leave pixels untouched
+        // when the stellar evidence is weak or non-radial.
+        bool autoLensChromaticAberration = true;
         bool noiseReductionEnabled = false;
         int noiseReductionStrength = 30;
         bool modifiedCameraColorEnabled = false;
@@ -172,6 +177,9 @@ public:
     const ModifiedCameraColorStats& modifiedCameraColorStats() const {
         return m_modifiedCameraColorStats;
     }
+    const ChromaticAberrationStats& chromaticAberrationStats() const {
+        return m_chromaticAberrationStats;
+    }
     double skyGroundSkyFraction() const { return m_skyGroundSkyFraction; }
     QString skyGroundMaskSource() const { return m_skyGroundMaskSource; }
     uint64_t timelapseMotionProtectedPixelEvaluations() const {
@@ -275,6 +283,7 @@ private:
     StarReductionStats m_starDefringeStats;
     StarReductionStats m_starReductionStats;
     ModifiedCameraColorStats m_modifiedCameraColorStats;
+    ChromaticAberrationStats m_chromaticAberrationStats;
     double m_skyGroundSkyFraction = 0.0;
     QString m_skyGroundMaskSource;
     uint64_t m_timelapseMotionProtectedPixelEvaluations = 0;

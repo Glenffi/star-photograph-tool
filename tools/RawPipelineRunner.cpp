@@ -201,6 +201,9 @@ int main(int argc, char* argv[]) {
     const QCommandLineOption noPhotometricNormalizationOption(
         "no-photometric-normalization",
         "Disable frame-to-reference exposure and background color matching.");
+    const QCommandLineOption noAutoLensChromaticAberrationOption(
+        "no-auto-lens-ca",
+        "Disable conservative automatic lateral lens chromatic-aberration correction.");
     const QCommandLineOption noQualityRejectionOption(
         "no-quality-rejection",
         "Keep severe quality outliers; automatic reference selection still runs.");
@@ -297,6 +300,7 @@ int main(int argc, char* argv[]) {
                        referenceOption,
                        methodOption, kappaOption, memoryBudgetOption,
                        noPhotometricNormalizationOption,
+                       noAutoLensChromaticAberrationOption,
                        noQualityRejectionOption,
                        skyGroundOption, skyGroundMaskOption,
                        skyGroundFeatherOption, groundMethodOption,
@@ -686,6 +690,8 @@ int main(int argc, char* argv[]) {
         !starTrailMode && !parser.isSet(noQualityRejectionOption);
     params.photometricNormalizationEnabled = !singleFrameMode &&
         !parser.isSet(noPhotometricNormalizationOption);
+    params.autoLensChromaticAberration =
+        !parser.isSet(noAutoLensChromaticAberrationOption);
     params.noiseReductionEnabled = denoiseStrength > 0;
     params.noiseReductionStrength = denoiseStrength;
     params.modifiedCameraColorEnabled = modifiedCameraColorEnabled;
@@ -749,7 +755,7 @@ int main(int argc, char* argv[]) {
     worker.wait();
 
     QJsonObject report;
-    report["schemaVersion"] = 18;
+    report["schemaVersion"] = 19;
     report["toolVersion"] = QCoreApplication::applicationVersion();
     report["generatedAt"] = QDateTime::currentDateTimeUtc().toString(Qt::ISODate);
     report["input"] = input;
@@ -927,6 +933,38 @@ int main(int argc, char* argv[]) {
         worker.photometricOutputAnchorGain();
     report["photometricOutputAnchorMaximumAbsoluteOffset"] =
         worker.photometricOutputAnchorOffset();
+    const ChromaticAberrationStats& chromaticStats =
+        worker.chromaticAberrationStats();
+    auto chromaticChannelReport = [](const ChromaticAberrationChannelStats& stats) {
+        QJsonObject channel;
+        channel["reliable"] = stats.reliable;
+        channel["measuredStars"] = stats.measuredStars;
+        channel["inlierStars"] = stats.inlierStars;
+        channel["coveredQuadrants"] = stats.coveredQuadrants;
+        channel["coveredAngularSectors"] = stats.coveredAngularSectors;
+        channel["outerInlierStars"] = stats.outerInlierStars;
+        channel["inlierFraction"] = stats.inlierFraction;
+        channel["nuisanceOffsetX"] = stats.nuisanceOffsetX;
+        channel["nuisanceOffsetY"] = stats.nuisanceOffsetY;
+        channel["sourceScale"] = stats.sourceScale;
+        channel["edgeShiftPixels"] = stats.edgeShiftPixels;
+        channel["uncorrectedRadialRms"] = stats.uncorrectedRadialRms;
+        channel["radialResidualRms"] = stats.radialResidualRms;
+        channel["tangentialResidualRms"] = stats.tangentialResidualRms;
+        return channel;
+    };
+    report["automaticLensChromaticAberrationEnabled"] =
+        params.autoLensChromaticAberration;
+    report["automaticLensChromaticAberrationApplied"] =
+        chromaticStats.applied;
+    report["chromaticAberrationDetectedStars"] =
+        chromaticStats.detectedStars;
+    report["chromaticAberrationEligibleStars"] =
+        chromaticStats.eligibleStars;
+    report["chromaticAberrationRed"] =
+        chromaticChannelReport(chromaticStats.red);
+    report["chromaticAberrationBlue"] =
+        chromaticChannelReport(chromaticStats.blue);
     report["denoiseStrength"] = denoiseStrength;
     report["modifiedCameraColorEnabled"] = modifiedCameraColorEnabled;
     report["modifiedCameraColorStrength"] = modifiedCameraColorStrength;

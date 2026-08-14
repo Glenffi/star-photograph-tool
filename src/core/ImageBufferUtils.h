@@ -15,6 +15,8 @@ struct RgbChannels {
 // output. A failed call leaves the output object unchanged.
 bool extractLuminance(const std::vector<uint16_t>& rgb, int width, int height,
                       std::vector<uint16_t>& luminance);
+bool extractChannel(const std::vector<uint16_t>& rgb, int width, int height,
+                    int channel, std::vector<uint16_t>& samples);
 bool splitRgb(const std::vector<uint16_t>& rgb, int width, int height,
               RgbChannels& channels);
 bool mergeRgb(const RgbChannels& channels, int width, int height,
