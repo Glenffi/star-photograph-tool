@@ -1,11 +1,12 @@
 #include "UpdateManager.h"
 
+#include "core/VerifiedDownloadFinalizer.h"
+
 #include <QApplication>
 #include <QCryptographicHash>
 #include <QDesktopServices>
 #include <QDir>
 #include <QFile>
-#include <QFileInfo>
 #include <QMessageBox>
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
@@ -31,18 +32,6 @@ QString humanReadableSize(qint64 bytes) {
     const double mebibytes = static_cast<double>(bytes) / (1024.0 * 1024.0);
     return QString::number(mebibytes, 'f', mebibytes < 10.0 ? 1 : 0) +
            QStringLiteral(" MiB");
-}
-
-QString downloadCandidatePath(const QDir& directory, const QString& fileName,
-                              int number) {
-    const QFileInfo info(fileName);
-    const QString suffix = info.completeSuffix();
-    const QString baseName = info.completeBaseName();
-    if (number == 0) return directory.filePath(fileName);
-    const QString candidateName = suffix.isEmpty()
-        ? QStringLiteral("%1 (%2)").arg(baseName).arg(number)
-        : QStringLiteral("%1 (%2).%3").arg(baseName).arg(number).arg(suffix);
-    return directory.filePath(candidateName);
 }
 
 }  // namespace
@@ -416,24 +405,15 @@ void UpdateManager::handleDownloadFinished() {
     if (!m_downloadCancelled && error.isEmpty()) {
         const QString temporaryPath = m_downloadFile->fileName();
         m_downloadFile->close();
-        const QDir directory(m_downloadDirectory);
-        for (int number = 0; number <= 999; ++number) {
-            const QString candidate = downloadCandidatePath(
-                directory, m_downloadPackage.fileName, number);
-            if (QFile::rename(temporaryPath, candidate)) {
-                m_downloadPath = candidate;
-                m_downloadFile->setAutoRemove(false);
-                break;
-            }
-            // QFile::rename never overwrites. An existing destination is an
-            // expected race; any other error should be surfaced immediately.
-            if (!QFileInfo::exists(candidate)) {
-                error = QStringLiteral("无法保存安装包到下载目录");
-                break;
-            }
-        }
-        if (error.isEmpty() && m_downloadPath.isEmpty()) {
-            error = QStringLiteral("下载目录中同名安装包过多");
+        // Destroy QTemporaryFile before the final move so its Qt file engine
+        // cannot retain any native state while Windows commits the package.
+        m_downloadFile->setAutoRemove(false);
+        m_downloadFile.reset();
+        if (!VerifiedDownloadFinalizer::commit(
+                temporaryPath, m_downloadDirectory,
+                m_downloadPackage.fileName, m_downloadPackage.size,
+                m_downloadPackage.sha256Hex, m_downloadPath, error)) {
+            QFile::remove(temporaryPath);
         }
     }
 

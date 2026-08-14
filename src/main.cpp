@@ -22,6 +22,7 @@
 #include <QDragEnterEvent>
 #include <QDropEvent>
 #include <QMimeData>
+#include <QNetworkProxyFactory>
 #include <QProgressDialog>
 #include <QProgressBar>
 #include <QDateTime>
@@ -1849,6 +1850,11 @@ int main(int argc, char* argv[]) {
     app.setApplicationVersion(STARPROCESSOR_VERSION);
     app.setOrganizationName("StarProcessor");
     app.setWindowIcon(UiAssets::appIcon());
+
+    // QNetworkAccessManager otherwise defaults to NoProxy. Respect the
+    // operating system proxy/PAC configuration for update checks and package
+    // downloads without storing proxy credentials in the application.
+    QNetworkProxyFactory::setUseSystemConfiguration(true);
 
     app.setStyleSheet(
         "QMainWindow, QDialog, QMessageBox, QFileDialog { background-color: #111719; color: #F3F7F6; }"

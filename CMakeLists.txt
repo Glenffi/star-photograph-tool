@@ -6,7 +6,7 @@ if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Darwin" AND
         "Minimum supported macOS version")
 endif()
 
-project(StarProcessor VERSION 0.10.0 LANGUAGES CXX)
+project(StarProcessor VERSION 0.10.1 LANGUAGES CXX)
 
 include(CTest)
 option(BUILD_SAMPLE_TOOLS "Build local RAW sample regression tools" ON)
@@ -119,6 +119,7 @@ set(CORE_SOURCES
     src/core/TimelapseEngine.cpp
     src/core/TemporalPhotometricSmoother.cpp
     src/core/UpdateManifest.cpp
+    src/core/VerifiedDownloadFinalizer.cpp
 )
 
 set(APP_SOURCES
@@ -159,6 +160,7 @@ set(CORE_HEADERS
     src/core/TimelapseEngine.h
     src/core/TemporalPhotometricSmoother.h
     src/core/UpdateManifest.h
+    src/core/VerifiedDownloadFinalizer.h
 )
 
 set(APP_HEADERS

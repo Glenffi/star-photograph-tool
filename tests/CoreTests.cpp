@@ -20,11 +20,13 @@
 #include "core/TemporalPhotometricSmoother.h"
 #include "core/TimelapseEngine.h"
 #include "core/UpdateManifest.h"
+#include "core/VerifiedDownloadFinalizer.h"
 
 #include <QByteArray>
 #include <QColor>
 #include <QColorSpace>
 #include <QCoreApplication>
+#include <QCryptographicHash>
 #include <QFile>
 #include <QImage>
 #include <QTemporaryDir>
@@ -3012,6 +3014,91 @@ void testUpdateManifest() {
           "The update manifest should reject an unavailable platform");
 }
 
+void testVerifiedDownloadFinalizer() {
+    QTemporaryDir temporaryDirectory;
+    check(temporaryDirectory.isValid(),
+          "The download finalizer test directory should be available");
+    if (!temporaryDirectory.isValid()) return;
+
+    const QString fileName =
+        QStringLiteral("StarProcessor-Windows-x64-v0.10.1.zip");
+    const QString existingPath = temporaryDirectory.filePath(fileName);
+    QFile existing(existingPath);
+    check(existing.open(QIODevice::WriteOnly) &&
+              existing.write("existing") == 8,
+          "The collision fixture should be writable");
+    existing.close();
+
+    const QByteArray payload("verified update package payload");
+    const QString sourcePath = temporaryDirectory.filePath(
+        QStringLiteral(".StarProcessor-update-test.part"));
+    QFile source(sourcePath);
+    check(source.open(QIODevice::WriteOnly) &&
+              source.write(payload) == payload.size(),
+          "The verified temporary package should be writable");
+    source.close();
+
+    const QByteArray sha256 = QCryptographicHash::hash(
+        payload, QCryptographicHash::Sha256).toHex();
+    QString savedPath;
+    QString error;
+    check(VerifiedDownloadFinalizer::commit(
+              sourcePath, temporaryDirectory.path(), fileName,
+              payload.size(), sha256, savedPath, error),
+          "A verified package should commit beside an existing download");
+    check(savedPath.endsWith(
+              QStringLiteral("StarProcessor-Windows-x64-v0.10.1 (1).zip")) &&
+              QFileInfo::exists(savedPath) && !QFileInfo::exists(sourcePath),
+          "The finalizer should preserve version dots and never overwrite");
+
+    QFile saved(savedPath);
+    check(saved.open(QIODevice::ReadOnly) && saved.readAll() == payload,
+          "The committed package should retain its verified bytes");
+    saved.close();
+
+    const QString fallbackSource = temporaryDirectory.filePath(
+        QStringLiteral("fallback.part"));
+    QFile fallback(fallbackSource);
+    check(fallback.open(QIODevice::WriteOnly) &&
+              fallback.write(payload) == payload.size(),
+          "The copy-fallback fixture should be writable");
+    fallback.close();
+    savedPath.clear();
+    error.clear();
+    const auto rejectRename = [](
+        const QString&, const QString&, QString& renameError) {
+        renameError = QStringLiteral("forced rename failure");
+        return false;
+    };
+    check(VerifiedDownloadFinalizer::commit(
+              fallbackSource, temporaryDirectory.path(),
+              QStringLiteral("StarProcessor-v0.10.1-macOS-arm64.dmg"),
+              payload.size(), sha256, savedPath, error, rejectRename) &&
+              QFileInfo::exists(savedPath) &&
+              !QFileInfo::exists(fallbackSource),
+          "A verified copy should recover from repeated rename failure");
+    QFile fallbackResult(savedPath);
+    check(fallbackResult.open(QIODevice::ReadOnly) &&
+              fallbackResult.readAll() == payload,
+          "The rename fallback should verify and retain exact bytes");
+
+    const QString corruptSource = temporaryDirectory.filePath(
+        QStringLiteral("corrupt.part"));
+    QFile corrupt(corruptSource);
+    check(corrupt.open(QIODevice::WriteOnly) &&
+              corrupt.write(payload) == payload.size(),
+          "The corrupt-hash fixture should be writable");
+    corrupt.close();
+    savedPath.clear();
+    error.clear();
+    check(!VerifiedDownloadFinalizer::commit(
+              corruptSource, temporaryDirectory.path(),
+              QStringLiteral("StarProcessor-v0.10.1-macOS-arm64.dmg"),
+              payload.size(), QByteArray(64, '0'), savedPath, error) &&
+              savedPath.isEmpty() && error.contains(QStringLiteral("SHA-256")),
+          "The finalizer should reject bytes that fail the expected hash");
+}
+
 } // namespace
 
 int main(int argc, char* argv[]) {
@@ -3041,6 +3128,7 @@ int main(int argc, char* argv[]) {
     testRawApiValidation();
     testSkyGroundHorizonDetection();
     testUpdateManifest();
+    testVerifiedDownloadFinalizer();
 
     if (failures == 0) {
         std::cout << "All core tests passed.\n";
