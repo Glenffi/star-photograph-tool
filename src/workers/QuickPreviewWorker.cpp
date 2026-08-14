@@ -20,6 +20,8 @@ QString stageText(FinishingStage stage) {
         return QString::fromUtf8("快速预览：地景细节");
     case FinishingStage::Sharpening:
         return QString::fromUtf8("快速预览：锐化");
+    case FinishingStage::StarDefringe:
+        return QString::fromUtf8("快速预览：去紫边");
     case FinishingStage::StarReduction:
         return QString::fromUtf8("快速预览：缩星");
     }

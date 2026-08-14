@@ -390,11 +390,10 @@ uint16_t blendImageSample(uint16_t first, uint16_t second, double amount) {
         first * (1.0 - amount) + second * amount));
 }
 
-} // namespace
-
-bool StarReducer::reduce(std::vector<uint16_t>& image, int width, int height,
-                         int strength, StarReductionStats* stats,
-                         const std::vector<uint8_t>* processingMask) {
+bool processStars(std::vector<uint16_t>& image, int width, int height,
+                  int strength, StarReductionStats* stats,
+                  const std::vector<uint8_t>* processingMask,
+                  bool reduceSize, bool applyDefringe) {
     if (stats) *stats = {};
     if (width <= 0 || height <= 0 || width > 65536 || height > 65536 ||
         width > INT_MAX / height) {
@@ -532,15 +531,38 @@ bool StarReducer::reduce(std::vector<uint16_t>& image, int width, int height,
             positiveLayerLuminance(&starLayer[pixel * 3]);
     }
 
-    const size_t defringedPixels = reduceStarColorFringes(
-        image, starless, starLayer, width, height, filteredStars,
-        strength, processingMask);
+    const size_t defringedPixels = applyDefringe
+        ? reduceStarColorFringes(image, starless, starLayer, width, height,
+                                 filteredStars, strength, processingMask)
+        : 0;
     if (stats) stats->defringedPixels = defringedPixels;
     if (defringedPixels > 0) {
         for (size_t pixel = 0; pixel < pixelCount; ++pixel) {
             starLayerLuminance[pixel] =
                 positiveLayerLuminance(&starLayer[pixel * 3]);
         }
+    }
+
+    if (!reduceSize) {
+        size_t affectedPixels = 0;
+        for (size_t pixel = 0; pixel < pixelCount; ++pixel) {
+            bool changed = false;
+            for (int channel = 0; channel < 3; ++channel) {
+                const size_t index = pixel * 3 + channel;
+                const int64_t recombined =
+                    static_cast<int64_t>(starless[index]) + starLayer[index];
+                const uint16_t corrected = static_cast<uint16_t>(
+                    std::clamp<int64_t>(recombined, 0, 65535));
+                changed = changed || corrected != image[index];
+                image[index] = corrected;
+            }
+            if (changed) ++affectedPixels;
+        }
+        if (stats) {
+            stats->affectedPixels = affectedPixels;
+            stats->radiusScale = 1.0;
+        }
+        return true;
     }
 
     const double normalizedStrength = strength / 100.0;
@@ -619,4 +641,21 @@ bool StarReducer::reduce(std::vector<uint16_t>& image, int width, int height,
     }
 
     return true;
+}
+
+} // namespace
+
+bool StarReducer::reduce(std::vector<uint16_t>& image, int width, int height,
+                         int strength, StarReductionStats* stats,
+                         const std::vector<uint8_t>* processingMask,
+                         bool applyDefringe) {
+    return processStars(image, width, height, strength, stats, processingMask,
+                        true, applyDefringe);
+}
+
+bool StarReducer::defringe(std::vector<uint16_t>& image, int width, int height,
+                           int strength, StarReductionStats* stats,
+                           const std::vector<uint8_t>* processingMask) {
+    return processStars(image, width, height, strength, stats, processingMask,
+                        false, true);
 }

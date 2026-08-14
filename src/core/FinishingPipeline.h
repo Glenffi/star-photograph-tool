@@ -17,6 +17,7 @@ enum class FinishingStage {
     BasicAdjustments,
     GroundDetail,
     Sharpening,
+    StarDefringe,
     StarReduction
 };
 
@@ -31,12 +32,15 @@ struct FinishingOptions {
     BasicAdjustmentOptions basicAdjustments;
     bool skyGroundSeparation = false;
     int groundDetailStrength = 40;
+    bool starDefringeEnabled = false;
+    int starDefringeStrength = 55;
     bool starReductionEnabled = false;
     int starReductionStrength = 70;
 };
 
 struct FinishingResult {
     ModifiedCameraColorStats modifiedCameraColorStats;
+    StarReductionStats starDefringeStats;
     StarReductionStats starReductionStats;
     bool cancelled = false;
     std::string error;

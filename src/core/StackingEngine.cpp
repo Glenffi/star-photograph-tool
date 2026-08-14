@@ -1,5 +1,6 @@
 #include "StackingEngine.h"
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <limits>
 
@@ -62,6 +63,198 @@ double medianAbsoluteDeviation(const std::vector<uint16_t>& values, double media
     if (deviations.size() % 2 != 0) return deviations[middle];
     return (deviations[middle] +
             *std::max_element(deviations.begin(), deviations.begin() + middle)) / 2.0;
+}
+
+struct RgbSample {
+    uint16_t red = 0;
+    uint16_t green = 0;
+    uint16_t blue = 0;
+    uint16_t luminance = 0;
+};
+
+uint16_t rgbLuminance(const uint16_t* rgb) {
+    return static_cast<uint16_t>(
+        (static_cast<uint32_t>(rgb[0]) * 13933U +
+         static_cast<uint32_t>(rgb[1]) * 46871U +
+         static_cast<uint32_t>(rgb[2]) * 4732U) /
+        65536U);
+}
+
+bool validRgbPixel(const std::vector<uint16_t>& image, size_t base,
+                   bool ignoreZero) {
+    // Alignment padding is encoded as one black RGB triplet. A single channel
+    // may legitimately be zero after black-level subtraction or photometric
+    // normalization, so it must not invalidate the other two channels.
+    return !ignoreZero || image[base] != 0 || image[base + 1] != 0 ||
+        image[base + 2] != 0;
+}
+
+double medianRgbLuminance(const std::vector<RgbSample>& samples,
+                          size_t begin, size_t end) {
+    const size_t count = end - begin;
+    const size_t middle = begin + count / 2;
+    if (count % 2 != 0) return samples[middle].luminance;
+    return (static_cast<double>(samples[middle - 1].luminance) +
+            samples[middle].luminance) / 2.0;
+}
+
+double rgbLuminanceDeviation(const std::vector<RgbSample>& samples,
+                             size_t begin, size_t end, double center) {
+    double sum = 0.0;
+    for (size_t index = begin; index < end; ++index) {
+        const double delta = samples[index].luminance - center;
+        sum += delta * delta;
+    }
+    return std::sqrt(sum / (end - begin));
+}
+
+double rgbLuminanceMad(const std::vector<RgbSample>& samples, double median,
+                       std::vector<double>& deviations) {
+    deviations.clear();
+    for (const RgbSample& sample : samples) {
+        deviations.push_back(std::abs(sample.luminance - median));
+    }
+    const size_t middle = deviations.size() / 2;
+    std::nth_element(deviations.begin(), deviations.begin() + middle,
+                     deviations.end());
+    if (deviations.size() % 2 != 0) return deviations[middle];
+    return (deviations[middle] +
+            *std::max_element(deviations.begin(), deviations.begin() + middle)) /
+        2.0;
+}
+
+void writeRgbAverage(const std::vector<RgbSample>& samples,
+                     size_t begin, size_t end, uint16_t* output) {
+    std::array<uint64_t, 3> sum = {};
+    for (size_t index = begin; index < end; ++index) {
+        sum[0] += samples[index].red;
+        sum[1] += samples[index].green;
+        sum[2] += samples[index].blue;
+    }
+    const uint64_t count = end - begin;
+    for (int channel = 0; channel < 3; ++channel) {
+        output[channel] = static_cast<uint16_t>(sum[channel] / count);
+    }
+}
+
+bool stackRgbSamples(const std::vector<std::vector<uint16_t>>& images,
+                     size_t pixelCount, StackingEngine::Method method,
+                     double kappa, std::vector<uint16_t>& result,
+                     bool ignoreZero) {
+    if (pixelCount > std::numeric_limits<size_t>::max() / 3) return false;
+    const size_t sampleCount = pixelCount * 3;
+    if (method < StackingEngine::Average || method > StackingEngine::Winsorized ||
+        !validFrames(images, sampleCount) ||
+        ((method == StackingEngine::KappaSigma ||
+          method == StackingEngine::Winsorized) &&
+         (!std::isfinite(kappa) || kappa <= 0.0))) {
+        return false;
+    }
+
+    result.assign(sampleCount, 0);
+    std::vector<RgbSample> samples;
+    std::vector<uint16_t> channelValues;
+    std::vector<double> deviations;
+    samples.reserve(images.size());
+    channelValues.reserve(images.size());
+    deviations.reserve(images.size());
+    constexpr double kMadToStdDev = 1.4826;
+
+    for (size_t pixel = 0; pixel < pixelCount; ++pixel) {
+        const size_t base = pixel * 3;
+        samples.clear();
+        for (const auto& image : images) {
+            if (!validRgbPixel(image, base, ignoreZero)) continue;
+            samples.push_back({image[base], image[base + 1], image[base + 2],
+                               rgbLuminance(image.data() + base)});
+        }
+        if (samples.empty()) continue;
+
+        uint16_t* output = result.data() + base;
+        if (method == StackingEngine::Average) {
+            writeRgbAverage(samples, 0, samples.size(), output);
+            continue;
+        }
+
+        if (method == StackingEngine::Median) {
+            // Median does not reject a subset, but all three channel medians use
+            // exactly the same set of valid RGB pixels.
+            for (int channel = 0; channel < 3; ++channel) {
+                channelValues.clear();
+                for (const RgbSample& sample : samples) {
+                    channelValues.push_back(channel == 0 ? sample.red :
+                                            channel == 1 ? sample.green :
+                                                           sample.blue);
+                }
+                std::sort(channelValues.begin(), channelValues.end());
+                output[channel] = static_cast<uint16_t>(std::lround(
+                    medianOfSorted(channelValues, 0, channelValues.size())));
+            }
+            continue;
+        }
+
+        // A single luminance ordering controls all RGB channels. Independent
+        // channel clipping can select three different frame subsets at a star
+        // edge and synthesize magenta/cyan pixels that never existed in a frame.
+        std::sort(samples.begin(), samples.end(),
+                  [](const RgbSample& first, const RgbSample& second) {
+                      return first.luminance < second.luminance;
+                  });
+
+        if (method == StackingEngine::Winsorized) {
+            const double median = medianRgbLuminance(samples, 0, samples.size());
+            const double threshold = kappa *
+                rgbLuminanceMad(samples, median, deviations) * kMadToStdDev;
+            const double lower = std::max(0.0, median - threshold);
+            const double upper = std::min(65535.0, median + threshold);
+            std::array<double, 3> sum = {};
+            for (const RgbSample& sample : samples) {
+                const double target = std::clamp(
+                    static_cast<double>(sample.luminance), lower, upper);
+                const double scale = sample.luminance == 0
+                    ? 1.0 : target / sample.luminance;
+                sum[0] += sample.red * scale;
+                sum[1] += sample.green * scale;
+                sum[2] += sample.blue * scale;
+            }
+            for (int channel = 0; channel < 3; ++channel) {
+                output[channel] = static_cast<uint16_t>(std::clamp(
+                    std::lround(sum[channel] / samples.size()), 0L, 65535L));
+            }
+            continue;
+        }
+
+        size_t activeBegin = 0;
+        size_t activeEnd = samples.size();
+        for (int iteration = 0; iteration < 3; ++iteration) {
+            const double median =
+                medianRgbLuminance(samples, activeBegin, activeEnd);
+            const double deviation =
+                rgbLuminanceDeviation(samples, activeBegin, activeEnd, median);
+            if (deviation == 0.0) break;
+            const double threshold = kappa * deviation;
+            const double lower = median - threshold;
+            const double upper = median + threshold;
+            size_t clippedBegin = activeBegin;
+            size_t clippedEnd = activeEnd;
+            while (clippedBegin < clippedEnd &&
+                   samples[clippedBegin].luminance < lower) {
+                ++clippedBegin;
+            }
+            while (clippedEnd > clippedBegin &&
+                   samples[clippedEnd - 1].luminance > upper) {
+                --clippedEnd;
+            }
+            if (clippedBegin == clippedEnd ||
+                (clippedBegin == activeBegin && clippedEnd == activeEnd)) {
+                break;
+            }
+            activeBegin = clippedBegin;
+            activeEnd = clippedEnd;
+        }
+        writeRgbAverage(samples, activeBegin, activeEnd, output);
+    }
+    return true;
 }
 
 bool stackSamples(const std::vector<std::vector<uint16_t>>& images,
@@ -189,9 +382,57 @@ bool StackingEngine::stack(const std::vector<std::vector<uint16_t>>& images,
 bool StackingEngine::stackRgb(const std::vector<std::vector<uint16_t>>& images,
                               int width, int height, Method method, double kappa,
                               std::vector<uint16_t>& result, bool ignoreZero) {
-    size_t expectedSize = 0;
-    return rgbImageSize(width, height, expectedSize) &&
-        stackSamples(images, expectedSize, method, kappa, result, ignoreZero);
+    size_t pixelCount = 0;
+    return imageSize(width, height, pixelCount) &&
+        stackRgbSamples(images, pixelCount, method, kappa, result, ignoreZero);
+}
+
+bool StackingEngine::stackRgbWithMask(
+    const std::vector<std::vector<uint16_t>>& images,
+    const std::vector<std::vector<uint16_t>>& originalImages,
+    int width, int height, Method method, double kappa,
+    const std::vector<uint8_t>& mask, std::vector<uint16_t>& result,
+    GroundMethod groundMethod) {
+    size_t pixelCount = 0;
+    size_t rgbSize = 0;
+    if (images.empty() || originalImages.empty() ||
+        !imageSize(width, height, pixelCount) ||
+        !rgbImageSize(width, height, rgbSize) || mask.size() != pixelCount ||
+        !validFrames(images, rgbSize) || !validFrames(originalImages, rgbSize) ||
+        (groundMethod != GroundReferenceFrame &&
+         images.size() != originalImages.size())) {
+        return false;
+    }
+
+    std::vector<uint16_t> skyResult;
+    if (!stackRgb(images, width, height, method, kappa, skyResult, true)) {
+        return false;
+    }
+
+    std::vector<uint16_t> groundResult;
+    if (groundMethod == GroundReferenceFrame) {
+        groundResult = originalImages.front();
+    } else {
+        const Method groundStackMethod = groundMethod == GroundMedian
+            ? Median : Average;
+        if (!stackRgb(originalImages, width, height, groundStackMethod, kappa,
+                      groundResult, false)) {
+            return false;
+        }
+    }
+
+    result.resize(rgbSize);
+    for (size_t pixel = 0; pixel < pixelCount; ++pixel) {
+        const double alpha = mask[pixel] / 255.0;
+        const size_t base = pixel * 3;
+        for (int channel = 0; channel < 3; ++channel) {
+            const double value = skyResult[base + channel] * alpha +
+                groundResult[base + channel] * (1.0 - alpha);
+            result[base + channel] = static_cast<uint16_t>(
+                std::clamp(std::lround(value), 0L, 65535L));
+        }
+    }
+    return true;
 }
 
 StackingEngine::Method StackingEngine::recommendMethod(int frameCount) {

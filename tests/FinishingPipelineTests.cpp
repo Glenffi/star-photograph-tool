@@ -122,6 +122,8 @@ void testEnabledStagesRunInWorkerOrder() {
     options.basicAdjustments.sharpening = 10;
     options.skyGroundSeparation = true;
     options.groundDetailStrength = 10;
+    options.starDefringeEnabled = true;
+    options.starDefringeStrength = 10;
     options.starReductionEnabled = true;
     options.starReductionStrength = 10;
 
@@ -138,6 +140,7 @@ void testEnabledStagesRunInWorkerOrder() {
         FinishingStage::BasicAdjustments,
         FinishingStage::GroundDetail,
         FinishingStage::Sharpening,
+        FinishingStage::StarDefringe,
         FinishingStage::StarReduction
     };
 

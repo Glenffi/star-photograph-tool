@@ -234,15 +234,54 @@ void testStacking() {
           "Sky stacking should ignore a shifted-ground sample marked as zero");
 
     const std::vector<std::vector<uint16_t>> rgbFrames = {
-        {100, 200, 300, 0, 500, 600},
+        {100, 200, 300, 0, 0, 0},
         {110, 210, 310, 400, 510, 610},
         {120, 220, 320, 420, 520, 620}
     };
     check(engine.stackRgb(rgbFrames, 2, 1, StackingEngine::Average, 2.5,
                           result, true),
           "Interleaved RGB stacking should succeed");
-    check(result == std::vector<uint16_t>({110, 210, 310, 410, 510, 610}),
-          "Interleaved RGB stacking should preserve channels and ignore padding");
+    check(result == std::vector<uint16_t>({110, 210, 310, 410, 515, 615}),
+          "Interleaved RGB stacking should ignore only all-zero padding pixels");
+
+    const std::vector<std::vector<uint16_t>> rgbWithValidZeroChannel = {
+        {0, 200, 400},
+        {100, 300, 500}
+    };
+    check(engine.stackRgb(rgbWithValidZeroChannel, 1, 1,
+                          StackingEngine::Average, 2.5, result, true) &&
+              result == std::vector<uint16_t>({50, 250, 450}),
+          "A zero in one RGB channel must not invalidate a real dark pixel");
+
+    // The last frame is a bright yellow outlier. Its blue value overlaps the
+    // normal blue distribution, so independent channel clipping would retain
+    // that blue sample after rejecting its red and green values. Linked
+    // luminance clipping must reject the complete RGB triplet instead.
+    const std::vector<std::vector<uint16_t>> chromaticOutlierFrames = {
+        {100, 100, 50},
+        {100, 100, 100},
+        {100, 100, 150},
+        {100, 100, 200},
+        {10000, 10000, 250}
+    };
+    check(engine.stackRgb(chromaticOutlierFrames, 1, 1,
+                          StackingEngine::KappaSigma, 1.5, result) &&
+              result == std::vector<uint16_t>({100, 100, 125}),
+          "Kappa-Sigma must accept or reject complete RGB pixels together");
+
+    const std::vector<std::vector<uint16_t>> alignedRgbMaskFrames = {
+        {100, 100, 50}, {100, 100, 100}, {100, 100, 150},
+        {100, 100, 200}, {10000, 10000, 250}
+    };
+    const std::vector<std::vector<uint16_t>> originalRgbMaskFrames = {
+        {500, 600, 700}, {500, 600, 700}, {500, 600, 700},
+        {500, 600, 700}, {500, 600, 700}
+    };
+    check(engine.stackRgbWithMask(
+              alignedRgbMaskFrames, originalRgbMaskFrames, 1, 1,
+              StackingEngine::KappaSigma, 1.5, {255}, result) &&
+              result == std::vector<uint16_t>({100, 100, 125}),
+          "Sky-ground RGB stacking must preserve linked sky rejection");
 
     const std::vector<std::vector<uint16_t>> outlierFrames = {
         {100}, {102}, {99}, {101}, {50000}
@@ -2136,6 +2175,26 @@ void testStarDetectionAndReduction() {
     const int coreRedGreenBefore =
         (fringedRgb[fringeCore] - fringeBackground[0]) -
         (fringedRgb[fringeCore + 1] - fringeBackground[1]);
+    std::vector<uint16_t> defringedOnly = fringedRgb;
+    StarReductionStats defringeOnlyStats;
+    check(StarReducer::defringe(
+              defringedOnly, width, height, 55, &defringeOnlyStats),
+          "Independent star defringe should process a chromatic-fringe fixture");
+    const double independentFringeAfter =
+        fringeBlueExcess(defringedOnly, fringeRing);
+    check(defringeOnlyStats.defringedPixels > 0 &&
+              independentFringeAfter < fringeBefore * 0.7,
+          "Independent defringe should reduce excess wing chroma");
+    const uint32_t independentCoreBefore =
+        fringedRgb[fringeCore] + fringedRgb[fringeCore + 1] +
+        fringedRgb[fringeCore + 2];
+    const uint32_t independentCoreAfter =
+        defringedOnly[fringeCore] + defringedOnly[fringeCore + 1] +
+        defringedOnly[fringeCore + 2];
+    check(std::abs(static_cast<int64_t>(independentCoreAfter) -
+                   static_cast<int64_t>(independentCoreBefore)) < 100,
+          "Independent defringe should not shrink or darken the star core");
+
     StarReductionStats fringeStats;
     check(StarReducer::reduce(
               fringedRgb, width, height, 55, &fringeStats),
@@ -2757,6 +2816,8 @@ void testPresetDenoisePersistence() {
     original.basicAdjustments.highlights = -24;
     original.basicAdjustments.vibrance = 16;
     original.basicAdjustments.sharpening = 35;
+    original.starDefringeEnabled = true;
+    original.starDefringeStrength = 61;
     const QString path = directory.filePath("preset.json");
     PresetManager::savePreset(original, path);
     const Preset loaded = PresetManager::loadPreset(path);
@@ -2769,8 +2830,10 @@ void testPresetDenoisePersistence() {
               loaded.basicAdjustments.exposureTenths == 7 &&
               loaded.basicAdjustments.highlights == -24 &&
               loaded.basicAdjustments.vibrance == 16 &&
-              loaded.basicAdjustments.sharpening == 35,
-          "JSON presets should persist denoise and basic adjustment settings");
+              loaded.basicAdjustments.sharpening == 35 &&
+              loaded.starDefringeEnabled &&
+              loaded.starDefringeStrength == 61,
+          "JSON presets should persist denoise, adjustments, and defringe");
 
     const QString legacyPath = directory.filePath("legacy.json");
     QFile legacyFile(legacyPath);
@@ -2783,6 +2846,8 @@ void testPresetDenoisePersistence() {
               legacy.photometricNormalizationEnabled &&
               !legacy.noiseReductionEnabled &&
               legacy.noiseReductionStrength == 30 &&
+              !legacy.starDefringeEnabled &&
+              legacy.starDefringeStrength == 55 &&
               legacy.basicAdjustments.isNeutral() &&
               legacy.kappaValue == 2.5,
           "Legacy presets without newer fields should use safe defaults");

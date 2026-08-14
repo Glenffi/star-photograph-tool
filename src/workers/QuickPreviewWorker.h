@@ -36,6 +36,9 @@ public:
     const StarReductionStats& starReductionStats() const {
         return m_finishingResult.starReductionStats;
     }
+    const StarReductionStats& starDefringeStats() const {
+        return m_finishingResult.starDefringeStats;
+    }
 
 signals:
     void stageMessage(const QString& message);

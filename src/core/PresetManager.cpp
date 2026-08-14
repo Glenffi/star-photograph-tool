@@ -71,6 +71,8 @@ void PresetManager::savePreset(const Preset& preset, const QString& path) {
     obj["vibrance"] = preset.basicAdjustments.vibrance;
     obj["saturation"] = preset.basicAdjustments.saturation;
     obj["sharpening"] = preset.basicAdjustments.sharpening;
+    obj["starDefringeEnabled"] = preset.starDefringeEnabled;
+    obj["starDefringeStrength"] = preset.starDefringeStrength;
     obj["starReduceEnabled"] = preset.starReduceEnabled;
     obj["starReduceStrength"] = preset.starReduceStrength;
     obj["outputFormat"] = preset.outputFormat;
@@ -121,6 +123,8 @@ Preset PresetManager::loadPreset(const QString& path) {
     preset.basicAdjustments.vibrance = obj["vibrance"].toInt(0);
     preset.basicAdjustments.saturation = obj["saturation"].toInt(0);
     preset.basicAdjustments.sharpening = obj["sharpening"].toInt(0);
+    preset.starDefringeEnabled = obj["starDefringeEnabled"].toBool(false);
+    preset.starDefringeStrength = obj["starDefringeStrength"].toInt(55);
     preset.starReduceEnabled = obj["starReduceEnabled"].toBool(false);
     preset.starReduceStrength = obj["starReduceStrength"].toInt(70);
     preset.outputFormat = obj["outputFormat"].toString("tiff16");

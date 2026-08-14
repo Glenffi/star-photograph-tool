@@ -164,6 +164,21 @@ bool FinishingPipeline::process(
             if (!finishStage()) return false;
         }
 
+        const bool independentDefringe = options.starDefringeEnabled &&
+            options.starDefringeStrength > 0;
+        if (independentDefringe) {
+            if (!beginStage(FinishingStage::StarDefringe)) return false;
+            const std::vector<uint8_t>* processingMask =
+                options.skyGroundSeparation ? skyMask : nullptr;
+            if (!StarReducer::defringe(
+                    rgb, width, height, options.starDefringeStrength,
+                    &result.starDefringeStats, processingMask)) {
+                result.error = "Star chromatic defringe failed";
+                return false;
+            }
+            if (!finishStage()) return false;
+        }
+
         if (options.starReductionEnabled &&
             options.starReductionStrength > 0) {
             if (!beginStage(FinishingStage::StarReduction)) return false;
@@ -171,7 +186,8 @@ bool FinishingPipeline::process(
                 options.skyGroundSeparation ? skyMask : nullptr;
             if (!StarReducer::reduce(
                     rgb, width, height, options.starReductionStrength,
-                    &result.starReductionStats, processingMask)) {
+                    &result.starReductionStats, processingMask,
+                    !independentDefringe)) {
                 result.error = "Star reduction failed";
                 return false;
             }

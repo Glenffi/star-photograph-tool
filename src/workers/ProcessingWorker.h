@@ -76,6 +76,8 @@ public:
         int dewarpStrength = 30;
         bool stretchEnabled = false;
         BasicAdjustmentOptions basicAdjustments;
+        bool starDefringeEnabled = false;
+        int starDefringeStrength = 55;
         bool starReduceEnabled = false;
         int starReduceStrength = 70;
         QString outputFormat = "tiff16";
@@ -163,6 +165,9 @@ public:
     bool wasCancelled() const { return m_wasCancelled; }
     const StarReductionStats& starReductionStats() const {
         return m_starReductionStats;
+    }
+    const StarReductionStats& starDefringeStats() const {
+        return m_starDefringeStats;
     }
     const ModifiedCameraColorStats& modifiedCameraColorStats() const {
         return m_modifiedCameraColorStats;
@@ -267,6 +272,7 @@ private:
     double m_photometricOutputAnchorMaxAbsOffset = 0.0;
     std::atomic<bool> m_cancelRequested{false};
     bool m_wasCancelled = false;
+    StarReductionStats m_starDefringeStats;
     StarReductionStats m_starReductionStats;
     ModifiedCameraColorStats m_modifiedCameraColorStats;
     double m_skyGroundSkyFraction = 0.0;

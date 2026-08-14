@@ -275,6 +275,10 @@ int main(int argc, char* argv[]) {
         "star-reduce-strength",
         "Enable star reduction at strength 1-100; 0 disables it.",
         "value", "0");
+    const QCommandLineOption starDefringeOption(
+        "star-defringe-strength",
+        "Correct excess star-wing chroma at strength 1-100; 0 disables it.",
+        "value", "0");
     parser.addOptions({inputOption, outputOption, limitOption,
                        startIndexOption, singleOption,
                        timelapseOption, darkDirectoryOption,
@@ -305,7 +309,7 @@ int main(int argc, char* argv[]) {
                        contrastOption, highlightsOption, shadowsOption,
                        whitesOption, blacksOption, vibranceOption,
                        saturationOption, sharpeningOption,
-                       starReduceOption});
+                       starDefringeOption, starReduceOption});
     parser.process(application);
 
     const QString input = QDir(parser.value(inputOption)).absolutePath();
@@ -341,6 +345,9 @@ int main(int argc, char* argv[]) {
     bool starReduceOk = false;
     const int starReduceStrength =
         parser.value(starReduceOption).toInt(&starReduceOk);
+    bool starDefringeOk = false;
+    const int starDefringeStrength =
+        parser.value(starDefringeOption).toInt(&starDefringeOk);
     const bool stretchEnabled = parser.isSet(stretchOption);
     BasicAdjustmentOptions basicAdjustments;
     bool temperatureOk = false;
@@ -488,9 +495,10 @@ int main(int argc, char* argv[]) {
                      "--timelapse, deep-sky calibration, or --sky-ground.\n";
         return 2;
     }
-    if (starTrailMode && starReduceStrength > 0) {
+    if (starTrailMode &&
+        (starReduceStrength > 0 || starDefringeStrength > 0)) {
         std::cerr << "--star-trail cannot be combined with "
-                     "--star-reduce-strength.\n";
+                     "--star-reduce-strength or --star-defringe-strength.\n";
         return 2;
     }
     if (timelapseMode && modifiedCameraColorEnabled) {
@@ -516,6 +524,8 @@ int main(int argc, char* argv[]) {
         !highlightsOk || !shadowsOk || !whitesOk || !blacksOk ||
         !vibranceOk || !saturationOk || !sharpeningOk ||
         !basicAdjustments.isValid() ||
+        !starDefringeOk || starDefringeStrength < 0 ||
+        starDefringeStrength > 100 ||
         !starReduceOk || starReduceStrength < 0 ||
         starReduceStrength > 100 ||
         !starTrailCometStrengthOk || starTrailCometStrength < 0 ||
@@ -543,7 +553,8 @@ int main(int argc, char* argv[]) {
                      "--memory-budget-mib, --denoise-strength, "
                      "--dehaze-strength, modified-camera color, basic "
                      "adjustments, or "
-                     "--star-reduce-strength/timelapse/star-trail/sky-ground "
+                     "--star-defringe-strength/--star-reduce-strength/"
+                     "timelapse/star-trail/sky-ground "
                      "options.\n";
         return 2;
     }
@@ -616,7 +627,8 @@ int main(int argc, char* argv[]) {
     estimateOptions.basicAdjustments =
         basicAdjustments.hasToneOrColorAdjustments();
     estimateOptions.sharpening = basicAdjustments.hasSharpening();
-    estimateOptions.starReduction = starReduceStrength > 0;
+    estimateOptions.starReduction =
+        starReduceStrength > 0 || starDefringeStrength > 0;
     estimateOptions.rawCalibration = deepSkyCalibration;
     const uint64_t estimatedBytes = timelapseMode
         ? ProcessingMemoryEstimator::estimateTimelapsePeakBytes(
@@ -688,6 +700,8 @@ int main(int argc, char* argv[]) {
     params.dewarpStrength = dehazeStrength;
     params.stretchEnabled = stretchEnabled;
     params.basicAdjustments = basicAdjustments;
+    params.starDefringeEnabled = starDefringeStrength > 0;
+    params.starDefringeStrength = starDefringeStrength;
     params.starReduceEnabled = starReduceStrength > 0;
     params.starReduceStrength = starReduceStrength;
 
@@ -953,6 +967,16 @@ int main(int argc, char* argv[]) {
     report["vibrance"] = basicAdjustments.vibrance;
     report["saturation"] = basicAdjustments.saturation;
     report["sharpening"] = basicAdjustments.sharpening;
+    report["starDefringeStrength"] = starDefringeStrength;
+    const StarReductionStats& defringeStats = worker.starDefringeStats();
+    report["starDefringeDetectedStars"] =
+        QString::number(defringeStats.detectedStars);
+    report["starDefringeProcessedStars"] =
+        QString::number(defringeStats.processedStars);
+    report["starDefringePixels"] =
+        QString::number(defringeStats.defringedPixels);
+    report["starDefringeAffectedPixels"] =
+        QString::number(defringeStats.affectedPixels);
     report["starReduceStrength"] = starReduceStrength;
     const StarReductionStats& reductionStats = worker.starReductionStats();
     report["starReductionDetectedStars"] =
@@ -1015,6 +1039,7 @@ int main(int argc, char* argv[]) {
         params.stretchEnabled ||
         !params.basicAdjustments.isNeutral() ||
         (params.skyGroundSepEnabled && params.groundDetailStrength > 0) ||
+        (params.starDefringeEnabled && params.starDefringeStrength > 0) ||
         (params.starReduceEnabled && params.starReduceStrength > 0);
     const PreviewImage8 preview = hasFinishingStage
         ? PreviewToneMapper::mapRgb16WithRange(

@@ -20,6 +20,8 @@ struct Preset {
     int modifiedCameraColorStrength = 100;
     bool stretchEnabled = false;
     BasicAdjustmentOptions basicAdjustments;
+    bool starDefringeEnabled = false;
+    int starDefringeStrength = 55;
     bool starReduceEnabled = false;
     int starReduceStrength = 70;
     QString outputFormat = "tiff16";

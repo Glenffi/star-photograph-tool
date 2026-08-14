@@ -210,6 +210,12 @@ bool processOpenedRaw(LibRaw& processor, const QString& filePath,
     params.output_color = 1; // sRGB primaries
     params.gamm[0] = 1.0f;   // linear transfer function
     params.gamm[1] = 1.0f;
+    // Blend only channel-clipped highlights. Bright stars often clip red and
+    // blue at different levels after camera white balance; plain clipping can
+    // therefore leave a false magenta core. LibRaw modes 3+ attempt spatial
+    // reconstruction and may invent structure, so mode 2 is the conservative
+    // default for scientific-looking star fields.
+    params.highlight = 2;
     if (calibratedCfa) {
         // Dark/Bias subtraction has already removed the sensor pedestal. Tell
         // LibRaw not to subtract it again, and retain the camera's usable range.

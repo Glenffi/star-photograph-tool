@@ -39,5 +39,17 @@ public:
      */
     static bool reduce(std::vector<uint16_t>& image, int width, int height,
                        int strength, StarReductionStats* stats = nullptr,
-                       const std::vector<uint8_t>* processingMask = nullptr);
+                       const std::vector<uint8_t>* processingMask = nullptr,
+                       bool applyDefringe = true);
+
+    /**
+     * @brief Correct excess color in star wings without changing star size.
+     *
+     * The correction compares each star core with its outer footprint and only
+     * reduces chroma that increases toward the edge. This protects naturally
+     * blue stars better than a global purple-hue desaturation filter.
+     */
+    static bool defringe(std::vector<uint16_t>& image, int width, int height,
+                         int strength, StarReductionStats* stats = nullptr,
+                         const std::vector<uint8_t>* processingMask = nullptr);
 };

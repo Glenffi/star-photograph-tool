@@ -271,77 +271,6 @@ private:
     QStringList m_files;
 };
 
-bool splitFrames(const std::vector<std::vector<uint16_t>>& rgbFrames,
-                 int width, int height,
-                 std::vector<std::vector<uint16_t>>& red,
-                 std::vector<std::vector<uint16_t>>& green,
-                 std::vector<std::vector<uint16_t>>& blue) {
-    red.clear();
-    green.clear();
-    blue.clear();
-    red.reserve(rgbFrames.size());
-    green.reserve(rgbFrames.size());
-    blue.reserve(rgbFrames.size());
-
-    for (const auto& rgb : rgbFrames) {
-        ImageBufferUtils::RgbChannels channels;
-        if (!ImageBufferUtils::splitRgb(rgb, width, height, channels)) return false;
-        red.push_back(std::move(channels.red));
-        green.push_back(std::move(channels.green));
-        blue.push_back(std::move(channels.blue));
-    }
-    return true;
-}
-
-bool mergeChannels(std::vector<uint16_t> red, std::vector<uint16_t> green,
-                   std::vector<uint16_t> blue, int width, int height,
-                   std::vector<uint16_t>& output) {
-    ImageBufferUtils::RgbChannels channels;
-    channels.red = std::move(red);
-    channels.green = std::move(green);
-    channels.blue = std::move(blue);
-    return ImageBufferUtils::mergeRgb(channels, width, height, output);
-}
-
-bool stackRgbWithMask(StackingEngine& stacker,
-                      const std::vector<std::vector<uint16_t>>& aligned,
-                      const std::vector<std::vector<uint16_t>>& originals,
-                      int width, int height, StackingEngine::Method method,
-                      double kappa, StackingEngine::GroundMethod groundMethod,
-                      const std::vector<uint8_t>& mask,
-                      std::vector<uint16_t>& output) {
-    if (aligned.empty() || originals.empty() ||
-        (groundMethod != StackingEngine::GroundReferenceFrame &&
-         aligned.size() != originals.size())) {
-        return false;
-    }
-
-    std::vector<std::vector<uint16_t>> alignedRed;
-    std::vector<std::vector<uint16_t>> alignedGreen;
-    std::vector<std::vector<uint16_t>> alignedBlue;
-    std::vector<std::vector<uint16_t>> originalRed;
-    std::vector<std::vector<uint16_t>> originalGreen;
-    std::vector<std::vector<uint16_t>> originalBlue;
-    if (!splitFrames(aligned, width, height, alignedRed, alignedGreen, alignedBlue) ||
-        !splitFrames(originals, width, height, originalRed, originalGreen, originalBlue)) {
-        return false;
-    }
-
-    std::vector<uint16_t> redResult;
-    std::vector<uint16_t> greenResult;
-    std::vector<uint16_t> blueResult;
-    if (!stacker.stackWithMask(alignedRed, originalRed, width, height, method,
-                               kappa, mask, redResult, groundMethod) ||
-        !stacker.stackWithMask(alignedGreen, originalGreen, width, height, method,
-                               kappa, mask, greenResult, groundMethod) ||
-        !stacker.stackWithMask(alignedBlue, originalBlue, width, height, method,
-                               kappa, mask, blueResult, groundMethod)) {
-        return false;
-    }
-    return mergeChannels(std::move(redResult), std::move(greenResult),
-                         std::move(blueResult), width, height, output);
-}
-
 bool stackCachedRgb(StackingEngine& stacker, const DiskFrameStore& aligned,
                     const DiskFrameStore* originals, int width, int height,
                     StackingEngine::Method method, double kappa,
@@ -387,9 +316,9 @@ bool stackCachedRgb(StackingEngine& stacker, const DiskFrameStore& aligned,
             maskChunk.assign(
                 mask->begin() + static_cast<size_t>(startRow) * width,
                 mask->begin() + static_cast<size_t>(startRow + rowCount) * width);
-            if (!stackRgbWithMask(stacker, alignedChunk, originalChunk, width,
-                                  rowCount, method, kappa, groundMethod,
-                                  maskChunk, stackedChunk)) {
+            if (!stacker.stackRgbWithMask(
+                    alignedChunk, originalChunk, width, rowCount, method, kappa,
+                    maskChunk, stackedChunk, groundMethod)) {
                 return false;
             }
         } else if (!stacker.stackRgb(alignedChunk, width, rowCount, method,
@@ -887,6 +816,7 @@ void ProcessingWorker::run() {
     m_photometricOutputAnchorGain = 1.0;
     m_photometricOutputAnchorMaxAbsOffset = 0.0;
     m_starReductionStats = {};
+    m_starDefringeStats = {};
     m_modifiedCameraColorStats = {};
     m_skyGroundSkyFraction = 0.0;
     m_skyGroundMaskSource.clear();
@@ -1085,7 +1015,8 @@ void ProcessingWorker::run() {
     estimateOptions.basicAdjustments =
         m_params.basicAdjustments.hasToneOrColorAdjustments();
     estimateOptions.sharpening = m_params.basicAdjustments.hasSharpening();
-    estimateOptions.starReduction = m_params.starReduceEnabled;
+    estimateOptions.starReduction =
+        m_params.starReduceEnabled || m_params.starDefringeEnabled;
     estimateOptions.rawCalibration = m_params.deepSkyMode;
     const uint64_t estimatedBytes = ProcessingMemoryEstimator::estimatePeakBytes(
         metadataWidth, metadataHeight, estimateOptions);
@@ -1667,8 +1598,9 @@ void ProcessingWorker::runStarTrail() {
         m_errorString = "星轨合成至少需要 3 张固定机位 RAW";
         return;
     }
-    if (m_params.starReduceEnabled && m_params.starReduceStrength > 0) {
-        m_errorString = "星轨合成不能同时启用缩星";
+    if ((m_params.starReduceEnabled && m_params.starReduceStrength > 0) ||
+        (m_params.starDefringeEnabled && m_params.starDefringeStrength > 0)) {
+        m_errorString = "星轨合成不能同时启用缩星或星点去紫边";
         return;
     }
 
@@ -2525,7 +2457,8 @@ void ProcessingWorker::runSingleFrame() {
     options.basicAdjustments =
         m_params.basicAdjustments.hasToneOrColorAdjustments();
     options.sharpening = m_params.basicAdjustments.hasSharpening();
-    options.starReduction = m_params.starReduceEnabled;
+    options.starReduction =
+        m_params.starReduceEnabled || m_params.starDefringeEnabled;
 
     auto fitsMemoryBudget = [this, &options](int width, int height) {
         const uint64_t estimated = ProcessingMemoryEstimator::estimatePeakBytes(
@@ -2603,6 +2536,7 @@ bool ProcessingWorker::finishResult(std::vector<uint16_t>& resultRgb,
         || m_params.stretchEnabled
         || !m_params.basicAdjustments.isNeutral()
         || (usesSkyGroundMask && m_params.groundDetailStrength > 0)
+        || (m_params.starDefringeEnabled && m_params.starDefringeStrength > 0)
         || (m_params.starReduceEnabled && m_params.starReduceStrength > 0);
     if (hasFinishingStage) {
         constexpr int kComparisonLongSide = 2400;
@@ -2635,6 +2569,8 @@ bool ProcessingWorker::finishResult(std::vector<uint16_t>& resultRgb,
     finishingOptions.basicAdjustments = m_params.basicAdjustments;
     finishingOptions.skyGroundSeparation = usesSkyGroundMask;
     finishingOptions.groundDetailStrength = m_params.groundDetailStrength;
+    finishingOptions.starDefringeEnabled = m_params.starDefringeEnabled;
+    finishingOptions.starDefringeStrength = m_params.starDefringeStrength;
     finishingOptions.starReductionEnabled = m_params.starReduceEnabled;
     finishingOptions.starReductionStrength = m_params.starReduceStrength;
 
@@ -2669,6 +2605,10 @@ bool ProcessingWorker::finishResult(std::vector<uint16_t>& resultRgb,
                 emit stageMessage("亮度锐化...");
                 emit progress(94);
                 break;
+            case FinishingStage::StarDefringe:
+                emit stageMessage("星点去紫边...");
+                emit progress(95);
+                break;
             case FinishingStage::StarReduction:
                 emit stageMessage("缩星处理...");
                 emit progress(95);
@@ -2683,6 +2623,7 @@ bool ProcessingWorker::finishResult(std::vector<uint16_t>& resultRgb,
         return false;
     }
     m_modifiedCameraColorStats = finishingResult.modifiedCameraColorStats;
+    m_starDefringeStats = finishingResult.starDefringeStats;
     m_starReductionStats = finishingResult.starReductionStats;
     if (m_params.modifiedCameraColorEnabled &&
         m_params.modifiedCameraColor.strength > 0) {
@@ -2696,12 +2637,24 @@ bool ProcessingWorker::finishResult(std::vector<uint16_t>& resultRgb,
             .arg(m_modifiedCameraColorStats.gains[1], 0, 'f', 3)
             .arg(m_modifiedCameraColorStats.gains[2], 0, 'f', 3));
     }
-    if (m_params.starReduceEnabled && m_params.starReduceStrength > 0) {
+    if (m_params.starDefringeEnabled && m_params.starDefringeStrength > 0) {
         emit stageMessage(QString(
-            "缩星完成：处理 %1 颗星，其中 %2 颗弱小星被清除或显著缩小，%3 个星缘像素去色边")
-            .arg(m_starReductionStats.processedStars)
-            .arg(m_starReductionStats.stronglySuppressedStars)
-            .arg(m_starReductionStats.defringedPixels));
+            "星点去紫边完成：修正 %1 个星缘像素，星点尺寸保持不变")
+            .arg(m_starDefringeStats.defringedPixels));
+    }
+    if (m_params.starReduceEnabled && m_params.starReduceStrength > 0) {
+        if (m_params.starDefringeEnabled && m_params.starDefringeStrength > 0) {
+            emit stageMessage(QString(
+                "缩星完成：处理 %1 颗星，其中 %2 颗弱小星被清除或显著缩小")
+                .arg(m_starReductionStats.processedStars)
+                .arg(m_starReductionStats.stronglySuppressedStars));
+        } else {
+            emit stageMessage(QString(
+                "缩星完成：处理 %1 颗星，其中 %2 颗弱小星被清除或显著缩小，%3 个星缘像素去色边")
+                .arg(m_starReductionStats.processedStars)
+                .arg(m_starReductionStats.stronglySuppressedStars)
+                .arg(m_starReductionStats.defringedPixels));
+        }
     }
 
     m_stackedData = std::move(resultRgb);

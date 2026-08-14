@@ -1190,16 +1190,52 @@ void ParamsPanel::setupUI() {
 
     adjustPageLayout->addWidget(m_optimizeGroup);
 
-    // 缩星组（始终展开，不可折叠）
+    // 星点修饰组（始终展开，不可折叠）
     m_starReduceGroup = new QWidget(this);
     setRole(m_starReduceGroup, "plainSection");
     auto* starLayout = new QVBoxLayout(m_starReduceGroup);
     starLayout->setContentsMargins(0, 15, 0, 6);
     starLayout->setSpacing(10);
 
-    auto* starTitle = new QLabel(QString::fromUtf8("缩星"), m_starReduceGroup);
+    auto* starTitle = new QLabel(QString::fromUtf8("星点修饰"), m_starReduceGroup);
     setRole(starTitle, "sectionTitle");
     starLayout->addWidget(starTitle);
+
+    auto* defringeRow = new QHBoxLayout();
+    m_starDefringeCheck = new QCheckBox(
+        QString::fromUtf8("去除星点紫边"), m_starReduceGroup);
+    m_starDefringeCheck->setToolTip(QString::fromUtf8(
+        "比较星核与星翼色度，只抑制向边缘突增的紫、蓝或绿色边\n"
+        "不会改变星点尺寸，也不会全局降低饱和度"));
+    connect(m_starDefringeCheck, &QCheckBox::toggled,
+            this, &ParamsPanel::onCheckChanged);
+    defringeRow->addWidget(m_starDefringeCheck);
+    starLayout->addLayout(defringeRow);
+
+    auto* defringeStrengthRow = new QHBoxLayout();
+    auto* defringeStrengthLabel = new QLabel(
+        QString::fromUtf8("去边强度:"), m_starReduceGroup);
+    defringeStrengthRow->addWidget(defringeStrengthLabel);
+    m_starDefringeSlider = createSlider(0, 100, 55);
+    m_starDefringeSlider->setEnabled(false);
+    m_starDefringeSlider->setMinimumWidth(96);
+    m_starDefringeLabel = new QLabel("55%", m_starReduceGroup);
+    setRole(m_starDefringeLabel, "value");
+    m_starDefringeLabel->setMinimumWidth(32);
+    m_starDefringeLabel->setEnabled(false);
+    m_starDefringeSlider->setToolTip(QString::fromUtf8(
+        "40-60 适合普通镜头色差；更高强度用于明显的蓝紫星翼\n"
+        "建议在 100% 预览下确认真实蓝星仍保留颜色"));
+    connect(m_starDefringeSlider, &QSlider::valueChanged,
+            this, [this](int value) {
+                m_starDefringeLabel->setText(QString("%1%").arg(value));
+                onSliderValueChanged(value);
+            });
+    connect(m_starDefringeSlider, &QSlider::sliderReleased,
+            this, &ParamsPanel::onSliderReleased);
+    defringeStrengthRow->addWidget(m_starDefringeSlider, 1);
+    defringeStrengthRow->addWidget(m_starDefringeLabel);
+    starLayout->addLayout(defringeStrengthRow);
 
     auto* starRow = new QHBoxLayout();
     m_starReduceCheck = new QCheckBox(QString::fromUtf8("启用缩星"), m_starReduceGroup);
@@ -1336,6 +1372,10 @@ void ParamsPanel::setupUI() {
     connect(m_noiseReductionCheck, &QCheckBox::toggled, this, [this](bool checked) {
         m_noiseReductionSlider->setEnabled(checked);
         m_noiseReductionLabel->setEnabled(checked);
+    });
+    connect(m_starDefringeCheck, &QCheckBox::toggled, this, [this](bool checked) {
+        m_starDefringeSlider->setEnabled(checked);
+        m_starDefringeLabel->setEnabled(checked);
     });
     connect(m_starReduceCheck, &QCheckBox::toggled, this, [this](bool checked) {
         m_starReduceSlider->setEnabled(checked);
@@ -1536,6 +1576,8 @@ void ParamsPanel::onRestoreDefaults() {
     m_vibranceSlider->setValue(0);
     m_saturationSlider->setValue(0);
     m_sharpeningSlider->setValue(0);
+    m_starDefringeCheck->setChecked(false);
+    m_starDefringeSlider->setValue(55);
     m_starReduceCheck->setChecked(false);
     m_starReduceSlider->setValue(70);
     m_outputFormat->setCurrentIndex(0);
@@ -1620,6 +1662,8 @@ void ParamsPanel::onSavePreset() {
     settings.setValue("vibrance", basic.vibrance);
     settings.setValue("saturation", basic.saturation);
     settings.setValue("sharpening", basic.sharpening);
+    settings.setValue("starDefringeEnabled", m_starDefringeCheck->isChecked());
+    settings.setValue("starDefringeStrength", m_starDefringeSlider->value());
     settings.setValue("starReduceEnabled", m_starReduceCheck->isChecked());
     settings.setValue("starReduceStrength", m_starReduceSlider->value());
     settings.setValue("outputFormat", m_outputFormat->currentIndex());
@@ -1687,6 +1731,8 @@ void ParamsPanel::saveCurrentSettings() {
     settings.setValue("vibrance", basic.vibrance);
     settings.setValue("saturation", basic.saturation);
     settings.setValue("sharpening", basic.sharpening);
+    settings.setValue("starDefringeEnabled", m_starDefringeCheck->isChecked());
+    settings.setValue("starDefringeStrength", m_starDefringeSlider->value());
     settings.setValue("starReduceEnabled", m_starReduceCheck->isChecked());
     settings.setValue("starReduceStrength", m_starReduceSlider->value());
     settings.setValue("outputFormat", m_outputFormat->currentIndex());
@@ -1755,6 +1801,9 @@ void ParamsPanel::loadPreset() {
     basic.vibrance = settings.value("vibrance", 0).toInt();
     basic.saturation = settings.value("saturation", 0).toInt();
     basic.sharpening = settings.value("sharpening", 0).toInt();
+    bool starDefringe = settings.value("starDefringeEnabled", false).toBool();
+    int starDefringeStrength =
+        settings.value("starDefringeStrength", 55).toInt();
     bool starReduce = settings.value("starReduceEnabled", false).toBool();
     int starReduceStrength = settings.value("starReduceStrength", 70).toInt();
     int outputFormat = settings.value("outputFormat", 0).toInt();
@@ -1821,6 +1870,8 @@ void ParamsPanel::loadPreset() {
     QSignalBlocker blocker38(m_vibranceSlider);
     QSignalBlocker blocker39(m_saturationSlider);
     QSignalBlocker blocker40(m_sharpeningSlider);
+    QSignalBlocker blocker41(m_starDefringeCheck);
+    QSignalBlocker blocker42(m_starDefringeSlider);
 
     m_stackAlgorithm->setCurrentIndex(stackIndex);
     m_kappaSlider->setValue(kappa);
@@ -1865,6 +1916,12 @@ void ParamsPanel::loadPreset() {
     applyBasicValue(m_vibranceSlider, m_vibranceLabel, basic.vibrance);
     applyBasicValue(m_saturationSlider, m_saturationLabel, basic.saturation);
     applyBasicValue(m_sharpeningSlider, m_sharpeningLabel, basic.sharpening);
+    m_starDefringeCheck->setChecked(starDefringe);
+    m_starDefringeSlider->setValue(std::clamp(starDefringeStrength, 0, 100));
+    m_starDefringeSlider->setEnabled(starDefringe);
+    m_starDefringeLabel->setText(
+        QString("%1%").arg(m_starDefringeSlider->value()));
+    m_starDefringeLabel->setEnabled(starDefringe);
     m_starReduceCheck->setChecked(starReduce);
     m_starReduceSlider->setValue(starReduceStrength);
     m_starReduceSlider->setEnabled(starReduce);
@@ -1970,6 +2027,10 @@ void ParamsPanel::onPresetChanged(int index) {
                 settings.value("saturation", 0).toInt();
             preset.basicAdjustments.sharpening =
                 settings.value("sharpening", 0).toInt();
+            preset.starDefringeEnabled =
+                settings.value("starDefringeEnabled", false).toBool();
+            preset.starDefringeStrength =
+                settings.value("starDefringeStrength", 55).toInt();
             preset.starReduceEnabled = settings.value("starReduceEnabled", false).toBool();
             preset.starReduceStrength = settings.value("starReduceStrength", 70).toInt();
             preset.outputFormat = settings.value("outputFormat", 0).toInt() == 0 ? "tiff16" : "png8";
@@ -2039,6 +2100,8 @@ void ParamsPanel::applyPreset(const Preset& preset) {
     QSignalBlocker blocker25(m_vibranceSlider);
     QSignalBlocker blocker26(m_saturationSlider);
     QSignalBlocker blocker27(m_sharpeningSlider);
+    QSignalBlocker blocker28(m_starDefringeCheck);
+    QSignalBlocker blocker29(m_starDefringeSlider);
 
     // Stack method
     if (preset.stackMethod == "median") m_stackAlgorithm->setCurrentIndex(0);
@@ -2112,6 +2175,14 @@ void ParamsPanel::applyPreset(const Preset& preset) {
                     preset.basicAdjustments.saturation);
     applyBasicValue(m_sharpeningSlider, m_sharpeningLabel,
                     preset.basicAdjustments.sharpening);
+
+    m_starDefringeCheck->setChecked(preset.starDefringeEnabled);
+    m_starDefringeSlider->setValue(
+        std::clamp(preset.starDefringeStrength, 0, 100));
+    m_starDefringeSlider->setEnabled(preset.starDefringeEnabled);
+    m_starDefringeLabel->setText(
+        QString("%1%").arg(m_starDefringeSlider->value()));
+    m_starDefringeLabel->setEnabled(preset.starDefringeEnabled);
 
     // Star reduction is part of the preset contract. Apply both values here so
     // built-in and custom presets behave the same after being selected.
@@ -2394,6 +2465,14 @@ BasicAdjustmentOptions ParamsPanel::basicAdjustmentOptions() const {
     options.saturation = m_saturationSlider->value();
     options.sharpening = m_sharpeningSlider->value();
     return options;
+}
+
+bool ParamsPanel::starDefringeEnabled() const {
+    return m_starDefringeCheck ? m_starDefringeCheck->isChecked() : false;
+}
+
+int ParamsPanel::starDefringeStrength() const {
+    return m_starDefringeSlider ? m_starDefringeSlider->value() : 0;
 }
 
 bool ParamsPanel::starReduceEnabled() const {
@@ -2897,6 +2976,8 @@ QString ParamsPanel::finishingSignature() const {
         QString::number(basic.whites), QString::number(basic.blacks),
         QString::number(basic.vibrance), QString::number(basic.saturation),
         QString::number(basic.sharpening),
+        QString::number(starDefringeEnabled()),
+        QString::number(starDefringeStrength()),
         QString::number(starReduceEnabled()),
         QString::number(starReduceStrength()),
         QString::number(groundDetailStrength())

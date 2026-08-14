@@ -50,6 +50,23 @@ public:
                   bool ignoreZero = false);
 
     /**
+     * @brief Stack aligned sky RGB frames and stationary ground RGB frames.
+     *
+     * Unlike three independent planar calls, this keeps RGB validity and
+     * outlier decisions coupled. That prevents a rejected red sample and a
+     * rejected green sample from different frames being recombined into a
+     * color that was never present in the source sequence.
+     */
+    bool stackRgbWithMask(
+        const std::vector<std::vector<uint16_t>>& images,
+        const std::vector<std::vector<uint16_t>>& originalImages,
+        int width, int height,
+        Method method, double kappa,
+        const std::vector<uint8_t>& mask,
+        std::vector<uint16_t>& result,
+        GroundMethod groundMethod = GroundAverage);
+
+    /**
      * @brief 天地分离堆栈
      *
      * 天空区域用对齐后图像堆栈，地景区域用原始图像直接堆栈（不移动），边界羽化融合。

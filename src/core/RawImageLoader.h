@@ -67,7 +67,8 @@ public:
     // Quality tiers are deliberately separate:
     // - loadMetadata(): RAW header only; never unpacks or demosaics pixels.
     // - loadPreview(): embedded preview first, then a fast half-size fallback.
-    // - loadRaw(): full-resolution AHD, reserved for the processing pipeline.
+    // - loadRaw(): full-resolution AHD with conservative clipped-highlight
+    //   blending, reserved for the processing pipeline.
     // Keep paths as QString until they reach LibRaw. On Windows this lets the
     // implementation use LibRaw's wchar_t overload for non-ASCII file names.
     bool loadMetadata(const QString& filePath, Metadata& out);

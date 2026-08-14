@@ -42,6 +42,8 @@ public:
     void clearModifiedCameraGrayPoint();
     bool stretchEnabled() const;
     BasicAdjustmentOptions basicAdjustmentOptions() const;
+    bool starDefringeEnabled() const;
+    int starDefringeStrength() const;
     bool starReduceEnabled() const;
     int starReduceStrength() const;
     QString outputFormat() const;
@@ -235,8 +237,11 @@ private:
     QSlider* m_sharpeningSlider = nullptr;
     QLabel* m_sharpeningLabel = nullptr;
 
-    // 缩星组
+    // 星点修饰组：去色边可以独立使用，不要求同时缩星。
     QWidget* m_starReduceGroup = nullptr;
+    QCheckBox* m_starDefringeCheck = nullptr;
+    QSlider* m_starDefringeSlider = nullptr;
+    QLabel* m_starDefringeLabel = nullptr;
     QCheckBox* m_starReduceCheck = nullptr;
     QSlider* m_starReduceSlider = nullptr;
     QLabel* m_starReduceLabel = nullptr;

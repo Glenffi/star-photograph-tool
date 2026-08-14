@@ -906,6 +906,10 @@ private:
             m_scene == ProcessingScene::SkyGround &&
                 options.skyGroundSeparation
                 ? m_paramsPanel->groundDetailStrength() : 0;
+        options.starDefringeEnabled =
+            m_paramsPanel->starDefringeEnabled();
+        options.starDefringeStrength =
+            m_paramsPanel->starDefringeStrength();
         options.starReductionEnabled =
             m_paramsPanel->starReduceEnabled();
         options.starReductionStrength =
@@ -1045,6 +1049,13 @@ private:
                                         "快速预览已更新 · 缩星处理 %1 颗，"
                                         "请在 100% 下检查")
                                         .arg(starStats.processedStars),
+                                    4000);
+                            } else if (m_paramsPanel->starDefringeEnabled()) {
+                                statusBar()->showMessage(
+                                    QString::fromUtf8(
+                                        "快速预览已更新 · 去紫边修正 %1 个星缘像素")
+                                        .arg(worker->starDefringeStats()
+                                                 .defringedPixels),
                                     4000);
                             } else {
                                 statusBar()->showMessage(
@@ -1350,6 +1361,9 @@ private slots:
         params.stretchEnabled = m_paramsPanel->stretchEnabled();
         params.basicAdjustments =
             m_paramsPanel->basicAdjustmentOptions();
+        params.starDefringeEnabled = !params.starTrailMode &&
+            m_paramsPanel->starDefringeEnabled();
+        params.starDefringeStrength = m_paramsPanel->starDefringeStrength();
         params.starReduceEnabled = !params.starTrailMode &&
             m_paramsPanel->starReduceEnabled();
         params.starReduceStrength = m_paramsPanel->starReduceStrength();
