@@ -102,6 +102,17 @@ jobs:
           test -n "${build_info}"
           grep -F "Actual bundled minimum: macOS 14.0" "${build_info}"
 
+      - name: Verify packaged runtime closure
+        shell: bash
+        run: |
+          set -euo pipefail
+          app="$(find dist -path '*/dmg/StarProcessor.app' -print -quit)"
+          test -n "${app}"
+          test -f "${app}/Contents/Frameworks/liblcms2.2.dylib"
+          version="$(sed -nE 's/project\(StarProcessor VERSION ([0-9.]+).*/\1/p' CMakeLists.txt)"
+          "${app}/Contents/MacOS/StarProcessor" --runtime-check \
+            | grep -F "StarProcessor ${version}"
+
       - name: Read package metadata
         id: package
         shell: bash

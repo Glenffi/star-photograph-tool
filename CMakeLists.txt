@@ -6,7 +6,7 @@ if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Darwin" AND
         "Minimum supported macOS version")
 endif()
 
-project(StarProcessor VERSION 0.10.1 LANGUAGES CXX)
+project(StarProcessor VERSION 0.10.2 LANGUAGES CXX)
 
 include(CTest)
 option(BUILD_SAMPLE_TOOLS "Build local RAW sample regression tools" ON)

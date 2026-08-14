@@ -32,6 +32,8 @@
 #include <QSignalBlocker>
 #include <QStackedWidget>
 #include <algorithm>
+#include <cstring>
+#include <iostream>
 #include <memory>
 #include "ui/ProjectPanel.h"
 #include "ui/PreviewPanel.h"
@@ -1855,6 +1857,15 @@ private:
 };
 
 int main(int argc, char* argv[]) {
+    // This path deliberately avoids QApplication. The packaging job uses it
+    // to make dyld load the completed bundle without requiring a GUI session.
+    for (int i = 1; i < argc; ++i) {
+        if (std::strcmp(argv[i], "--runtime-check") == 0) {
+            std::cout << "StarProcessor " << STARPROCESSOR_VERSION << '\n';
+            return 0;
+        }
+    }
+
     QApplication::setHighDpiScaleFactorRoundingPolicy(
         Qt::HighDpiScaleFactorRoundingPolicy::PassThrough
     );

@@ -23,14 +23,14 @@
 
 1. 以 Release、macOS 14 deployment target 配置并编译。
 2. 运行全部 CTest。
-3. 用 `macdeployqt` 复制 Qt、LibRaw、libtiff 和传递依赖，仅保留 Cocoa 平台、macOS 样式与 JPEG 三个实际使用的 Qt 插件。
-4. 审计所有 Mach-O 文件，禁止残留 Homebrew 或用户目录依赖。
+3. 用 `macdeployqt` 复制 Qt、LibRaw 和 libtiff，仅保留 Cocoa 平台、macOS 样式与 JPEG 三个实际使用的 Qt 插件。
+4. 递归扫描所有 Mach-O 的 `@rpath` 依赖，从 vcpkg/Homebrew 运行库目录补齐非 Qt 传递依赖；随后逐项解析 `@rpath`、`@loader_path` 和 `@executable_path`，禁止缺失文件及残留 Homebrew 或用户目录依赖。
 5. 扫描 bundle 内全部 Mach-O，读取依赖真实的最低系统版本并回写 `Info.plist`。
 6. 在路径改写全部结束后进行 ad-hoc 深度签名并验证 bundle seal。
-7. 启动打包后的程序并生成截图，确认 Qt 平台插件可加载。
+7. 无条件执行 `--runtime-check`，让 dyld 加载打包后的完整动态库树；有图形会话时再启动程序并生成截图，确认 Qt 平台插件可加载。
 8. 创建压缩 DMG 和 SHA-256 文件。
 
-设置 `SKIP_LAUNCH_TEST=1` 可在没有图形会话的 CI 中跳过启动测试；设置 `SKIP_DMG_CREATE=1` 可只生成完成部署和签名的 staging 目录。当前包没有 Apple Developer ID 签名和 notarization；这不影响本机测试，但不等同于面向公众的正式签名发行。
+设置 `SKIP_LAUNCH_TEST=1` 只会跳过需要图形会话的截图检查，不会跳过 dyld 运行时自检；设置 `SKIP_DMG_CREATE=1` 可只生成完成部署和签名的 staging 目录。当前包没有 Apple Developer ID 签名和 notarization；这不影响本机测试，但不等同于面向公众的正式签名发行。
 
 > 源码目标是 macOS 14，但客户端最终兼容范围由打包机上的预编译依赖共同决定。脚本会取 bundle 内所有 Mach-O 的最高最低版本，写入 `LSMinimumSystemVersion` 和 `BUILD-INFO.txt`。开发机 Homebrew 依赖若面向更高系统，本地 DMG 会如实提高要求。正式 arm64 包由 `.github/workflows/macos-package.yml` 在 macOS 14 runner 上构建，Qt 固定为 6.8.3，LibRaw/libtiff 使用项目内 `arm64-osx-dynamic` vcpkg triplet 从源码构建；只要任一 bundle 依赖高于 14.0，工作流就会失败而不是发布错误标记的包。
 

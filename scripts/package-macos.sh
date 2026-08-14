@@ -25,12 +25,91 @@ mach_o_minimum_version() {
     '
 }
 
-for tool in cmake ctest ditto hdiutil codesign otool file; do
+for tool in cmake ctest ditto hdiutil codesign otool file realpath; do
     if ! command -v "${tool}" >/dev/null 2>&1; then
         echo "Required packaging tool is missing: ${tool}" >&2
         exit 2
     fi
 done
+
+declare -a dependency_search_dirs=()
+
+locate_runtime_dependency() {
+    local relative_name="$1"
+    local file_name
+    file_name="$(basename "${relative_name}")"
+    local search_dir
+    for search_dir in "${dependency_search_dirs[@]}"; do
+        [[ -d "${search_dir}" ]] || continue
+        if [[ -f "${search_dir}/${relative_name}" ]]; then
+            realpath "${search_dir}/${relative_name}"
+            return 0
+        fi
+        if [[ -f "${search_dir}/${file_name}" ]]; then
+            realpath "${search_dir}/${file_name}"
+            return 0
+        fi
+    done
+    return 1
+}
+
+copy_transitive_rpath_dependencies() {
+    local frameworks_dir="${STAGED_APP}/Contents/Frameworks"
+    local copied dependency relative_name target source_path binary
+    local pass=0
+
+    while (( pass < 20 )); do
+        copied=0
+        while IFS= read -r -d '' binary; do
+            file "${binary}" | grep -q 'Mach-O' || continue
+            while IFS= read -r dependency; do
+                [[ "${dependency}" == @rpath/* ]] || continue
+                relative_name="${dependency#@rpath/}"
+                target="${frameworks_dir}/${relative_name}"
+                [[ -e "${target}" ]] && continue
+
+                if ! source_path="$(locate_runtime_dependency "${relative_name}")"; then
+                    continue
+                fi
+                echo "Bundling transitive dependency: ${dependency}"
+                cmake -E make_directory "$(dirname "${target}")"
+                # Copy the real file under the install-name expected by dyld;
+                # preserving a Homebrew symlink can leave a dangling target.
+                ditto "${source_path}" "${target}"
+                copied=1
+            done < <(otool -L "${binary}" | tail -n +2 | awk '{print $1}')
+        done < <(find "${STAGED_APP}" -type f -print0)
+
+        (( pass += 1 ))
+        [[ "${copied}" -eq 1 ]] || return 0
+    done
+
+    echo "Transitive dependency collection did not converge" >&2
+    return 1
+}
+
+bundle_dependency_exists() {
+    local binary="$1"
+    local dependency="$2"
+    local relative_name
+    case "${dependency}" in
+        @rpath/*)
+            relative_name="${dependency#@rpath/}"
+            [[ -e "${STAGED_APP}/Contents/Frameworks/${relative_name}" ]]
+            ;;
+        @loader_path/*)
+            relative_name="${dependency#@loader_path/}"
+            [[ -e "$(dirname "${binary}")/${relative_name}" ]]
+            ;;
+        @executable_path/*)
+            relative_name="${dependency#@executable_path/}"
+            [[ -e "${STAGED_APP}/Contents/MacOS/${relative_name}" ]]
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
 
 if [[ -z "${QT_PREFIX:-}" || -z "${LIBRAW_PREFIX:-}" ||
       -z "${TIFF_PREFIX:-}" ]]; then
@@ -41,6 +120,20 @@ if [[ -z "${QT_PREFIX:-}" || -z "${LIBRAW_PREFIX:-}" ||
     QT_PREFIX="${QT_PREFIX:-$(brew --prefix qt@6)}"
     LIBRAW_PREFIX="${LIBRAW_PREFIX:-$(brew --prefix libraw)}"
     TIFF_PREFIX="${TIFF_PREFIX:-$(brew --prefix libtiff)}"
+fi
+dependency_search_dirs+=(
+    "${LIBRAW_PREFIX}/lib"
+    "${TIFF_PREFIX}/lib"
+    "${QT_PREFIX}/lib"
+)
+if command -v brew >/dev/null 2>&1; then
+    homebrew_prefix="$(brew --prefix)"
+    dependency_search_dirs+=("${homebrew_prefix}/lib")
+fi
+if [[ -n "${VCPKG_INSTALLED_DIR:-}" && -n "${VCPKG_TARGET_TRIPLET:-}" ]]; then
+    dependency_search_dirs+=(
+        "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/lib"
+    )
 fi
 MACDEPLOYQT="${QT_PREFIX}/bin/macdeployqt"
 QT_PLUGIN_DIR="$(${QT_PREFIX}/bin/qtpaths --plugin-dir)"
@@ -105,11 +198,6 @@ cmake -E rm -rf "${STAGING_DIR}"
 cmake -E make_directory "${DMG_ROOT}"
 ditto "${BUILT_APP}" "${STAGED_APP}"
 
-"${MACDEPLOYQT}" "${STAGED_APP}" \
-    "${macdeployqt_arguments[@]}" \
-    -libpath="${LIBRAW_PREFIX}/lib" \
-    -libpath="${TIFF_PREFIX}/lib"
-
 # macdeployqt otherwise copies every image/input plugin associated with QtGui,
 # including QML and virtual-keyboard stacks this Widgets application never
 # loads. Keep only the runtime surface StarProcessor actually uses.
@@ -118,6 +206,7 @@ declare -a qt_plugins=(
     "styles/libqmacstyle.dylib"
     "imageformats/libqjpeg.dylib"
 )
+declare -a plugin_executable_arguments=()
 for plugin in "${qt_plugins[@]}"; do
     source_plugin="${QT_PLUGIN_DIR}/${plugin}"
     staged_plugin="${STAGED_APP}/Contents/PlugIns/${plugin}"
@@ -127,12 +216,22 @@ for plugin in "${qt_plugins[@]}"; do
     fi
     cmake -E make_directory "$(dirname "${staged_plugin}")"
     ditto "${source_plugin}" "${staged_plugin}"
-    "${MACDEPLOYQT}" "${STAGED_APP}" \
-        "${macdeployqt_arguments[@]}" \
-        -executable="${staged_plugin}" \
-        -libpath="${LIBRAW_PREFIX}/lib" \
-        -libpath="${TIFF_PREFIX}/lib"
+    plugin_executable_arguments+=("-executable=${staged_plugin}")
 done
+
+# Deploy the app and every manually selected plugin in one pass. Re-running
+# macdeployqt after it has rewritten a copied library can make newer Qt tools
+# reject the intentionally unfinished intermediate signature.
+"${MACDEPLOYQT}" "${STAGED_APP}" \
+    "${macdeployqt_arguments[@]}" \
+    "${plugin_executable_arguments[@]}" \
+    -libpath="${LIBRAW_PREFIX}/lib" \
+    -libpath="${TIFF_PREFIX}/lib"
+
+# macdeployqt follows Qt's dependency graph but can miss non-Qt @rpath
+# dependencies of bundled libraries. LibRaw's optional LittleCMS dependency is
+# one real example. Resolve the complete closure before auditing and signing.
+copy_transitive_rpath_dependencies
 
 external_dependency_found=0
 actual_deployment_target="${DEPLOYMENT_TARGET}"
@@ -167,7 +266,13 @@ while IFS= read -r -d '' binary; do
         fi
         [[ -n "${install_name_real}" && "${dependency}" == "${install_name_real}" ]] && continue
         case "${dependency}" in
-            @*|/System/*|/usr/lib/*) ;;
+            /System/*|/usr/lib/*) ;;
+            @*)
+                if ! bundle_dependency_exists "${binary}" "${dependency}"; then
+                    echo "Unresolved bundle dependency: ${binary} -> ${dependency}" >&2
+                    external_dependency_found=1
+                fi
+                ;;
             *)
                 echo "External dependency remains: ${binary} -> ${dependency}" >&2
                 external_dependency_found=1
@@ -197,13 +302,22 @@ fi
 codesign --force --deep --sign - --timestamp=none "${STAGED_APP}"
 codesign --verify --deep --strict --verbose=2 "${STAGED_APP}"
 
+# This always runs, including headless CI. It enters main only after dyld has
+# loaded every linked runtime library, so a missing transitive dylib fails the
+# package before it can be published.
+runtime_check_output="$("${STAGED_APP}/Contents/MacOS/StarProcessor" --runtime-check)"
+if [[ "${runtime_check_output}" != "StarProcessor ${VERSION}" ]]; then
+    echo "Packaged application runtime check returned: ${runtime_check_output}" >&2
+    exit 5
+fi
+
 if [[ "${SKIP_LAUNCH_TEST:-0}" != "1" ]]; then
     SCREENSHOT="${STAGING_DIR}/launch-check.png"
     "${STAGED_APP}/Contents/MacOS/StarProcessor" \
         "--screenshot=${SCREENSHOT}"
     if [[ ! -s "${SCREENSHOT}" ]]; then
         echo "Packaged application did not create its launch-check screenshot" >&2
-        exit 5
+        exit 6
     fi
 fi
 
