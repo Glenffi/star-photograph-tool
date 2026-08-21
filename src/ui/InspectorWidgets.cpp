@@ -395,6 +395,7 @@ CompactToggle::CompactToggle(const QString& text, QWidget* parent)
         StyleTokens::Properties::kControlRole,
         QString::fromLatin1(StyleTokens::Properties::kToggle));
     setProperty("state", QStringLiteral("off"));
+    setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
     setFocusPolicy(Qt::StrongFocus);
     setCursor(Qt::PointingHandCursor);
     setTristate(false);

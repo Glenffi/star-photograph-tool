@@ -1,9 +1,12 @@
 #include "PreviewPanel.h"
+#include "StyleTokens.h"
 #include "UiAssets.h"
 #include "../core/PreviewToneMapper.h"
 #include "../core/RawImageLoader.h"
 #include "../core/SkyGroundMask.h"
 #include <QScrollArea>
+#include <QFrame>
+#include <QStackedLayout>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QLabel>
@@ -19,13 +22,29 @@
 #include <QDebug>
 #include <QPainter>
 #include <QTimer>
+#include <QVariantAnimation>
+#include <QSignalBlocker>
+#include <QKeyEvent>
+#include <QStyle>
 #include <algorithm>
 #include <cmath>
 
 namespace {
 
-constexpr int kPreviewMargin = 16;
+constexpr int kPreviewMargin = StyleTokens::Spacing::kCanvasPadding * 2;
 constexpr int kSplitGutter = 12;
+
+QColor tokenColor(const char* value) {
+    return QColor(QString::fromLatin1(value));
+}
+
+void setButtonVariant(QPushButton* button, const char* variant) {
+    if (!button) return;
+    button->setProperty(StyleTokens::Properties::kVariant,
+                        QString::fromLatin1(variant));
+    button->style()->unpolish(button);
+    button->style()->polish(button);
+}
 
 } // namespace
 
@@ -48,124 +67,143 @@ void PreviewPanel::setupUI() {
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(0);
 
-    setupTopBar();
-    layout->addWidget(m_topBar);
-
-    // 图像区域（空状态 + 图像视图）
-    auto* contentWidget = new QWidget(this);
-    // The empty state is slightly lifted from the darker image canvas so the
-    // central workspace stays legible before a source is selected.
-    contentWidget->setStyleSheet("background-color: #1B2527;");
-    auto* contentLayout = new QVBoxLayout(contentWidget);
-    contentLayout->setContentsMargins(0, 0, 0, 0);
-    contentLayout->setSpacing(0);
+    m_canvasHost = new QWidget(this);
+    m_canvasHost->setObjectName("previewCanvas");
+    m_canvasHost->setProperty(StyleTokens::Properties::kUiRole,
+                              StyleTokens::Properties::kCanvas);
+    m_canvasHost->installEventFilter(this);
 
     setupEmptyState();
-    contentLayout->addWidget(m_emptyState, 1, Qt::AlignCenter);
-
     setupImageView();
-    contentLayout->addWidget(m_scrollArea, 1);
+    auto* contentStack = new QStackedLayout(m_canvasHost);
+    contentStack->setContentsMargins(0, 0, 0, 0);
+    contentStack->setStackingMode(QStackedLayout::StackAll);
+    contentStack->addWidget(m_emptyState);
+    contentStack->addWidget(m_scrollArea);
     m_scrollArea->setVisible(false);
+    layout->addWidget(m_canvasHost, 1);
 
-    layout->addWidget(contentWidget, 1);
-
+    setupTopBar();
     setupBottomBar();
-    layout->addWidget(m_bottomBar);
+    m_resultSummary = new QWidget(m_canvasHost);
+    m_resultSummary->setObjectName(QStringLiteral("resultSummaryOverlay"));
+    m_resultSummary->setProperty(StyleTokens::Properties::kUiRole,
+                                 StyleTokens::Properties::kOverlay);
+    auto* summaryLayout = new QVBoxLayout(m_resultSummary);
+    summaryLayout->setContentsMargins(12, 8, 12, 8);
+    m_resultSummaryLabel = new QLabel(m_resultSummary);
+    m_resultSummaryLabel->setProperty(
+        StyleTokens::Properties::kTextRole,
+        StyleTokens::Properties::kMono);
+    summaryLayout->addWidget(m_resultSummaryLabel);
+    m_resultSummary->hide();
+    m_resultSummaryTimer = new QTimer(this);
+    m_resultSummaryTimer->setSingleShot(true);
+    m_resultSummaryTimer->setInterval(3500);
+    connect(m_resultSummaryTimer, &QTimer::timeout,
+            m_resultSummary, &QWidget::hide);
+    m_topBar->raise();
+    m_maskEditControls->raise();
+    m_bottomBar->raise();
+    m_resultSummary->raise();
 }
 
 void PreviewPanel::setupTopBar() {
-    m_topBar = new QWidget(this);
-    m_topBar->setFixedHeight(44);
-    m_topBar->setStyleSheet("background-color: #171F21; border-bottom: 1px solid #2B393B;");
+    m_topBar = new QWidget(m_canvasHost);
+    m_topBar->setObjectName("previewFloatingToolbar");
+    m_topBar->setProperty(StyleTokens::Properties::kUiRole,
+                          StyleTokens::Properties::kOverlay);
+    m_topBar->setFixedHeight(32);
+    m_topBar->setVisible(false);
 
     auto* layout = new QHBoxLayout(m_topBar);
-    layout->setContentsMargins(12, 0, 10, 0);
+    layout->setContentsMargins(4, 2, 4, 2);
     layout->setSpacing(4);
 
-    auto* title = new QLabel(QString::fromUtf8("预览"), m_topBar);
-    title->setStyleSheet("font-size: 12px; font-weight: 700; color: #D2DDDA;");
-    layout->addWidget(title);
-    layout->addSpacing(8);
-
-    auto createToolBtn = [this](const QString& text, const QString& tooltip) -> QPushButton* {
-        auto* btn = new QPushButton(text, this);
+    auto createToolBtn = [](QWidget* parent, const QString& text,
+                            const QString& tooltip) -> QPushButton* {
+        auto* btn = new QPushButton(text, parent);
         btn->setToolTip(tooltip);
         btn->setAccessibleName(tooltip);
-        btn->setFixedHeight(28);
+        btn->setProperty(StyleTokens::Properties::kVariant,
+                         StyleTokens::Properties::kGhost);
         btn->setIconSize(QSize(16, 16));
         btn->setCursor(Qt::PointingHandCursor);
-        btn->setStyleSheet(
-            "QPushButton {"
-            "  background-color: transparent;"
-            "  color: #A7B8B4;"
-            "  border: 1px solid #344548;"
-            "  border-radius: 5px;"
-            "  padding: 2px 9px;"
-            "  font-size: 11px;"
-            "}"
-            "QPushButton:hover {"
-            "  background-color: #273336;"
-            "  color: #F3F7F6;"
-            "  border-color: #4D6265;"
-            "}"
-            "QPushButton:pressed {"
-            "  background-color: #344548;"
-            "}"
-            "QPushButton:disabled {"
-            "  color: #536763;"
-            "  border-color: #263234;"
-            "}"
-        );
         return btn;
     };
 
-    m_fitBtn = createToolBtn(QString(), QString::fromUtf8("适应视图"));
-    m_fitBtn->setIcon(UiAssets::icon(UiAssets::Glyph::Fit, QColor("#A7B8B4")));
-    m_fitBtn->setFixedWidth(30);
+    m_resultBtn = createToolBtn(m_topBar, QString::fromUtf8("结果"),
+                                QString::fromUtf8("回到当前处理结果 (R)"));
+    m_resultBtn->setIcon(UiAssets::icon(
+        UiAssets::Glyph::Result,
+        tokenColor(StyleTokens::Colors::kAccent)));
+    m_resultBtn->setVisible(false);
+    connect(m_resultBtn, &QPushButton::clicked,
+            this, &PreviewPanel::resultRequested);
+    layout->addWidget(m_resultBtn);
+
+    m_fitBtn = createToolBtn(m_topBar, QString(),
+                             QString::fromUtf8("适应视图 (F)"));
+    m_fitBtn->setProperty(StyleTokens::Properties::kVariant,
+                          StyleTokens::Properties::kIcon);
+    m_fitBtn->setIcon(UiAssets::icon(
+        UiAssets::Glyph::Fit,
+        tokenColor(StyleTokens::Colors::kTextSecondary)));
     connect(m_fitBtn, &QPushButton::clicked, this, &PreviewPanel::onFitView);
     layout->addWidget(m_fitBtn);
 
-    m_zoom100Btn = createToolBtn("100%", QString::fromUtf8("显示实际像素"));
+    m_zoom100Btn = createToolBtn(m_topBar, "100%",
+                                 QString::fromUtf8("显示实际像素 (1)"));
     connect(m_zoom100Btn, &QPushButton::clicked, this, &PreviewPanel::onZoom100);
     layout->addWidget(m_zoom100Btn);
 
-    m_zoomInBtn = createToolBtn(QString(), QString::fromUtf8("放大"));
-    m_zoomInBtn->setIcon(UiAssets::icon(UiAssets::Glyph::ZoomIn, QColor("#A7B8B4")));
-    m_zoomInBtn->setFixedWidth(30);
-    connect(m_zoomInBtn, &QPushButton::clicked, this, &PreviewPanel::onZoomIn);
-    layout->addWidget(m_zoomInBtn);
-
-    m_zoomOutBtn = createToolBtn(QString(), QString::fromUtf8("缩小"));
-    m_zoomOutBtn->setIcon(UiAssets::icon(UiAssets::Glyph::ZoomOut, QColor("#A7B8B4")));
-    m_zoomOutBtn->setFixedWidth(30);
+    m_zoomOutBtn = createToolBtn(m_topBar, QString(), QString::fromUtf8("缩小 (-)"));
+    m_zoomOutBtn->setProperty(StyleTokens::Properties::kVariant,
+                              StyleTokens::Properties::kIcon);
+    m_zoomOutBtn->setIcon(UiAssets::icon(
+        UiAssets::Glyph::ZoomOut,
+        tokenColor(StyleTokens::Colors::kTextSecondary)));
     connect(m_zoomOutBtn, &QPushButton::clicked, this, &PreviewPanel::onZoomOut);
     layout->addWidget(m_zoomOutBtn);
 
+    m_zoomInBtn = createToolBtn(m_topBar, QString(), QString::fromUtf8("放大 (+)"));
+    m_zoomInBtn->setProperty(StyleTokens::Properties::kVariant,
+                             StyleTokens::Properties::kIcon);
+    m_zoomInBtn->setIcon(UiAssets::icon(
+        UiAssets::Glyph::ZoomIn,
+        tokenColor(StyleTokens::Colors::kTextSecondary)));
+    connect(m_zoomInBtn, &QPushButton::clicked, this, &PreviewPanel::onZoomIn);
+    layout->addWidget(m_zoomInBtn);
+
     m_zoomLabel = new QLabel("100%", m_topBar);
-    m_zoomLabel->setMinimumWidth(38);
+    m_zoomLabel->setProperty(StyleTokens::Properties::kTextRole,
+                             StyleTokens::Properties::kMono);
+    m_zoomLabel->setMinimumWidth(42);
     m_zoomLabel->setAlignment(Qt::AlignCenter);
-    m_zoomLabel->setStyleSheet("font-size: 10px; color: #81938F;");
     layout->addWidget(m_zoomLabel);
 
-    m_maskEditControls = new QWidget(m_topBar);
+    // 蒙版编辑工具在主浮层下独立排列，避免窄画布时挤压缩放控件。
+    m_maskEditControls = new QWidget(m_canvasHost);
+    m_maskEditControls->setObjectName("previewMaskToolbar");
+    m_maskEditControls->setProperty(StyleTokens::Properties::kUiRole,
+                                    StyleTokens::Properties::kOverlay);
+    m_maskEditControls->setFixedHeight(32);
     auto* maskLayout = new QHBoxLayout(m_maskEditControls);
-    maskLayout->setContentsMargins(8, 0, 0, 0);
+    maskLayout->setContentsMargins(4, 2, 4, 2);
     maskLayout->setSpacing(4);
-    m_maskBrushBtn = createToolBtn(
+    m_maskBrushBtn = createToolBtn(m_maskEditControls,
         QString::fromUtf8("修补地景"),
         QString::fromUtf8("粗略涂过漏检地景，松手后自动贴合真实边缘"));
     m_maskBrushBtn->setObjectName("maskGroundHintButton");
     m_maskBrushBtn->setIcon(
-        UiAssets::icon(UiAssets::Glyph::Brush, QColor("#F2B65A")));
+        UiAssets::icon(UiAssets::Glyph::Brush,
+                       tokenColor(StyleTokens::Colors::kWarning)));
     m_maskBrushBtn->setCheckable(true);
     m_maskBrushBtn->setChecked(true);
     connect(m_maskBrushBtn, &QPushButton::toggled, this,
             [this](bool checked) {
                 m_maskEditingActive = checked && !m_initialMask.empty();
-                if (m_imageLabel) {
-                    m_imageLabel->setCursor(
-                        m_maskEditingActive ? Qt::CrossCursor : Qt::ArrowCursor);
-                }
+                updateImageCursor();
             });
     maskLayout->addWidget(m_maskBrushBtn);
 
@@ -177,61 +215,57 @@ void PreviewPanel::setupTopBar() {
     m_maskBrushSize->setToolTip(QString::fromUtf8("粗略提示笔刷直径"));
     maskLayout->addWidget(m_maskBrushSize);
     m_maskBrushSizeLabel = new QLabel("36 px", m_maskEditControls);
+    m_maskBrushSizeLabel->setProperty(StyleTokens::Properties::kTextRole,
+                                      StyleTokens::Properties::kMono);
+    m_maskBrushSizeLabel->setProperty(StyleTokens::Properties::kStatusRole,
+                                      StyleTokens::Properties::kWarning);
     m_maskBrushSizeLabel->setMinimumWidth(40);
-    m_maskBrushSizeLabel->setStyleSheet("font-size: 10px; color: #C8A866;");
     connect(m_maskBrushSize, &QSlider::valueChanged, this,
             [this](int value) {
                 m_maskBrushSizeLabel->setText(QString("%1 px").arg(value));
             });
     maskLayout->addWidget(m_maskBrushSizeLabel);
 
-    m_maskUndoBtn = createToolBtn(QString(), QString::fromUtf8("撤销上一笔"));
+    m_maskUndoBtn = createToolBtn(m_maskEditControls, QString(),
+                                  QString::fromUtf8("撤销上一笔"));
+    m_maskUndoBtn->setProperty(StyleTokens::Properties::kVariant,
+                               StyleTokens::Properties::kIcon);
     m_maskUndoBtn->setObjectName("maskGroundHintUndo");
     m_maskUndoBtn->setIcon(
-        UiAssets::icon(UiAssets::Glyph::Undo, QColor("#A7B8B4")));
-    m_maskUndoBtn->setFixedWidth(30);
+        UiAssets::icon(UiAssets::Glyph::Undo,
+                       tokenColor(StyleTokens::Colors::kTextSecondary)));
     connect(m_maskUndoBtn, &QPushButton::clicked,
             this, &PreviewPanel::undoGroundHint);
     maskLayout->addWidget(m_maskUndoBtn);
-    m_maskResetBtn = createToolBtn(QString(), QString::fromUtf8("恢复自动检测"));
+    m_maskResetBtn = createToolBtn(m_maskEditControls, QString(),
+                                   QString::fromUtf8("恢复自动检测"));
+    m_maskResetBtn->setProperty(StyleTokens::Properties::kVariant,
+                                StyleTokens::Properties::kIcon);
     m_maskResetBtn->setObjectName("maskGroundHintReset");
     m_maskResetBtn->setIcon(
-        UiAssets::icon(UiAssets::Glyph::Reset, QColor("#A7B8B4")));
-    m_maskResetBtn->setFixedWidth(30);
+        UiAssets::icon(UiAssets::Glyph::Reset,
+                       tokenColor(StyleTokens::Colors::kTextSecondary)));
     connect(m_maskResetBtn, &QPushButton::clicked,
             this, &PreviewPanel::resetGroundHints);
     maskLayout->addWidget(m_maskResetBtn);
-    m_maskDoneBtn = createToolBtn(QString(), QString::fromUtf8("完成蒙版修补"));
+    m_maskDoneBtn = createToolBtn(m_maskEditControls, QString(),
+                                  QString::fromUtf8("完成蒙版修补"));
+    m_maskDoneBtn->setProperty(StyleTokens::Properties::kVariant,
+                               StyleTokens::Properties::kIcon);
     m_maskDoneBtn->setObjectName("maskGroundHintDone");
     m_maskDoneBtn->setIcon(
-        UiAssets::icon(UiAssets::Glyph::Done, QColor("#4ED7AE")));
-    m_maskDoneBtn->setFixedWidth(30);
+        UiAssets::icon(UiAssets::Glyph::Done,
+                       tokenColor(StyleTokens::Colors::kOk)));
     connect(m_maskDoneBtn, &QPushButton::clicked, this, [this]() {
         m_maskBrushBtn->setChecked(false);
     });
     maskLayout->addWidget(m_maskDoneBtn);
     m_maskEditControls->setVisible(false);
-    layout->addWidget(m_maskEditControls);
-
-    layout->addStretch();
-
-    m_resultBtn = createToolBtn(QString::fromUtf8("查看结果"),
-                                QString::fromUtf8("返回最近一次处理结果"));
-    m_resultBtn->setIcon(UiAssets::icon(UiAssets::Glyph::Result, QColor("#6FA8FF")));
-    m_resultBtn->setVisible(false);
-    connect(m_resultBtn, &QPushButton::clicked,
-            this, &PreviewPanel::resultRequested);
-    layout->addWidget(m_resultBtn);
 
     // 有真实的堆栈前预览后才显示三个比较模式。
     m_compareControl = new QWidget(m_topBar);
-    m_compareControl->setStyleSheet(
-        "QWidget { background-color: #111719; border: 1px solid #2B393B; border-radius: 5px; }"
-        "QPushButton { background-color: transparent; color: #91A39F; border: none; "
-        "  border-radius: 4px; padding: 4px 10px; font-size: 10px; }"
-        "QPushButton:hover { color: #F3F7F6; }"
-        "QPushButton:checked { background-color: #2B393B; color: #F3F7F6; font-weight: 700; }"
-    );
+    m_compareControl->setProperty(StyleTokens::Properties::kUiRole,
+                                  StyleTokens::Properties::kRaised);
     auto* compareLayout = new QHBoxLayout(m_compareControl);
     compareLayout->setContentsMargins(2, 2, 2, 2);
     compareLayout->setSpacing(0);
@@ -243,6 +277,8 @@ void PreviewPanel::setupTopBar() {
     for (QPushButton* button : {m_beforeBtn, m_afterBtn, m_splitBtn}) {
         button->setCheckable(true);
         button->setCursor(Qt::PointingHandCursor);
+        button->setProperty(StyleTokens::Properties::kVariant,
+                            StyleTokens::Properties::kGhost);
         compareLayout->addWidget(button);
     }
     m_viewModeGroup->addButton(m_beforeBtn, 0);
@@ -253,101 +289,97 @@ void PreviewPanel::setupTopBar() {
             this, &PreviewPanel::onViewModeChanged);
     m_compareControl->setVisible(false);
     layout->addWidget(m_compareControl);
-    layout->addSpacing(6);
 
-    m_infoBtn = createToolBtn(QString(), QString::fromUtf8("显示或隐藏图像信息"));
-    m_infoBtn->setIcon(UiAssets::icon(UiAssets::Glyph::Info, QColor("#A7B8B4")));
-    m_infoBtn->setFixedWidth(30);
+    m_maskOverlayBtn = createToolBtn(m_topBar, QString::fromUtf8("蒙版"),
+                                     QString::fromUtf8("显示或隐藏蒙版叠加 (M)"));
+    m_maskOverlayBtn->setCheckable(true);
+    m_maskOverlayBtn->setVisible(false);
+    connect(m_maskOverlayBtn, &QPushButton::clicked,
+            this, &PreviewPanel::onToggleMaskOverlay);
+    layout->addWidget(m_maskOverlayBtn);
+
+    m_infoBtn = createToolBtn(m_topBar, QString(),
+                              QString::fromUtf8("灰点吸管 (G)"));
+    m_infoBtn->setProperty(StyleTokens::Properties::kVariant,
+                           StyleTokens::Properties::kIcon);
+    m_infoBtn->setIcon(UiAssets::icon(
+        UiAssets::Glyph::Eyedropper,
+        tokenColor(StyleTokens::Colors::kTextSecondary)));
     m_infoBtn->setCheckable(true);
-    m_infoBtn->setChecked(true);
-    connect(m_infoBtn, &QPushButton::clicked, this, &PreviewPanel::onToggleInfo);
+    m_infoBtn->setChecked(false);
+    connect(m_infoBtn, &QPushButton::clicked,
+            this, &PreviewPanel::onTogglePointSelection);
     layout->addWidget(m_infoBtn);
-
 }
 
 void PreviewPanel::setupEmptyState() {
-    m_emptyState = new QWidget(this);
-    m_emptyState->setStyleSheet("background-color: transparent;");
+    m_emptyState = new QWidget(m_canvasHost);
+    m_emptyState->setProperty(StyleTokens::Properties::kUiRole,
+                              StyleTokens::Properties::kCanvas);
     auto* emptyLayout = new QVBoxLayout(m_emptyState);
     emptyLayout->setSpacing(12);
     emptyLayout->setAlignment(Qt::AlignCenter);
 
     m_emptyIcon = new QLabel(m_emptyState);
     m_emptyIcon->setFixedSize(72, 72);
-    m_emptyIcon->setPixmap(UiAssets::logoMark(54));
-    m_emptyIcon->setStyleSheet(
-        "background-color: #171F21; "
-        "border: 1px solid #344548; border-radius: 6px;"
-    );
+    m_emptyIcon->setPixmap(UiAssets::icon(
+        UiAssets::Glyph::Nightscape,
+        tokenColor(StyleTokens::Colors::kLineStrong), 64).pixmap(64, 64));
     m_emptyIcon->setAlignment(Qt::AlignCenter);
     emptyLayout->addWidget(m_emptyIcon);
 
-    m_emptyText = new QLabel(QString::fromUtf8("导入一组连续拍摄的 RAW 照片"), m_emptyState);
-    m_emptyText->setStyleSheet("font-size: 14px; font-weight: 600; color: #D2DDDA; background-color: transparent;");
+    m_emptyText = new QLabel(QString::fromUtf8("今晚的星空还在等你"), m_emptyState);
+    m_emptyText->setProperty(StyleTokens::Properties::kTextRole,
+                             StyleTokens::Properties::kDisplay);
     m_emptyText->setAlignment(Qt::AlignCenter);
     emptyLayout->addWidget(m_emptyText);
 
     m_emptyFormat = new QLabel(
-        QString::fromUtf8("支持 NEF, CR2, ARW, DNG, RAW, ORF, RAF, PEF, CR3"),
+        QString::fromUtf8("拖入一组 RAW，或选择文件"),
         m_emptyState
     );
-    m_emptyFormat->setStyleSheet("font-size: 11px; color: #718681; background-color: transparent;");
+    m_emptyFormat->setProperty(StyleTokens::Properties::kTextRole,
+                               StyleTokens::Properties::kSecondary);
     m_emptyFormat->setAlignment(Qt::AlignCenter);
     emptyLayout->addWidget(m_emptyFormat);
 
-    m_emptyImportBtn = new QPushButton(QString::fromUtf8("添加照片"), m_emptyState);
+    m_emptyImportBtn = new QPushButton(QString::fromUtf8("选择文件"), m_emptyState);
+    m_emptyImportBtn->setProperty(StyleTokens::Properties::kVariant,
+                                  StyleTokens::Properties::kPrimary);
     m_emptyImportBtn->setIcon(
-        UiAssets::icon(UiAssets::Glyph::AddPhotos, QColor("#0D211B")));
+        UiAssets::icon(UiAssets::Glyph::AddPhotos,
+                       tokenColor(StyleTokens::Colors::kActionText)));
     m_emptyImportBtn->setIconSize(QSize(16, 16));
-    m_emptyImportBtn->setFixedHeight(36);
     m_emptyImportBtn->setCursor(Qt::PointingHandCursor);
-    m_emptyImportBtn->setStyleSheet(
-        "QPushButton {"
-        "  background-color: #4ED7AE;"
-        "  color: #0D211B;"
-        "  border: none;"
-        "  border-radius: 5px;"
-        "  padding: 8px 20px;"
-        "  font-size: 13px;"
-        "  font-weight: 700;"
-        "}"
-        "QPushButton:hover {"
-        "  background-color: #67E2BE;"
-        "}"
-        "QPushButton:pressed {"
-        "  background-color: #32B98F;"
-        "}"
-    );
     connect(m_emptyImportBtn, &QPushButton::clicked, this, &PreviewPanel::importRequested);
     emptyLayout->addWidget(m_emptyImportBtn, 0, Qt::AlignCenter);
 
 }
 
 void PreviewPanel::setupImageView() {
-    m_scrollArea = new QScrollArea(this);
+    m_scrollArea = new QScrollArea(m_canvasHost);
     m_scrollArea->setWidgetResizable(true);
     m_scrollArea->setAlignment(Qt::AlignCenter);
-    m_scrollArea->setStyleSheet(
-        "QScrollArea { background-color: #090D0F; border: none; }"
-        "QScrollBar:vertical { background-color: #111719; width: 10px; }"
-        "QScrollBar::handle:vertical { background-color: #344548; border-radius: 5px; min-height: 24px; }"
-        "QScrollBar::handle:vertical:hover { background-color: #4D6265; }"
-        "QScrollBar:horizontal { background-color: #111719; height: 10px; }"
-        "QScrollBar::handle:horizontal { background-color: #344548; border-radius: 5px; min-width: 24px; }"
-        "QScrollBar::handle:horizontal:hover { background-color: #4D6265; }"
-    );
+    m_scrollArea->setProperty(StyleTokens::Properties::kUiRole,
+                              StyleTokens::Properties::kCanvas);
+    m_scrollArea->setFrameShape(QFrame::NoFrame);
 
     m_imageContainer = new QWidget();
-    m_imageContainer->setStyleSheet("background-color: #090D0F;");
+    m_imageContainer->setProperty(StyleTokens::Properties::kUiRole,
+                                  StyleTokens::Properties::kCanvas);
     auto* containerLayout = new QVBoxLayout(m_imageContainer);
-    containerLayout->setContentsMargins(0, 0, 0, 0);
+    containerLayout->setContentsMargins(
+        StyleTokens::Spacing::kCanvasPadding,
+        StyleTokens::Spacing::kCanvasPadding,
+        StyleTokens::Spacing::kCanvasPadding,
+        StyleTokens::Spacing::kCanvasPadding);
     containerLayout->setAlignment(Qt::AlignCenter);
 
     m_imageLabel = new QLabel(m_imageContainer);
     m_imageLabel->setObjectName("previewImageLabel");
-    m_imageLabel->setStyleSheet("background-color: transparent;");
     m_imageLabel->setAlignment(Qt::AlignCenter);
     m_imageLabel->setMouseTracking(true);
+    m_imageLabel->setFocusPolicy(Qt::StrongFocus);
     m_imageLabel->installEventFilter(this);
     m_scrollArea->viewport()->installEventFilter(this);
     containerLayout->addWidget(m_imageLabel, 0, Qt::AlignCenter);
@@ -356,32 +388,259 @@ void PreviewPanel::setupImageView() {
 }
 
 void PreviewPanel::setupBottomBar() {
-    m_bottomBar = new QWidget(this);
-    m_bottomBar->setFixedHeight(34);
-    m_bottomBar->setStyleSheet("background-color: #171F21; border-top: 1px solid #2B393B;");
+    m_bottomBar = new QWidget(m_canvasHost);
+    m_bottomBar->setObjectName("previewInfoOverlay");
+    m_bottomBar->setProperty(StyleTokens::Properties::kUiRole,
+                             StyleTokens::Properties::kOverlay);
+    m_bottomBar->setFixedHeight(26);
+    m_bottomBar->setVisible(false);
 
     auto* layout = new QHBoxLayout(m_bottomBar);
-    layout->setContentsMargins(10, 0, 10, 0);
+    layout->setContentsMargins(8, 0, 8, 0);
     layout->setSpacing(12);
 
     m_bottomInfo = new QLabel(this);
-    m_bottomInfo->setStyleSheet("font-size: 10px; color: #91A39F; background-color: transparent;");
+    m_bottomInfo->setProperty(StyleTokens::Properties::kTextRole,
+                              StyleTokens::Properties::kCaption);
     m_bottomInfo->setText(QString::fromUtf8("缩放: 100% | 就绪"));
     layout->addWidget(m_bottomInfo);
 
     m_mouseInfo = new QLabel(this);
     layout->addStretch();
-    m_mouseInfo->setStyleSheet("font-size: 10px; color: #718681; background-color: transparent;");
+    m_mouseInfo->setProperty(StyleTokens::Properties::kTextRole,
+                             StyleTokens::Properties::kMono);
     m_mouseInfo->setText(QString::fromUtf8("鼠标: — | RGB: —"));
     layout->addWidget(m_mouseInfo);
 }
 
+void PreviewPanel::positionCanvasOverlays() {
+    if (!m_canvasHost) return;
+    const int availableWidth = std::max(1, m_canvasHost->width() - 32);
+    const auto placeCentered = [this, availableWidth](QWidget* widget, int y) {
+        if (!widget) return;
+        widget->adjustSize();
+        const int width = std::min(availableWidth, widget->sizeHint().width());
+        widget->resize(width, widget->height());
+        widget->move(std::max(16, (m_canvasHost->width() - width) / 2), y);
+        widget->raise();
+    };
+    placeCentered(m_topBar, 12);
+    placeCentered(m_maskEditControls, 52);
+    if (m_bottomBar) {
+        const int width = std::max(1, m_canvasHost->width() - 48);
+        m_bottomBar->setGeometry(
+            24, std::max(24, m_canvasHost->height() - 50), width, 26);
+        m_bottomBar->raise();
+    }
+    if (m_resultSummary && m_resultSummary->isVisible()) {
+        m_resultSummary->adjustSize();
+        m_resultSummary->move(
+            std::max(24, m_canvasHost->width() -
+                             m_resultSummary->width() - 24),
+            56);
+        m_resultSummary->raise();
+    }
+}
+
+void PreviewPanel::showImageCanvas() {
+    m_emptyState->setVisible(false);
+    m_scrollArea->setVisible(true);
+    m_topBar->setVisible(true);
+    if (m_infoBtn) m_infoBtn->setVisible(m_showingResult);
+    m_bottomBar->setVisible(false);
+    positionCanvasOverlays();
+}
+
+QString PreviewPanel::sourceContentKey(const QString& filePath) const {
+    QFileInfo info(filePath);
+    const QString canonical = info.canonicalFilePath();
+    return canonical.isEmpty() ? info.absoluteFilePath() : canonical;
+}
+
+QString PreviewPanel::legacyResultContentKey() const {
+    if (m_showingResult &&
+        (m_currentContentKey.startsWith(QStringLiteral("result:")) ||
+         m_currentContentKey.startsWith(QStringLiteral("quick:")))) {
+        return m_currentContentKey;
+    }
+    return QStringLiteral("result:legacy");
+}
+
+void PreviewPanel::saveCurrentViewState() {
+    if (m_currentContentKey.isEmpty() || m_currentImage.isNull() ||
+        !m_scrollArea) {
+        return;
+    }
+    ViewStateStore::ViewState state;
+    state.zoomMode = m_fitToView ? ViewStateStore::ZoomMode::Fit
+                                : ViewStateStore::ZoomMode::Manual;
+    state.zoom = m_zoom;
+    state.horizontalScroll = m_scrollArea->horizontalScrollBar()->value();
+    state.verticalScroll = m_scrollArea->verticalScrollBar()->value();
+    state.comparisonMode = static_cast<ViewStateStore::ComparisonMode>(
+        std::clamp(m_viewMode, 0, 2));
+    state.maskOverlayVisible = m_maskOverlayVisible;
+    m_viewStateStore.save(m_currentContentKey, state);
+}
+
+bool PreviewPanel::beginContentSwitch(const QString& contentKey) {
+    const QString key = contentKey.trimmed();
+    const bool sameContent = !key.isEmpty() && key == m_currentContentKey;
+    saveCurrentViewState();
+    ++m_viewRestoreGeneration;
+    m_currentContentKey = key;
+    m_pendingViewState = key.isEmpty()
+        ? std::optional<ViewStateStore::ViewState>()
+        : m_viewStateStore.stateFor(key);
+    return sameContent;
+}
+
+void PreviewPanel::finishContentSwitch() {
+    if (m_currentImage.isNull()) return;
+    showImageCanvas();
+    updateImageDisplay();
+    onFitView();
+    const uint64_t generation = m_viewRestoreGeneration;
+    const QString key = m_currentContentKey;
+    const auto pending = m_pendingViewState;
+    m_pendingViewState.reset();
+    QTimer::singleShot(0, this, [this, generation, key, pending]() {
+        if (generation != m_viewRestoreGeneration ||
+            key != m_currentContentKey || m_currentImage.isNull()) {
+            return;
+        }
+        if (pending) {
+            restoreViewState(*pending);
+        } else if (m_fitToView) {
+            applyFitZoom();
+        }
+        updateZoomDisplay();
+    });
+}
+
+void PreviewPanel::restoreViewState(const ViewStateStore::ViewState& state) {
+    m_viewMode = hasComparison()
+        ? std::clamp(static_cast<int>(state.comparisonMode), 0, 2)
+        : 1;
+    m_beforeAfterMode = m_viewMode == 2;
+    updateComparisonButtons();
+    emit beforeAfterModeChanged(m_beforeAfterMode);
+    setMaskOverlayVisible(state.maskOverlayVisible && hasMaskData());
+
+    if (state.zoomMode == ViewStateStore::ZoomMode::Fit) {
+        m_fitToView = true;
+        applyFitZoom();
+        return;
+    }
+
+    m_fitToView = false;
+    m_zoom = std::clamp(state.zoom, 0.01, maximumSafeZoom());
+    applyZoom();
+    if (m_imageContainer->layout()) m_imageContainer->layout()->activate();
+    m_scrollArea->horizontalScrollBar()->setValue(state.horizontalScroll);
+    m_scrollArea->verticalScrollBar()->setValue(state.verticalScroll);
+    updateZoomDisplay();
+    emit zoomChanged(m_zoom);
+}
+
+void PreviewPanel::updateComparisonButtons() {
+    if (m_beforeBtn) {
+        const QSignalBlocker blocker(m_beforeBtn);
+        m_beforeBtn->setChecked(m_viewMode == 0);
+    }
+    if (m_afterBtn) {
+        const QSignalBlocker blocker(m_afterBtn);
+        m_afterBtn->setChecked(m_viewMode == 1);
+    }
+    if (m_splitBtn) {
+        const QSignalBlocker blocker(m_splitBtn);
+        m_splitBtn->setChecked(m_viewMode == 2);
+    }
+    setButtonVariant(m_beforeBtn, m_viewMode == 0
+        ? StyleTokens::Properties::kSecondaryButton
+        : StyleTokens::Properties::kGhost);
+    setButtonVariant(m_afterBtn, m_viewMode == 1
+        ? StyleTokens::Properties::kSecondaryButton
+        : StyleTokens::Properties::kGhost);
+    setButtonVariant(m_splitBtn, m_viewMode == 2
+        ? StyleTokens::Properties::kSecondaryButton
+        : StyleTokens::Properties::kGhost);
+}
+
+void PreviewPanel::setMaskOverlayVisible(bool visible) {
+    m_maskOverlayVisible = visible && hasMaskData();
+    if (m_maskOverlayBtn) {
+        const QSignalBlocker blocker(m_maskOverlayBtn);
+        m_maskOverlayBtn->setChecked(m_maskOverlayVisible);
+        setButtonVariant(m_maskOverlayBtn, m_maskOverlayVisible
+            ? StyleTokens::Properties::kSecondaryButton
+            : StyleTokens::Properties::kGhost);
+    }
+    if (!m_currentImage.isNull()) updateImageDisplay();
+}
+
+QPointF PreviewPanel::viewportCenter() const {
+    if (!m_scrollArea || !m_scrollArea->viewport()) return {};
+    return QPointF(m_scrollArea->viewport()->rect().center());
+}
+
+void PreviewPanel::setZoomAnchored(double zoom,
+                                   const QPointF& viewportAnchor) {
+    if (m_currentImage.isNull()) return;
+    const QSize oldLabelSize = m_imageLabel->size();
+    const QPointF oldLabelPoint = m_imageLabel->mapFrom(
+        m_scrollArea->viewport(), viewportAnchor.toPoint());
+    const double normalizedX = oldLabelSize.width() > 0
+        ? oldLabelPoint.x() / oldLabelSize.width() : 0.5;
+    const double normalizedY = oldLabelSize.height() > 0
+        ? oldLabelPoint.y() / oldLabelSize.height() : 0.5;
+
+    m_fitToView = false;
+    m_zoom = std::clamp(zoom, 0.01, maximumSafeZoom());
+    applyZoom();
+    if (m_imageContainer->layout()) m_imageContainer->layout()->activate();
+
+    const QPoint newTopLeft = m_imageLabel->mapTo(
+        m_scrollArea->viewport(), QPoint(0, 0));
+    const QPointF newPoint(
+        newTopLeft.x() + normalizedX * m_imageLabel->width(),
+        newTopLeft.y() + normalizedY * m_imageLabel->height());
+    const QPointF delta = newPoint - viewportAnchor;
+    m_scrollArea->horizontalScrollBar()->setValue(
+        m_scrollArea->horizontalScrollBar()->value() + qRound(delta.x()));
+    m_scrollArea->verticalScrollBar()->setValue(
+        m_scrollArea->verticalScrollBar()->value() + qRound(delta.y()));
+    updateZoomDisplay();
+    emit zoomChanged(m_zoom);
+}
+
+void PreviewPanel::animateZoomTo(double zoom,
+                                 const QPointF& viewportAnchor) {
+    const double target = std::clamp(zoom, 0.01, maximumSafeZoom());
+    if (qFuzzyCompare(m_zoom, target)) return;
+    if (m_zoomAnimation) {
+        m_zoomAnimation->stop();
+        m_zoomAnimation->deleteLater();
+    }
+    auto* animation = new QVariantAnimation(this);
+    m_zoomAnimation = animation;
+    animation->setStartValue(m_zoom);
+    animation->setEndValue(target);
+    animation->setDuration(StyleTokens::Motion::kBaseMs);
+    animation->setEasingCurve(QEasingCurve::OutCubic);
+    connect(animation, &QVariantAnimation::valueChanged, this,
+            [this, viewportAnchor](const QVariant& value) {
+                setZoomAnchored(value.toDouble(), viewportAnchor);
+            });
+    connect(animation, &QVariantAnimation::finished, this,
+            [this, animation]() {
+                if (m_zoomAnimation == animation) m_zoomAnimation = nullptr;
+                animation->deleteLater();
+            });
+    animation->start();
+}
+
 void PreviewPanel::loadImage(const QString& filePath) {
-    setPointSelectionActive(false);
-    clearSelectedPoint();
-    clearMaskOverlay();
-    const uint64_t generation = ++m_previewGeneration;
-    m_previewPool.clear();
     if (filePath.isEmpty()) {
         clearImage();
         return;
@@ -392,6 +651,12 @@ void PreviewPanel::loadImage(const QString& filePath) {
         qWarning() << "文件不存在:" << filePath;
         return;
     }
+    beginContentSwitch(sourceContentKey(filePath));
+    setPointSelectionActive(false);
+    clearSelectedPoint();
+    clearMaskOverlay();
+    const uint64_t generation = ++m_previewGeneration;
+    m_previewPool.clear();
     m_currentFilePath = filePath;
     m_imageFileName = info.fileName();
     m_currentImage = QImage();
@@ -400,6 +665,8 @@ void PreviewPanel::loadImage(const QString& filePath) {
     m_imageLabel->setPixmap(QPixmap());
     m_scrollArea->setVisible(false);
     m_emptyState->setVisible(true);
+    m_topBar->setVisible(false);
+    m_bottomBar->setVisible(false);
     m_emptyText->setText(QString::fromUtf8("正在生成 RAW 预览..."));
     m_emptyFormat->setText(info.fileName());
     m_emptyImportBtn->setVisible(false);
@@ -455,11 +722,7 @@ void PreviewPanel::loadImage(const QString& filePath) {
                 safePanel->m_imageIso = metadata.iso;
                 safePanel->m_imageExposure = metadata.exposureTime;
                 safePanel->m_imageFocalLength = metadata.focalLength;
-                safePanel->m_emptyState->setVisible(false);
-                safePanel->m_scrollArea->setVisible(true);
-                safePanel->updateImageDisplay();
-                safePanel->onFitView();
-                safePanel->updateZoomDisplay();
+                safePanel->finishContentSwitch();
                 emit safePanel->sourcePreviewReady(
                     filePath, image, metadata.iso, metadata.exposureTime,
                     metadata.aperture, metadata.focalLength);
@@ -468,30 +731,37 @@ void PreviewPanel::loadImage(const QString& filePath) {
 }
 
 void PreviewPanel::loadImage(const QImage& image) {
-    setPointSelectionActive(false);
-    clearSelectedPoint();
-    clearMaskOverlay();
+    loadImage(image, QStringLiteral("image:%1")
+                         .arg(++m_anonymousContentGeneration));
+}
+
+void PreviewPanel::loadImage(const QImage& image,
+                             const QString& contentKey) {
     ++m_previewGeneration;
     m_previewPool.clear();
     if (image.isNull()) {
         clearImage();
         return;
     }
+    const bool sameContent = beginContentSwitch(contentKey);
+    if (!sameContent) {
+        setPointSelectionActive(false);
+        clearSelectedPoint();
+        clearMaskOverlay();
+    }
     m_currentImage = image;
     m_showingResult = false;
     resetComparison();
 
-    m_emptyState->setVisible(false);
-    m_scrollArea->setVisible(true);
-
-    updateImageDisplay();
-    onFitView();
-    updateZoomDisplay();
+    finishContentSwitch();
 }
 
 void PreviewPanel::load16BitImage(const std::vector<uint16_t>& data, int w, int h) {
-    setPointSelectionActive(false);
-    clearMaskOverlay();
+    load16BitImage(data, w, h, legacyResultContentKey());
+}
+
+void PreviewPanel::load16BitImage(const std::vector<uint16_t>& data, int w,
+                                  int h, const QString& contentKey) {
     ++m_previewGeneration;
     m_previewPool.clear();
     const PreviewImage8 preview = PreviewToneMapper::mapMono16(data, w, h);
@@ -499,37 +769,11 @@ void PreviewPanel::load16BitImage(const std::vector<uint16_t>& data, int w, int 
         clearImage();
         return;
     }
-
-    const QImage borrowed(preview.rgb.data(), preview.width, preview.height,
-                          preview.width * 3, QImage::Format_RGB888);
-    const QImage image = borrowed.copy();
-
-    m_currentImage = image;
-    m_showingResult = true;
-    resetComparison();
-    m_currentFilePath.clear();
-    m_imageFileName = QString::fromUtf8("堆栈结果");
-    m_imageIso = 0;
-    m_imageExposure = 0.0;
-    m_imageFocalLength = 0;
-
-    m_emptyState->setVisible(false);
-    m_scrollArea->setVisible(true);
-
-    updateImageDisplay();
-    onFitView();
-    updateZoomDisplay();
-}
-
-void PreviewPanel::loadRgb16BitImage(const std::vector<uint16_t>& rgb, int w, int h) {
-    setPointSelectionActive(false);
-    clearMaskOverlay();
-    ++m_previewGeneration;
-    m_previewPool.clear();
-    const PreviewImage8 preview = PreviewToneMapper::mapRgb16(rgb, w, h);
-    if (preview.rgb.empty()) {
-        clearImage();
-        return;
+    const bool sameContent = beginContentSwitch(contentKey);
+    if (!sameContent) {
+        setPointSelectionActive(false);
+        clearSelectedPoint();
+        clearMaskOverlay();
     }
 
     const QImage borrowed(preview.rgb.data(), preview.width, preview.height,
@@ -545,12 +789,43 @@ void PreviewPanel::loadRgb16BitImage(const std::vector<uint16_t>& rgb, int w, in
     m_imageExposure = 0.0;
     m_imageFocalLength = 0;
 
-    m_emptyState->setVisible(false);
-    m_scrollArea->setVisible(true);
+    finishContentSwitch();
+}
 
-    updateImageDisplay();
-    onFitView();
-    updateZoomDisplay();
+void PreviewPanel::loadRgb16BitImage(const std::vector<uint16_t>& rgb, int w, int h) {
+    loadRgb16BitImage(rgb, w, h, legacyResultContentKey());
+}
+
+void PreviewPanel::loadRgb16BitImage(const std::vector<uint16_t>& rgb, int w,
+                                     int h, const QString& contentKey) {
+    ++m_previewGeneration;
+    m_previewPool.clear();
+    const PreviewImage8 preview = PreviewToneMapper::mapRgb16(rgb, w, h);
+    if (preview.rgb.empty()) {
+        clearImage();
+        return;
+    }
+    const bool sameContent = beginContentSwitch(contentKey);
+    if (!sameContent) {
+        setPointSelectionActive(false);
+        clearSelectedPoint();
+        clearMaskOverlay();
+    }
+
+    const QImage borrowed(preview.rgb.data(), preview.width, preview.height,
+                          preview.width * 3, QImage::Format_RGB888);
+    const QImage image = borrowed.copy();
+
+    m_currentImage = image;
+    m_showingResult = true;
+    resetComparison();
+    m_currentFilePath.clear();
+    m_imageFileName = QString::fromUtf8("堆栈结果");
+    m_imageIso = 0;
+    m_imageExposure = 0.0;
+    m_imageFocalLength = 0;
+
+    finishContentSwitch();
 }
 
 void PreviewPanel::loadRgb16BitComparison(const QImage& before,
@@ -558,20 +833,14 @@ void PreviewPanel::loadRgb16BitComparison(const QImage& before,
                                            int w, int h,
                                            uint16_t blackPoint,
                                            uint16_t whitePoint) {
-    const bool updatingExistingResult =
-        m_showingResult && hasComparison() && !before.isNull();
-    const int preservedViewMode = m_viewMode;
-    const double preservedZoom = m_zoom;
-    const bool preservedFitToView = m_fitToView;
-    const QSize preservedBeforeSize = m_beforeImage.size();
-    const QSize preservedAfterSize = m_afterImage.size();
-    const int preservedHorizontalScroll = m_scrollArea
-        ? m_scrollArea->horizontalScrollBar()->value() : 0;
-    const int preservedVerticalScroll = m_scrollArea
-        ? m_scrollArea->verticalScrollBar()->value() : 0;
+    loadRgb16BitComparison(before, afterRgb, w, h, blackPoint, whitePoint,
+                           legacyResultContentKey());
+}
 
-    setPointSelectionActive(false);
-    clearMaskOverlay();
+void PreviewPanel::loadRgb16BitComparison(
+    const QImage& before, const std::vector<uint16_t>& afterRgb,
+    int w, int h, uint16_t blackPoint, uint16_t whitePoint,
+    const QString& contentKey) {
     ++m_previewGeneration;
     m_previewPool.clear();
     const int comparisonLongSide = before.isNull()
@@ -585,6 +854,12 @@ void PreviewPanel::loadRgb16BitComparison(const QImage& before,
     if (preview.rgb.empty()) {
         clearImage();
         return;
+    }
+    const bool sameContent = beginContentSwitch(contentKey);
+    if (!sameContent) {
+        setPointSelectionActive(false);
+        clearSelectedPoint();
+        clearMaskOverlay();
     }
 
     const QImage borrowed(preview.rgb.data(), preview.width, preview.height,
@@ -611,42 +886,14 @@ void PreviewPanel::loadRgb16BitComparison(const QImage& before,
         resetComparison();
     }
 
-    m_emptyState->setVisible(false);
-    m_scrollArea->setVisible(true);
-    const bool sameComparisonGeometry = updatingExistingResult &&
-        m_beforeImage.size() == preservedBeforeSize &&
-        m_afterImage.size() == preservedAfterSize;
-    if (sameComparisonGeometry) {
-        m_viewMode = std::clamp(preservedViewMode, 0, 2);
-        m_beforeAfterMode = m_viewMode == 2;
-        if (m_beforeBtn) m_beforeBtn->setChecked(m_viewMode == 0);
-        if (m_afterBtn) m_afterBtn->setChecked(m_viewMode == 1);
-        if (m_splitBtn) m_splitBtn->setChecked(m_viewMode == 2);
-        m_fitToView = preservedFitToView;
-        if (m_fitToView) {
-            applyFitZoom();
-        } else {
-            m_zoom = std::clamp(
-                preservedZoom, 0.01, maximumSafeZoom());
-            applyZoom();
-            QTimer::singleShot(0, this,
-                [this, preservedHorizontalScroll,
-                 preservedVerticalScroll]() {
-                    if (!m_scrollArea) return;
-                    m_scrollArea->horizontalScrollBar()->setValue(
-                        preservedHorizontalScroll);
-                    m_scrollArea->verticalScrollBar()->setValue(
-                        preservedVerticalScroll);
-                });
-        }
-    } else {
-        updateImageDisplay();
-        onFitView();
-    }
-    updateZoomDisplay();
+    finishContentSwitch();
 }
 
 void PreviewPanel::clearImage() {
+    saveCurrentViewState();
+    ++m_viewRestoreGeneration;
+    m_pendingViewState.reset();
+    m_currentContentKey.clear();
     setPointSelectionActive(false);
     m_selectedPointX = -1.0;
     m_selectedPointY = -1.0;
@@ -673,21 +920,19 @@ void PreviewPanel::clearImage() {
 
     m_imageLabel->setPixmap(QPixmap());
     m_emptyState->setVisible(true);
-    m_emptyText->setText(QString::fromUtf8("导入一组连续拍摄的 RAW 照片"));
-    m_emptyFormat->setText(
-        QString::fromUtf8("支持 NEF, CR2, ARW, DNG, RAW, ORF, RAF, PEF, CR3"));
+    m_emptyText->setText(QString::fromUtf8("今晚的星空还在等你"));
+    m_emptyFormat->setText(QString::fromUtf8("拖入一组 RAW，或选择文件"));
     m_emptyImportBtn->setVisible(true);
     m_scrollArea->setVisible(false);
+    m_topBar->setVisible(false);
+    m_maskEditControls->setVisible(false);
+    m_bottomBar->setVisible(false);
     m_bottomInfo->setText(QString::fromUtf8("缩放: 100% | 就绪"));
     m_mouseInfo->setText(QString::fromUtf8("鼠标: — | RGB: —"));
 }
 
 void PreviewPanel::setZoom(double zoom) {
-    m_fitToView = false;
-    m_zoom = std::clamp(zoom, 0.01, maximumSafeZoom());
-    applyZoom();
-    updateZoomDisplay();
-    emit zoomChanged(m_zoom);
+    setZoomAnchored(zoom, viewportCenter());
 }
 
 double PreviewPanel::zoom() const {
@@ -718,8 +963,14 @@ void PreviewPanel::setPointSelectionActive(bool active) {
             applyZoom();
         }
     }
-    m_imageLabel->setCursor(
-        m_pointSelectionActive ? Qt::CrossCursor : Qt::ArrowCursor);
+    if (m_infoBtn) {
+        const QSignalBlocker blocker(m_infoBtn);
+        m_infoBtn->setChecked(m_pointSelectionActive);
+        setButtonVariant(m_infoBtn, m_pointSelectionActive
+            ? StyleTokens::Properties::kSecondaryButton
+            : StyleTokens::Properties::kIcon);
+    }
+    updateImageCursor();
     if (m_pointSelectionActive && m_mouseInfo) {
         m_mouseInfo->setText(QString::fromUtf8("点击应为灰色的天空区域"));
     }
@@ -782,11 +1033,11 @@ void PreviewPanel::onZoom100() {
 }
 
 void PreviewPanel::onZoomIn() {
-    setZoom(m_zoom * 1.25);
+    animateZoomTo(m_zoom * 1.25, viewportCenter());
 }
 
 void PreviewPanel::onZoomOut() {
-    setZoom(m_zoom * 0.8);
+    animateZoomTo(m_zoom * 0.8, viewportCenter());
 }
 
 void PreviewPanel::onToggleBeforeAfter() {
@@ -794,10 +1045,9 @@ void PreviewPanel::onToggleBeforeAfter() {
     m_beforeAfterMode = true;
     m_viewMode = 2;
     if (m_splitBtn) m_splitBtn->setChecked(true);
+    applyZoom();
     if (m_fitToView) {
         applyFitZoom();
-    } else {
-        applyZoom();
     }
 }
 
@@ -805,17 +1055,36 @@ void PreviewPanel::onViewModeChanged(int id) {
     if (!hasComparison()) return;
     m_viewMode = std::clamp(id, 0, 2);
     m_beforeAfterMode = m_viewMode == 2;
+    updateComparisonButtons();
     emit beforeAfterModeChanged(m_beforeAfterMode);
+    applyZoom();
     if (m_fitToView) {
         applyFitZoom();
-    } else {
-        applyZoom();
     }
 }
 
 void PreviewPanel::onToggleInfo() {
     m_showInfo = m_infoBtn->isChecked();
     m_bottomBar->setVisible(m_showInfo);
+}
+
+void PreviewPanel::onToggleMaskOverlay() {
+    setMaskOverlayVisible(m_maskOverlayBtn && m_maskOverlayBtn->isChecked());
+}
+
+void PreviewPanel::onTogglePointSelection() {
+    setPointSelectionActive(m_infoBtn && m_infoBtn->isChecked());
+}
+
+void PreviewPanel::updateImageCursor() {
+    if (!m_imageLabel) return;
+    if (m_pointSelectionActive || m_maskEditingActive) {
+        m_imageLabel->setCursor(Qt::CrossCursor);
+    } else if (m_panning) {
+        m_imageLabel->setCursor(Qt::ClosedHandCursor);
+    } else {
+        m_imageLabel->setCursor(Qt::OpenHandCursor);
+    }
 }
 
 void PreviewPanel::updateImageDisplay() {
@@ -915,6 +1184,9 @@ void PreviewPanel::applyZoom() {
 
     m_imageLabel->setPixmap(pixmap);
     m_imageLabel->setFixedSize(pixmap.size());
+    m_imageContainer->setMinimumSize(
+        pixmap.width() + kPreviewMargin,
+        pixmap.height() + kPreviewMargin);
 }
 
 bool PreviewPanel::imageSampleAt(const QPoint& labelPosition,
@@ -994,12 +1266,24 @@ void PreviewPanel::updateZoomDisplay() {
     if (m_zoomLabel) {
         m_zoomLabel->setText(QString("%1%").arg(qRound(m_zoom * 100)));
     }
+    if (m_zoom100Btn) m_zoom100Btn->setEnabled(!m_currentImage.isNull());
+    if (m_zoomInBtn) {
+        const bool atLimit = m_zoom >= maximumSafeZoom() - 0.0001;
+        m_zoomInBtn->setEnabled(!m_currentImage.isNull() && !atLimit);
+        m_zoomInBtn->setToolTip(atLimit
+            ? QString::fromUtf8("已达安全缩放上限")
+            : QString::fromUtf8("放大 (+)"));
+    }
 }
 
 void PreviewPanel::wheelEvent(QWheelEvent* event) {
-    if (event->modifiers() & Qt::ControlModifier) {
-        double delta = event->angleDelta().y() > 0 ? 1.25 : 0.8;
-        setZoom(m_zoom * delta);
+    if (event->modifiers() & (Qt::ControlModifier | Qt::MetaModifier)) {
+        const double delta = event->angleDelta().y() > 0 ? 1.15 : 1.0 / 1.15;
+        const QPointF anchor = m_scrollArea
+            ? m_scrollArea->viewport()->mapFrom(this,
+                  event->position().toPoint())
+            : viewportCenter();
+        animateZoomTo(m_zoom * delta, anchor);
         event->accept();
     } else {
         // 普通滚轮传递给滚动区域
@@ -1008,6 +1292,14 @@ void PreviewPanel::wheelEvent(QWheelEvent* event) {
 }
 
 bool PreviewPanel::eventFilter(QObject* watched, QEvent* event) {
+    if (watched == m_canvasHost) {
+        if (event->type() == QEvent::Resize || event->type() == QEvent::Show) {
+            QTimer::singleShot(0, this,
+                               [this]() { positionCanvasOverlays(); });
+        }
+        return QWidget::eventFilter(watched, event);
+    }
+
     if (m_scrollArea && watched == m_scrollArea->viewport()) {
         if (event->type() == QEvent::Resize && m_fitToView &&
             !m_currentImage.isNull() && !m_fitUpdatePending) {
@@ -1028,8 +1320,23 @@ bool PreviewPanel::eventFilter(QObject* watched, QEvent* event) {
 
     if (event->type() == QEvent::Wheel) {
         auto* wheel = static_cast<QWheelEvent*>(event);
-        if (wheel->modifiers() & Qt::ControlModifier) {
-            setZoom(m_zoom * (wheel->angleDelta().y() > 0 ? 1.25 : 0.8));
+        if (wheel->modifiers() &
+            (Qt::ControlModifier | Qt::MetaModifier)) {
+            const QPointF anchor = m_scrollArea->viewport()->mapFrom(
+                m_imageLabel, wheel->position().toPoint());
+            const double factor = wheel->angleDelta().y() > 0
+                ? 1.15 : 1.0 / 1.15;
+            animateZoomTo(m_zoom * factor, anchor);
+            return true;
+        }
+    }
+
+    if (event->type() == QEvent::MouseButtonDblClick) {
+        auto* mouse = static_cast<QMouseEvent*>(event);
+        if (mouse->button() == Qt::LeftButton &&
+            !m_maskEditingActive && !m_pointSelectionActive) {
+            if (m_fitToView) onZoom100();
+            else onFitView();
             return true;
         }
     }
@@ -1076,7 +1383,7 @@ bool PreviewPanel::eventFilter(QObject* watched, QEvent* event) {
             }
             m_panning = true;
             m_lastPanPos = mouse->globalPosition().toPoint();
-            m_imageLabel->setCursor(Qt::ClosedHandCursor);
+            updateImageCursor();
             return true;
         }
     }
@@ -1135,7 +1442,7 @@ bool PreviewPanel::eventFilter(QObject* watched, QEvent* event) {
                 return true;
             }
             m_panning = false;
-            m_imageLabel->setCursor(Qt::ArrowCursor);
+            updateImageCursor();
             return true;
         }
     }
@@ -1158,13 +1465,11 @@ void PreviewPanel::setBeforeAfterMode(bool enabled) {
     if (!hasComparison()) return;
     m_viewMode = enabled ? 2 : 1;
     m_beforeAfterMode = enabled;
-    if (enabled && m_splitBtn) m_splitBtn->setChecked(true);
-    if (!enabled && m_afterBtn) m_afterBtn->setChecked(true);
+    updateComparisonButtons();
     emit beforeAfterModeChanged(enabled);
+    applyZoom();
     if (m_fitToView) {
         applyFitZoom();
-    } else {
-        applyZoom();
     }
 }
 
@@ -1192,10 +1497,21 @@ void PreviewPanel::setComparisonImages(const QImage& before, const QImage& after
     m_currentImage = after;
     m_viewMode = 1;
     m_beforeAfterMode = false;
-    if (m_afterBtn) m_afterBtn->setChecked(true);
+    updateComparisonButtons();
     if (m_compareControl) m_compareControl->setVisible(true);
     emit comparisonAvailabilityChanged(true);
     emit beforeAfterModeChanged(false);
+    showImageCanvas();
+    // A direct setComparisonImages() call may occur before Qt has laid out the
+    // newly visible scroll area. Render once at the current zoom immediately;
+    // the queued fit pass then refines it when viewport geometry is available.
+    applyZoom();
+    if (m_fitToView) {
+        QTimer::singleShot(0, this, [this]() {
+            if (m_fitToView && hasComparison()) applyFitZoom();
+        });
+    }
+    updateZoomDisplay();
 }
 
 bool PreviewPanel::hasComparison() const {
@@ -1211,6 +1527,14 @@ void PreviewPanel::setResultAvailable(bool available, bool viewingResult) {
     if (m_resultBtn) m_resultBtn->setVisible(available && !viewingResult);
 }
 
+void PreviewPanel::showResultSummary(const QString& summary) {
+    if (!m_resultSummary || !m_resultSummaryLabel || summary.isEmpty()) return;
+    m_resultSummaryLabel->setText(summary);
+    m_resultSummary->show();
+    positionCanvasOverlays();
+    if (m_resultSummaryTimer) m_resultSummaryTimer->start();
+}
+
 void PreviewPanel::clearComparison() {
     resetComparison();
 }
@@ -1220,7 +1544,7 @@ void PreviewPanel::resetComparison() {
     m_afterImage = QImage();
     m_viewMode = 1;
     m_beforeAfterMode = false;
-    if (m_afterBtn) m_afterBtn->setChecked(true);
+    updateComparisonButtons();
     if (m_compareControl) m_compareControl->setVisible(false);
     emit comparisonAvailabilityChanged(false);
     emit beforeAfterModeChanged(false);
@@ -1250,6 +1574,9 @@ void PreviewPanel::setMaskOverlay(const std::vector<uint8_t>& mask, int w, int h
     m_maskRefinementActive = false;
     if (m_maskBrushBtn) m_maskBrushBtn->setChecked(true);
     if (m_maskEditControls) m_maskEditControls->setVisible(true);
+    if (m_maskOverlayBtn) m_maskOverlayBtn->setVisible(true);
+    setMaskOverlayVisible(true);
+    positionCanvasOverlays();
     rebuildMaskOverlay();
     updateImageDisplay();
     emit editedMaskChanged();
@@ -1271,6 +1598,9 @@ void PreviewPanel::clearMaskOverlay() {
     m_editedMaskWidth = 0;
     m_editedMaskHeight = 0;
     if (m_maskEditControls) m_maskEditControls->setVisible(false);
+    if (m_maskOverlayBtn) m_maskOverlayBtn->setVisible(false);
+    if (m_maskOverlayBtn) m_maskOverlayBtn->setChecked(false);
+    positionCanvasOverlays();
     updateImageDisplay();
 }
 

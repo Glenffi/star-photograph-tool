@@ -85,6 +85,7 @@ public:
     void setMaskPreview(const std::vector<uint8_t>& mask, int w, int h);
     void setDetectMaskEnabled(bool enabled);
     void applySceneProfile(ProcessingScene scene);
+    void showCalibrationSettings();
 
 signals:
     void paramsChanged();  // 参数发生任何变化时触发

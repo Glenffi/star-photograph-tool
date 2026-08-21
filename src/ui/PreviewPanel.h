@@ -1,7 +1,10 @@
 #pragma once
 
+#include "ViewStateStore.h"
+
 #include <QWidget>
 #include <QImage>
+#include <QPointF>
 #include <QThreadPool>
 #include <QVector>
 
@@ -15,6 +18,7 @@ class QPushButton;
 class QTimer;
 class QButtonGroup;
 class QSlider;
+class QVariantAnimation;
 
 class PreviewPanel : public QWidget {
     Q_OBJECT
@@ -24,14 +28,29 @@ public:
 
     void loadImage(const QString& filePath);     // 通过 RawImageLoader 加载
     void loadImage(const QImage& image);         // 直接加载 QImage
+    void loadImage(const QImage& image, const QString& contentKey);
     void load16BitImage(const std::vector<uint16_t>& data, int w, int h); // 加载 16-bit 单通道并 tone mapping
+    void load16BitImage(const std::vector<uint16_t>& data, int w, int h,
+                        const QString& contentKey);
     void loadRgb16BitImage(const std::vector<uint16_t>& rgb, int w, int h); // 加载 16-bit RGB 并 tone mapping
+    void loadRgb16BitImage(const std::vector<uint16_t>& rgb, int w, int h,
+                           const QString& contentKey);
     void loadRgb16BitComparison(const QImage& before,
                                 const std::vector<uint16_t>& afterRgb,
                                 int w, int h,
                                 uint16_t blackPoint,
                                 uint16_t whitePoint);
+    void loadRgb16BitComparison(const QImage& before,
+                                const std::vector<uint16_t>& afterRgb,
+                                int w, int h,
+                                uint16_t blackPoint,
+                                uint16_t whitePoint,
+                                const QString& contentKey);
     void clearImage();
+
+    // 素材使用规范路径作键；正式结果与快速预览由调用方
+    // 分别传入 result:<signature> 与 quick:<signature>。旧加载接口保持可用。
+    QString currentContentKey() const { return m_currentContentKey; }
 
     void setZoom(double zoom);
     double zoom() const;
@@ -50,6 +69,7 @@ public:
     bool hasComparison() const;
     bool isShowingResult() const;
     void setResultAvailable(bool available, bool viewingResult = false);
+    void showResultSummary(const QString& summary);
     void clearComparison();
 
     void setMaskOverlay(const std::vector<uint8_t>& mask, int w, int h);
@@ -90,6 +110,8 @@ private slots:
     void onZoomIn();
     void onZoomOut();
     void onViewModeChanged(int id);
+    void onToggleMaskOverlay();
+    void onTogglePointSelection();
     void undoGroundHint();
     void resetGroundHints();
 
@@ -99,6 +121,20 @@ private:
     void setupImageView();
     void setupTopBar();
     void setupBottomBar();
+    void positionCanvasOverlays();
+    void showImageCanvas();
+    QString sourceContentKey(const QString& filePath) const;
+    QString legacyResultContentKey() const;
+    bool beginContentSwitch(const QString& contentKey);
+    void finishContentSwitch();
+    void saveCurrentViewState();
+    void restoreViewState(const ViewStateStore::ViewState& state);
+    void updateComparisonButtons();
+    void updateImageCursor();
+    void setMaskOverlayVisible(bool visible);
+    void setZoomAnchored(double zoom, const QPointF& viewportAnchor);
+    void animateZoomTo(double zoom, const QPointF& viewportAnchor);
+    QPointF viewportCenter() const;
     void updateZoomDisplay();
     void updateImageDisplay();
     void applyZoom();
@@ -128,6 +164,10 @@ private:
     QPushButton* m_emptyImportBtn = nullptr;
 
     // 图像显示
+    QWidget* m_canvasHost = nullptr;
+    QWidget* m_resultSummary = nullptr;
+    QLabel* m_resultSummaryLabel = nullptr;
+    QTimer* m_resultSummaryTimer = nullptr;
     QScrollArea* m_scrollArea = nullptr;
     QLabel* m_imageLabel = nullptr;
     QWidget* m_imageContainer = nullptr;
@@ -141,6 +181,7 @@ private:
     QPushButton* m_zoomInBtn = nullptr;
     QPushButton* m_zoomOutBtn = nullptr;
     QPushButton* m_resultBtn = nullptr;
+    QPushButton* m_maskOverlayBtn = nullptr;
     QWidget* m_maskEditControls = nullptr;
     QPushButton* m_maskBrushBtn = nullptr;
     QPushButton* m_maskUndoBtn = nullptr;
@@ -154,6 +195,7 @@ private:
     QPushButton* m_afterBtn = nullptr;
     QPushButton* m_splitBtn = nullptr;
     QLabel* m_zoomLabel = nullptr;
+    QVariantAnimation* m_zoomAnimation = nullptr;
 
     // 底部信息栏
     QWidget* m_bottomBar = nullptr;
@@ -181,6 +223,13 @@ private:
     double m_imageExposure = 0.0;
     int m_imageFocalLength = 0;
     QString m_imageFileName;
+
+    // 会话内视图状态：素材、正式结果与快速预览各自独立。
+    ViewStateStore m_viewStateStore;
+    QString m_currentContentKey;
+    std::optional<ViewStateStore::ViewState> m_pendingViewState;
+    uint64_t m_viewRestoreGeneration = 0;
+    uint64_t m_anonymousContentGeneration = 0;
 
     // 蒙版叠加
     QImage m_maskOverlay;

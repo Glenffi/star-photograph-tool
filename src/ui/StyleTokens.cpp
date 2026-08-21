@@ -1,5 +1,6 @@
 #include "StyleTokens.h"
 
+#include <QFontDatabase>
 #include <QtGlobal>
 
 namespace StyleTokens {
@@ -40,23 +41,45 @@ QColor fromHex(const char* hex) {
 
 namespace Typography {
 
+namespace {
+
+QString quotedFontFamily(const QStringList& preferred,
+                         QFontDatabase::SystemFont fallback) {
+    const QStringList available = QFontDatabase::families();
+    for (const QString& family : preferred) {
+        if (available.contains(family, Qt::CaseInsensitive)) {
+            return QStringLiteral("\"") + family + QStringLiteral("\"");
+        }
+    }
+    return QStringLiteral("\"") +
+        QFontDatabase::systemFont(fallback).family() + QStringLiteral("\"");
+}
+
+} // namespace
+
 QString uiFontFamily() {
 #if defined(Q_OS_MACOS)
-    return QStringLiteral("\"PingFang SC\"");
+    return quotedFontFamily({QStringLiteral("PingFang SC")},
+                            QFontDatabase::GeneralFont);
 #elif defined(Q_OS_WIN)
-    return QStringLiteral("\"Microsoft YaHei UI\"");
+    return quotedFontFamily({QStringLiteral("Microsoft YaHei UI")},
+                            QFontDatabase::GeneralFont);
 #else
-    return QStringLiteral("sans-serif");
+    return quotedFontFamily({}, QFontDatabase::GeneralFont);
 #endif
 }
 
 QString monoFontFamily() {
 #if defined(Q_OS_MACOS)
-    return QStringLiteral("\"SF Mono\"");
+    return quotedFontFamily(
+        {QStringLiteral("SF Mono"), QStringLiteral("Menlo")},
+        QFontDatabase::FixedFont);
 #elif defined(Q_OS_WIN)
-    return QStringLiteral("\"Cascadia Mono\"");
+    return quotedFontFamily(
+        {QStringLiteral("Cascadia Mono"), QStringLiteral("Consolas")},
+        QFontDatabase::FixedFont);
 #else
-    return QStringLiteral("monospace");
+    return quotedFontFamily({}, QFontDatabase::FixedFont);
 #endif
 }
 
@@ -260,6 +283,12 @@ QToolButton[variant="secondary"] {
     color: {{TEXT_PRIMARY}};
     background-color: transparent;
     border-color: {{LINE_STRONG}};
+}
+QPushButton[variant="secondary"]:disabled,
+QToolButton[variant="secondary"]:disabled {
+    color: {{TEXT_FAINT}};
+    background-color: transparent;
+    border-color: {{LINE_SUBTLE}};
 }
 QPushButton[variant="ghost"],
 QToolButton[variant="ghost"] {

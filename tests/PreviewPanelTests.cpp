@@ -114,6 +114,19 @@ int main(int argc, char** argv) {
     check(refreshedPixmap.width() >= width * 2,
           "Quick-preview refresh should preserve split comparison mode");
 
+    panel.loadImage(before, QStringLiteral("source:first"));
+    processLayout();
+    panel.resetZoom();
+    processLayout();
+    panel.loadImage(after, QStringLiteral("source:second"));
+    processLayout();
+    panel.fitToView();
+    processLayout();
+    panel.loadImage(before, QStringLiteral("source:first"));
+    processLayout();
+    check(std::abs(panel.zoom() - 1.0) < 0.0001,
+          "Returning to a source should restore its independent zoom state");
+
     PreviewPanel maskPanel;
     maskPanel.resize(1000, 640);
     maskPanel.show();

@@ -36,7 +36,7 @@ enum class Glyph {
     ChevronRight
 };
 
-QIcon icon(Glyph glyph, const QColor& color, int logicalSize = 18);
+QIcon icon(Glyph glyph, const QColor& color, int logicalSize = 20);
 QPixmap logoMark(int logicalSize = 36);
 QIcon appIcon();
 

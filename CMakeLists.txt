@@ -134,7 +134,6 @@ set(APP_SOURCES
     src/ui/StyleTokens.cpp
     src/ui/InspectorWidgets.cpp
     src/ui/ViewStateStore.cpp
-    src/ui/SceneLauncher.cpp
     src/update/UpdateManager.cpp
 )
 
@@ -179,7 +178,6 @@ set(APP_HEADERS
     src/ui/InspectorWidgets.h
     src/ui/ViewStateStore.h
     src/ui/ProcessingScene.h
-    src/ui/SceneLauncher.h
     src/update/UpdateManager.h
 )
 
@@ -274,8 +272,10 @@ if(BUILD_TESTING)
         tests/PreviewPanelTests.cpp
         src/ui/PreviewPanel.cpp
         src/ui/UiAssets.cpp
+        src/ui/ViewStateStore.cpp
         src/ui/PreviewPanel.h
-        src/ui/UiAssets.h)
+        src/ui/UiAssets.h
+        src/ui/ViewStateStore.h)
     target_include_directories(StarProcessorPreviewTests PRIVATE
         ${CMAKE_SOURCE_DIR}/src)
     target_link_libraries(StarProcessorPreviewTests PRIVATE

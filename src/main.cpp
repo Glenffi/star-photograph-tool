@@ -30,7 +30,6 @@
 #include <QSet>
 #include <QTimer>
 #include <QSignalBlocker>
-#include <QStackedWidget>
 #include <algorithm>
 #include <cstring>
 #include <iostream>
@@ -40,7 +39,7 @@
 #include "ui/ParamsPanel.h"
 #include "ui/Toolbar.h"
 #include "ui/UiAssets.h"
-#include "ui/SceneLauncher.h"
+#include "ui/ProcessingScene.h"
 #include "ui/StyleTokens.h"
 #include "update/UpdateManager.h"
 
@@ -58,15 +57,20 @@ public:
     MainWindow(QWidget* parent = nullptr) : QMainWindow(parent) {
         setWindowTitle("StarProcessor — 星空摄影师 RAW 处理工具");
         resize(1400, 900);
-        setMinimumSize(1100, 720);
+        setMinimumSize(1180, 760);
         setAcceptDrops(true);
 
         setupCentralWidget();
         m_updateManager = new UpdateManager(this);
         setupMenuBar();
         setupStatusBar();
-        setupStepBar();
         setupConnections();
+
+        QSettings settings("StarProcessor", "App");
+        const int storedScene = settings.value(
+            "ui/processingScene",
+            static_cast<int>(ProcessingScene::Nightscape)).toInt();
+        activateScene(static_cast<ProcessingScene>(std::clamp(storedScene, 0, 5)));
 
         connect(m_updateManager, &UpdateManager::statusMessage,
                 this, [this](const QString& message, int timeoutMs) {
@@ -83,8 +87,6 @@ public:
                 activateScene(paths.size() == 1
                                   ? ProcessingScene::SingleFrame
                                   : ProcessingScene::Nightscape);
-            } else if (m_contentStack->currentWidget() == m_sceneLauncher) {
-                activateScene(m_scene);
             }
             m_projectPanel->addFiles(paths);
         }
@@ -168,88 +170,44 @@ private:
         m_toolbar = new Toolbar(this);
         mainLayout->addWidget(m_toolbar);
 
-        m_contentStack = new QStackedWidget(centralWidget);
-        m_sceneLauncher = new SceneLauncher(m_contentStack);
-        m_contentStack->addWidget(m_sceneLauncher);
-
-        m_workspacePage = new QWidget(m_contentStack);
-        auto* workspaceLayout = new QVBoxLayout(m_workspacePage);
-        workspaceLayout->setContentsMargins(0, 0, 0, 0);
-        workspaceLayout->setSpacing(0);
-
-        // 工作流状态只反映真实处理阶段，不作为伪导航使用。
-        m_stepBar = new QWidget(m_workspacePage);
-        m_stepBar->setFixedHeight(40);
-        m_stepBar->setStyleSheet(
-            "QWidget { background-color: #111719; border-bottom: 1px solid #263234; }"
-        );
-        auto* stepLayout = new QHBoxLayout(m_stepBar);
-        stepLayout->setContentsMargins(16, 0, 12, 0);
-        stepLayout->setSpacing(6);
-        const QStringList steps = {
-            QString::fromUtf8("素材"), QString::fromUtf8("对齐"),
-            QString::fromUtf8("堆栈"), QString::fromUtf8("结果")
-        };
-        for (int i = 0; i < steps.size(); ++i) {
-            auto* label = new QLabel(steps[i], m_stepBar);
-            label->setAlignment(Qt::AlignCenter);
-            label->setMinimumWidth(64);
-            m_stepLabels.append(label);
-            stepLayout->addWidget(label);
-            if (i + 1 < steps.size()) {
-                auto* connector = new QLabel(QString::fromUtf8("›"), m_stepBar);
-                connector->setStyleSheet("color: #536763; border: none; font-size: 15px;");
-                stepLayout->addWidget(connector);
-            }
-        }
-        stepLayout->addStretch();
-        m_inlineProgress = new QProgressBar(m_stepBar);
-        m_inlineProgress->setRange(0, 100);
-        m_inlineProgress->setTextVisible(false);
-        m_inlineProgress->setFixedSize(110, 5);
-        m_inlineProgress->setVisible(false);
-        m_inlineProgress->setStyleSheet(
-            "QProgressBar { background-color: #2B393B; border: none; border-radius: 2px; }"
-            "QProgressBar::chunk { background-color: #4ED7AE; border-radius: 2px; }"
-        );
-        stepLayout->addWidget(m_inlineProgress);
-        m_workflowStatus = new QLabel(m_stepBar);
-        m_workflowStatus->setMinimumWidth(210);
-        m_workflowStatus->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
-        m_workflowStatus->setStyleSheet("color: #81938F; border: none; font-size: 10px;");
-        stepLayout->addWidget(m_workflowStatus);
-        workspaceLayout->addWidget(m_stepBar);
-
         // 主内容区：素材、预览、参数三栏。
-        auto* contentSplitter = new QSplitter(Qt::Horizontal, m_workspacePage);
-        contentSplitter->setHandleWidth(2);
-        contentSplitter->setStyleSheet(
-            "QSplitter::handle { background-color: #263234; }"
-        );
+        m_contentSplitter = new QSplitter(Qt::Horizontal, centralWidget);
+        m_contentSplitter->setHandleWidth(1);
 
-        // 左侧面板：ProjectPanel（卡片式文件列表）
-        m_projectPanel = new ProjectPanel(contentSplitter);
-        m_projectPanel->setMinimumWidth(250);
-        m_projectPanel->setMaximumWidth(430);
-        contentSplitter->addWidget(m_projectPanel);
+        m_projectPanel = new ProjectPanel(m_contentSplitter);
+        m_projectPanel->setMinimumWidth(StyleTokens::Layout::kLeftPanelMinimumWidth);
+        m_projectPanel->setMaximumWidth(StyleTokens::Layout::kLeftPanelMaximumWidth);
+        m_contentSplitter->addWidget(m_projectPanel);
 
-        // 中央面板：PreviewPanel（QLabel + QScrollArea）
-        m_previewPanel = new PreviewPanel(contentSplitter);
-        contentSplitter->addWidget(m_previewPanel);
+        m_previewPanel = new PreviewPanel(m_contentSplitter);
+        m_contentSplitter->addWidget(m_previewPanel);
 
-        // 右侧面板：ParamsPanel（实际参数面板）
-        m_paramsPanel = new ParamsPanel(contentSplitter);
-        m_paramsPanel->setMinimumWidth(280);
-        m_paramsPanel->setMaximumWidth(460);
-        contentSplitter->addWidget(m_paramsPanel);
+        m_paramsPanel = new ParamsPanel(m_contentSplitter);
+        m_paramsPanel->setMinimumWidth(StyleTokens::Layout::kRightPanelMinimumWidth);
+        m_paramsPanel->setMaximumWidth(StyleTokens::Layout::kRightPanelMaximumWidth);
+        m_contentSplitter->addWidget(m_paramsPanel);
 
-        // 设置默认比例：22% / 56% / 22%
-        contentSplitter->setSizes({300, 780, 320});
-
-        workspaceLayout->addWidget(contentSplitter, 1);
-        m_contentStack->addWidget(m_workspacePage);
-        m_contentStack->setCurrentWidget(m_sceneLauncher);
-        mainLayout->addWidget(m_contentStack, 1);
+        QSettings settings("StarProcessor", "App");
+        const int leftWidth = std::clamp(
+            settings.value("ui/leftPanelWidth",
+                           StyleTokens::Layout::kLeftPanelWidth).toInt(),
+            StyleTokens::Layout::kLeftPanelMinimumWidth,
+            StyleTokens::Layout::kLeftPanelMaximumWidth);
+        const int rightWidth = std::clamp(
+            settings.value("ui/rightPanelWidth",
+                           StyleTokens::Layout::kRightPanelWidth).toInt(),
+            StyleTokens::Layout::kRightPanelMinimumWidth,
+            StyleTokens::Layout::kRightPanelMaximumWidth);
+        m_contentSplitter->setSizes({leftWidth, 840, rightWidth});
+        connect(m_contentSplitter, &QSplitter::splitterMoved,
+                this, [this](int, int) {
+                    const QList<int> sizes = m_contentSplitter->sizes();
+                    if (sizes.size() != 3) return;
+                    QSettings settings("StarProcessor", "App");
+                    settings.setValue("ui/leftPanelWidth", sizes[0]);
+                    settings.setValue("ui/rightPanelWidth", sizes[2]);
+                });
+        mainLayout->addWidget(m_contentSplitter, 1);
     }
 
     QString sceneName() const {
@@ -282,51 +240,17 @@ private:
         m_scene = scene;
         m_sceneActive = true;
 
-        switch (scene) {
-        case ProcessingScene::SingleFrame:
-            m_sceneStepNames = {QString::fromUtf8("素材"), QString::fromUtf8("调整"),
-                                QString::fromUtf8("预览"), QString::fromUtf8("导出")};
-            break;
-        case ProcessingScene::SkyGround:
-            m_sceneStepNames = {QString::fromUtf8("素材"), QString::fromUtf8("蒙版"),
-                                QString::fromUtf8("双路堆栈"), QString::fromUtf8("结果")};
-            break;
-        case ProcessingScene::Nightscape:
-            m_sceneStepNames = {QString::fromUtf8("素材"), QString::fromUtf8("对齐"),
-                                QString::fromUtf8("堆栈"), QString::fromUtf8("结果")};
-            break;
-        case ProcessingScene::DeepSky:
-            m_sceneStepNames = {QString::fromUtf8("校准"), QString::fromUtf8("对齐"),
-                                QString::fromUtf8("堆栈"), QString::fromUtf8("结果")};
-            break;
-        case ProcessingScene::StarTrail:
-            m_sceneStepNames = {QString::fromUtf8("素材"), QString::fromUtf8("星轨累积"),
-                                QString::fromUtf8("地景融合"), QString::fromUtf8("结果")};
-            break;
-        case ProcessingScene::Timelapse:
-            m_sceneStepNames = {QString::fromUtf8("素材"), QString::fromUtf8("预分析"),
-                                QString::fromUtf8("逐帧降噪"), QString::fromUtf8("输出序列")};
-            break;
-        }
-
         if (changed) {
             m_paramsPanel->clearModifiedCameraGrayPoint();
             invalidateCachedResult();
             m_paramsPanel->applySceneProfile(scene);
         }
-        m_contentStack->setCurrentWidget(m_workspacePage);
+        m_projectPanel->setScene(scene);
+        QSettings("StarProcessor", "App").setValue(
+            "ui/processingScene", static_cast<int>(scene));
         updateProjectReadiness();
         statusBar()->showMessage(
             QString::fromUtf8("已进入%1流程").arg(sceneName()), 3000);
-    }
-
-    void showSceneLauncher() {
-        if (processingActive()) return;
-        m_contentStack->setCurrentWidget(m_sceneLauncher);
-        m_toolbar->enableProcess(false);
-        m_toolbar->enableExport(false);
-        m_toolbar->setProjectSummary(QString::fromUtf8("选择处理场景"));
-        statusBar()->showMessage(QString::fromUtf8("选择与拍摄内容匹配的处理场景"));
     }
 
     void updateProjectReadiness() {
@@ -335,6 +259,24 @@ private:
         const int required = requiredFrameCount();
         const bool calibrationReady = m_scene != ProcessingScene::DeepSky ||
             m_paramsPanel->deepSkyCalibrationInputsComplete();
+        const auto calibrationSummary = [](const QStringList& paths,
+                                           const QString& master) {
+            if (!master.isEmpty()) return QStringLiteral("Master");
+            if (!paths.isEmpty()) {
+                return QString::fromUtf8("%1 张").arg(paths.size());
+            }
+            return QString::fromUtf8("未设置");
+        };
+        m_projectPanel->setCalibrationSummary(
+            calibrationSummary(m_paramsPanel->darkFramePaths(),
+                               m_paramsPanel->masterDarkPath()),
+            calibrationSummary(m_paramsPanel->flatFramePaths(),
+                               m_paramsPanel->masterFlatPath()),
+            calibrationSummary(m_paramsPanel->biasFramePaths(),
+                               m_paramsPanel->masterBiasPath()),
+            calibrationSummary(m_paramsPanel->darkFlatFramePaths(),
+                               m_paramsPanel->masterDarkFlatPath()),
+            m_paramsPanel->deepSkyCalibrationInputsComplete());
         m_toolbar->enableProcess(count >= required && calibrationReady);
         m_toolbar->setProjectSummary(
             count > 0
@@ -468,40 +410,29 @@ private:
     }
 
     void setupStatusBar() {
-        statusBar()->setStyleSheet(
-            "QStatusBar { background-color: #171F21; color: #81938F; border-top: 1px solid #2B393B; }"
-        );
-    }
+        statusBar()->setFixedHeight(StyleTokens::Layout::kStatusBarHeight);
+        m_pixelInfoLabel = new QLabel(QString::fromUtf8("RGB —"), statusBar());
+        m_pixelInfoLabel->setProperty(
+            StyleTokens::Properties::kTextRole,
+            QString::fromLatin1(StyleTokens::Properties::kMono));
+        m_pixelInfoLabel->setMinimumWidth(190);
+        m_pixelInfoLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+        statusBar()->addPermanentWidget(m_pixelInfoLabel);
 
-    void setupStepBar() {
-        setWorkflowStage(0, QString::fromUtf8("等待选择场景"));
+        m_inlineProgress = new QProgressBar(statusBar());
+        m_inlineProgress->setProperty(
+            StyleTokens::Properties::kControlRole,
+            QString::fromLatin1(StyleTokens::Properties::kProgressLine));
+        m_inlineProgress->setRange(0, 100);
+        m_inlineProgress->setTextVisible(false);
+        m_inlineProgress->setFixedWidth(120);
+        m_inlineProgress->setVisible(false);
+        statusBar()->addPermanentWidget(m_inlineProgress);
     }
 
     void setWorkflowStage(int stage, const QString& status, bool complete = false) {
-        const int current = std::clamp(
-            stage, 0, static_cast<int>(m_stepLabels.size()) - 1);
-        for (int i = 0; i < m_stepLabels.size(); ++i) {
-            QLabel* label = m_stepLabels[i];
-            if (!label) continue;
-            if (i < current || (complete && i <= current)) {
-                label->setText(QString::fromUtf8("✓ ") + m_sceneStepNames.value(i));
-                label->setStyleSheet(
-                    "color: #4ED7AE; border: none; font-size: 10px; font-weight: 600; padding: 4px 7px;"
-                );
-            } else if (i == current) {
-                label->setText(m_sceneStepNames.value(i));
-                label->setStyleSheet(
-                    "color: #F3F7F6; background-color: #1B2527; border: 1px solid #465B5E; "
-                    "border-radius: 5px; font-size: 10px; font-weight: 700; padding: 4px 7px;"
-                );
-            } else {
-                label->setText(m_sceneStepNames.value(i));
-                label->setStyleSheet(
-                    "color: #667B77; border: none; font-size: 10px; padding: 4px 7px;"
-                );
-            }
-        }
-        if (m_workflowStatus) m_workflowStatus->setText(status);
+        Q_UNUSED(stage)
+        statusBar()->showMessage(status, complete ? 5000 : 0);
     }
 
     void setupConnections() {
@@ -511,12 +442,7 @@ private:
         connect(m_quickPreviewTimer, &QTimer::timeout,
                 this, &MainWindow::startQuickPreview);
 
-        connect(m_sceneLauncher, &SceneLauncher::sceneSelected,
-                this, &MainWindow::activateScene);
-
         // Toolbar 信号
-        connect(m_toolbar, &Toolbar::sceneSelectorClicked,
-                this, &MainWindow::showSceneLauncher);
         connect(m_toolbar, &Toolbar::importFilesClicked, this, &MainWindow::onImportClicked);
         connect(m_toolbar, &Toolbar::importFolderClicked, this, &MainWindow::onImportFolderClicked);
         connect(m_toolbar, &Toolbar::clearProjectClicked, this, [this]() {
@@ -534,6 +460,10 @@ private:
             onSettingsClicked();
         });
         connect(m_toolbar, &Toolbar::aboutClicked, this, &MainWindow::onAboutClicked);
+        connect(m_projectPanel, &ProjectPanel::sceneChanged,
+                this, &MainWindow::activateScene);
+        connect(m_projectPanel, &ProjectPanel::calibrationSettingsRequested,
+                m_paramsPanel, &ParamsPanel::showCalibrationSettings);
 
         // 文件选择 -> 预览加载
         connect(m_projectPanel, &ProjectPanel::fileSelected, this, [this](const QString& filePath) {
@@ -550,11 +480,20 @@ private:
                         filePath, image, iso, exposureTime, aperture,
                         focalLength);
                     if (m_projectPanel->currentFilePath() == filePath) {
+                        m_pixelInfoLabel->setText(
+                            QString::fromUtf8("%1×%2 · RGB —")
+                                .arg(image.width()).arg(image.height()));
                         statusBar()->showMessage(
                             QString("已加载：%1")
                                 .arg(QFileInfo(filePath).fileName()),
                             3000);
                     }
+                });
+        connect(m_previewPanel, &PreviewPanel::mousePixelInfo,
+                this, [this](int x, int y, int r, int g, int b) {
+                    m_pixelInfoLabel->setText(
+                        QString::fromUtf8("%1,%2 · RGB %3,%4,%5")
+                            .arg(x).arg(y).arg(r).arg(g).arg(b));
                 });
         connect(m_previewPanel, &PreviewPanel::sourcePreviewFailed, this,
                 [this](const QString& filePath) {
@@ -779,10 +718,7 @@ private:
     }
 
     QString menuStyleSheet() const {
-        return "QMenu { background-color: #171F21; color: #D2DDDA; border: 1px solid #344548; padding: 5px; }"
-               "QMenu::item { padding: 7px 22px 7px 10px; border-radius: 4px; }"
-               "QMenu::item:selected { background-color: #273336; color: #F3F7F6; }"
-               "QMenu::separator { height: 1px; background-color: #2B393B; margin: 5px 8px; }";
+        return QString();
     }
 
     static QString formatExposureTime(double seconds) {
@@ -935,15 +871,19 @@ private:
 
     void showBestAvailableResult() {
         if (currentQuickPreviewAvailable()) {
+            const QString contentKey = QStringLiteral("quick:") +
+                m_quickPreviewSignature;
             if (!m_cachedBeforePreview.isNull()) {
                 m_previewPanel->loadRgb16BitComparison(
                     m_cachedBeforePreview, m_cachedQuickPreviewResult,
                     m_quickPreviewWidth, m_quickPreviewHeight,
-                    m_cachedBeforeBlackPoint, m_cachedBeforeWhitePoint);
+                    m_cachedBeforeBlackPoint, m_cachedBeforeWhitePoint,
+                    contentKey);
             } else {
                 m_previewPanel->loadRgb16BitImage(
                     m_cachedQuickPreviewResult,
-                    m_quickPreviewWidth, m_quickPreviewHeight);
+                    m_quickPreviewWidth, m_quickPreviewHeight,
+                    contentKey);
             }
             m_previewPanel->setResultLabel(QString::fromUtf8(
                 "快速预览 %1×%2 · 完整导出需重新处理")
@@ -962,14 +902,18 @@ private:
             return;
         }
         if (m_cachedStackedData.empty()) return;
+        const QString contentKey = QStringLiteral("result:") +
+            m_lastProcessedSignature;
         if (!m_cachedBeforePreview.isNull()) {
             m_previewPanel->loadRgb16BitComparison(
                 m_cachedBeforePreview, m_cachedStackedData,
                 m_cachedWidth, m_cachedHeight,
-                m_cachedBeforeBlackPoint, m_cachedBeforeWhitePoint);
+                m_cachedBeforeBlackPoint, m_cachedBeforeWhitePoint,
+                contentKey);
         } else {
             m_previewPanel->loadRgb16BitImage(
-                m_cachedStackedData, m_cachedWidth, m_cachedHeight);
+                m_cachedStackedData, m_cachedWidth, m_cachedHeight,
+                contentKey);
         }
         if (m_paramsPanel->modifiedCameraColorEnabled() &&
             m_paramsPanel->modifiedCameraColorMode() ==
@@ -1151,11 +1095,7 @@ private slots:
                 fullPaths.append(directory.absoluteFilePath(f));
             }
             if (!fullPaths.isEmpty()) {
-                if (!m_sceneActive) {
-                    activateScene(ProcessingScene::Nightscape);
-                } else if (m_contentStack->currentWidget() == m_sceneLauncher) {
-                    activateScene(m_scene);
-                }
+                if (!m_sceneActive) activateScene(ProcessingScene::Nightscape);
                 m_projectPanel->addFiles(fullPaths);
                 statusBar()->showMessage(
                     QString("从文件夹导入 %1 个文件").arg(fullPaths.size()),
@@ -1210,7 +1150,13 @@ private slots:
 
     void onProcessClicked() {
         if (m_worker && m_worker->isRunning()) {
-            statusBar()->showMessage("已有处理任务正在运行", 3000);
+            m_worker->requestCancel();
+            setWorkflowStage(1, QString::fromUtf8("正在安全停止..."));
+            return;
+        }
+        if (m_exportWorker && m_exportWorker->isRunning()) {
+            m_exportWorker->requestCancel();
+            setWorkflowStage(3, QString::fromUtf8("正在取消导出..."));
             return;
         }
         if (m_previewPanel->maskRefinementActive()) {
@@ -1402,7 +1348,7 @@ private slots:
         // Worker parameters and source paths are immutable once captured.
         // Disable their editors so the visible project always describes the
         // task currently running; preview navigation remains available.
-        m_projectPanel->setEnabled(false);
+        m_projectPanel->setEditingEnabled(false);
         m_paramsPanel->setEnabled(false);
         m_inlineProgress->setValue(0);
         m_inlineProgress->setVisible(true);
@@ -1500,7 +1446,7 @@ private slots:
             dialog->close();
             dialog->deleteLater();
             m_toolbar->setProcessing(false);
-            m_projectPanel->setEnabled(true);
+            m_projectPanel->setEditingEnabled(true);
             m_paramsPanel->setEnabled(true);
             m_inlineProgress->setVisible(false);
             if (worker->wasCancelled()) {
@@ -1560,6 +1506,20 @@ private slots:
                           ? QString::fromUtf8(" · 星点偏长，请检查曝光拖线/像差")
                           : QString())),
                     true);
+                QString methodName = m_paramsPanel->stackMethod();
+                if (methodName == QStringLiteral("median")) {
+                    methodName = QStringLiteral("Median");
+                } else if (methodName == QStringLiteral("average")) {
+                    methodName = QStringLiteral("Average");
+                } else if (methodName == QStringLiteral("kappa-sigma")) {
+                    methodName = QStringLiteral("Kappa-Sigma");
+                } else if (methodName == QStringLiteral("winsorized")) {
+                    methodName = QStringLiteral("Winsorized");
+                }
+                m_previewPanel->showResultSummary(
+                    QString::fromUtf8("%1×%2 · %3 帧 · %4")
+                        .arg(m_cachedWidth).arg(m_cachedHeight)
+                        .arg(frameCount).arg(methodName));
                 if (currentProcessingSignature() !=
                     m_lastProcessedSignature) {
                     setWorkflowStage(1,
@@ -1628,9 +1588,7 @@ private slots:
         connect(dialog, &QProgressDialog::canceled, this, [this]() {
             if (m_worker) {
                 m_worker->requestCancel();
-                if (m_workflowStatus) {
-                    m_workflowStatus->setText(QString::fromUtf8("正在安全停止..."));
-                }
+                setWorkflowStage(1, QString::fromUtf8("正在安全停止..."));
                 statusBar()->showMessage("处理已取消", 3000);
             }
         });
@@ -1683,7 +1641,7 @@ private slots:
         auto* worker = new ExportWorker(
             image, m_cachedWidth, m_cachedHeight, fullPath, fmt, this);
         m_exportWorker = worker;
-        m_projectPanel->setEnabled(false);
+        m_projectPanel->setEditingEnabled(false);
         m_paramsPanel->setEnabled(false);
         m_toolbar->setProcessing(true);
         m_inlineProgress->setRange(0, 0);
@@ -1706,7 +1664,7 @@ private slots:
                     m_cachedStackedData = std::move(*image);
                     m_toolbar->setProcessing(false);
                     m_toolbar->enableExport(true);
-                    m_projectPanel->setEnabled(true);
+                    m_projectPanel->setEditingEnabled(true);
                     m_paramsPanel->setEnabled(true);
                     m_inlineProgress->setRange(0, 100);
                     m_inlineProgress->setVisible(false);
@@ -1804,21 +1762,14 @@ private slots:
 
 private:
     Toolbar* m_toolbar = nullptr;
-    SceneLauncher* m_sceneLauncher = nullptr;
-    QStackedWidget* m_contentStack = nullptr;
-    QWidget* m_workspacePage = nullptr;
+    QSplitter* m_contentSplitter = nullptr;
     ProjectPanel* m_projectPanel = nullptr;
     PreviewPanel* m_previewPanel = nullptr;
     ParamsPanel* m_paramsPanel = nullptr;
-    QWidget* m_stepBar = nullptr;
-    QList<QLabel*> m_stepLabels;
-    QLabel* m_workflowStatus = nullptr;
     QProgressBar* m_inlineProgress = nullptr;
+    QLabel* m_pixelInfoLabel = nullptr;
     ProcessingScene m_scene = ProcessingScene::Nightscape;
     bool m_sceneActive = false;
-    QStringList m_sceneStepNames = {
-        QString::fromUtf8("素材"), QString::fromUtf8("对齐"),
-        QString::fromUtf8("堆栈"), QString::fromUtf8("结果")};
     QAction* m_beforeAfterAction = nullptr;
     UpdateManager* m_updateManager = nullptr;
     ProcessingWorker* m_worker = nullptr;

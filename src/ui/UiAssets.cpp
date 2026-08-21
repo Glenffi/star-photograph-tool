@@ -11,7 +11,7 @@ namespace {
 constexpr qreal kDesignSize = 24.0;
 constexpr qreal kDeviceScale = 2.0;
 
-QPen iconPen(const QColor& color, qreal width = 1.7) {
+QPen iconPen(const QColor& color, qreal width = 1.5) {
     QPen pen(color, width, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin);
     return pen;
 }

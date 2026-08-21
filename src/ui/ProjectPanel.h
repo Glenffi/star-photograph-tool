@@ -1,5 +1,7 @@
 #pragma once
 
+#include "ProcessingScene.h"
+
 #include <QWidget>
 #include <QStringList>
 #include <QPixmap>
@@ -8,11 +10,14 @@
 class QScrollArea;
 class QVBoxLayout;
 class QHBoxLayout;
+class QComboBox;
 class QMenu;
 class QAction;
 class QLabel;
 class QEnterEvent;
 class QGraphicsOpacityEffect;
+class QKeyEvent;
+class QPaintEvent;
 class QResizeEvent;
 class ThumbnailGenerator;
 class QImage;
@@ -44,8 +49,10 @@ signals:
 
 protected:
     void mousePressEvent(QMouseEvent* event) override;
+    void keyPressEvent(QKeyEvent* event) override;
     void enterEvent(QEnterEvent* event) override;
     void leaveEvent(QEvent* event) override;
+    void paintEvent(QPaintEvent* event) override;
     void resizeEvent(QResizeEvent* event) override;
 
 private:
@@ -60,6 +67,7 @@ private:
     QLabel* m_nameLabel = nullptr;
     QLabel* m_metaLabel = nullptr;
     QLabel* m_statusLabel = nullptr;
+    QWidget* m_referenceDot = nullptr;
     QGraphicsOpacityEffect* m_opacityEffect = nullptr;
 };
 
@@ -74,6 +82,12 @@ public:
     void removeSelected();
     void setReferenceFrame(const QString& filePath);
     void setReferenceFrame(int index);
+    void setScene(ProcessingScene scene);
+    ProcessingScene currentScene() const;
+    void setEditingEnabled(bool enabled);
+    void setCalibrationSummary(const QString& dark, const QString& flat,
+                               const QString& bias, const QString& darkFlat,
+                               bool ready);
 
     QStringList filePaths() const;
     QStringList includedFilePaths() const;  // 未排除的文件
@@ -90,6 +104,8 @@ signals:
     void filesChanged();
     void filesDropped(const QStringList& filePaths);
     void referenceFrameChanged();
+    void sceneChanged(ProcessingScene scene);
+    void calibrationSettingsRequested();
     void requestProcess();
 
 private slots:
@@ -100,6 +116,7 @@ private slots:
     void onExcludeSelected();
     void onSetReferenceFrame();
     void onViewMetadata();
+    void onRevealInFileManager();
     void onRemoveFromList();
     void onImportClicked();
 
@@ -110,6 +127,8 @@ protected:
 
 private:
     void setupUI();
+    QWidget* setupHeader();
+    QWidget* setupCalibrationSummary();
     void setupEmptyState();
     void setupFileList();
     void setupBottomBar();
@@ -122,8 +141,11 @@ private:
     void showFileList();
     void showEmptyState();
     void setCurrentIndex(int index);
+    int minimumFrameCount() const;
+    void updateEditingState();
 
     // UI 组件
+    QComboBox* m_sceneCombo = nullptr;
     QScrollArea* m_scrollArea = nullptr;
     QWidget* m_listContainer = nullptr;
     QVBoxLayout* m_listLayout = nullptr;
@@ -133,12 +155,20 @@ private:
     QLabel* m_bottomLabel = nullptr;
     QPushButton* m_headerImportBtn = nullptr;
     QPushButton* m_emptyImportBtn = nullptr;
+    QWidget* m_calibrationSummary = nullptr;
+    QLabel* m_darkSummary = nullptr;
+    QLabel* m_flatSummary = nullptr;
+    QLabel* m_biasSummary = nullptr;
+    QLabel* m_darkFlatSummary = nullptr;
+    QLabel* m_calibrationReady = nullptr;
+    QPushButton* m_calibrationSettingsBtn = nullptr;
 
     // 右键菜单
     QMenu* m_contextMenu = nullptr;
     QAction* m_excludeAction = nullptr;
     QAction* m_referenceAction = nullptr;
     QAction* m_metadataAction = nullptr;
+    QAction* m_revealAction = nullptr;
     QAction* m_removeAction = nullptr;
 
     // 数据
@@ -146,6 +176,8 @@ private:
     QList<FileItem> m_fileItems;
     QList<FileCard*> m_cards;
     QStringList m_pendingThumbnailPaths;
+    ProcessingScene m_scene = ProcessingScene::Nightscape;
+    bool m_editingEnabled = true;
     int m_currentIndex = -1;
     int m_contextMenuIndex = -1;
 };
