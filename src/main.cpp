@@ -41,6 +41,7 @@
 #include "ui/Toolbar.h"
 #include "ui/UiAssets.h"
 #include "ui/SceneLauncher.h"
+#include "ui/StyleTokens.h"
 #include "update/UpdateManager.h"
 
 #include "core/RawImageLoader.h"
@@ -1881,25 +1882,7 @@ int main(int argc, char* argv[]) {
     // downloads without storing proxy credentials in the application.
     QNetworkProxyFactory::setUseSystemConfiguration(true);
 
-    app.setStyleSheet(
-        "QMainWindow, QDialog, QMessageBox, QFileDialog { background-color: #111719; color: #F3F7F6; }"
-        "QWidget { color: #D2DDDA; letter-spacing: 0px; }"
-        "QMenuBar { background-color: #171F21; color: #C7D3D0; border-bottom: 1px solid #263234; }"
-        "QMenuBar::item { padding: 5px 11px; background-color: transparent; }"
-        "QMenuBar::item:selected { background-color: #273336; color: #F3F7F6; }"
-        "QStatusBar { background-color: #171F21; color: #81938F; }"
-        "QSplitter::handle { background-color: #263234; }"
-        "QScrollBar:vertical { background-color: #111719; width: 10px; }"
-        "QScrollBar::handle:vertical { background-color: #344548; border-radius: 5px; min-height: 24px; }"
-        "QScrollBar::handle:vertical:hover { background-color: #4D6265; }"
-        "QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }"
-        "QScrollBar:horizontal { background-color: #111719; height: 10px; }"
-        "QScrollBar::handle:horizontal { background-color: #344548; border-radius: 5px; min-width: 24px; }"
-        "QScrollBar::handle:horizontal:hover { background-color: #4D6265; }"
-        "QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal { width: 0; }"
-        "QToolTip { background-color: #273336; color: #F3F7F6; border: 1px solid #4D6265; "
-        "  border-radius: 4px; padding: 5px 7px; }"
-    );
+    app.setStyleSheet(StyleTokens::appStyleSheet());
 
     MainWindow window;
     window.show();

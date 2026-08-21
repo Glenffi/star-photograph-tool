@@ -1,16 +1,7 @@
 #pragma once
 
-#include <QMetaType>
 #include <QWidget>
-
-enum class ProcessingScene {
-    SingleFrame,
-    Nightscape,
-    DeepSky,
-    SkyGround,
-    StarTrail,
-    Timelapse
-};
+#include "ProcessingScene.h"
 
 class SceneLauncher : public QWidget {
     Q_OBJECT
@@ -20,5 +11,3 @@ public:
 signals:
     void sceneSelected(ProcessingScene scene);
 };
-
-Q_DECLARE_METATYPE(ProcessingScene)

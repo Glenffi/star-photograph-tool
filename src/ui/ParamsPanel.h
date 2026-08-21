@@ -5,6 +5,7 @@
 #include "core/AutoOptimizeEngine.h"
 #include "core/PresetManager.h"
 #include "core/SkyGroundMask.h"
+#include "ui/ProcessingScene.h"
 
 class QScrollArea;
 class QVBoxLayout;
@@ -17,7 +18,6 @@ class QLabel;
 class QTimer;
 class QLineEdit;
 class QTabWidget;
-enum class ProcessingScene;
 
 class ParamsPanel : public QWidget {
     Q_OBJECT

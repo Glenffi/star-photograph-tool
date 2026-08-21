@@ -131,6 +131,9 @@ set(APP_SOURCES
     src/ui/Toolbar.cpp
     src/ui/ParamsPanel.cpp
     src/ui/UiAssets.cpp
+    src/ui/StyleTokens.cpp
+    src/ui/InspectorWidgets.cpp
+    src/ui/ViewStateStore.cpp
     src/ui/SceneLauncher.cpp
     src/update/UpdateManager.cpp
 )
@@ -172,6 +175,10 @@ set(APP_HEADERS
     src/ui/Toolbar.h
     src/ui/ParamsPanel.h
     src/ui/UiAssets.h
+    src/ui/StyleTokens.h
+    src/ui/InspectorWidgets.h
+    src/ui/ViewStateStore.h
+    src/ui/ProcessingScene.h
     src/ui/SceneLauncher.h
     src/update/UpdateManager.h
 )
@@ -276,6 +283,21 @@ if(BUILD_TESTING)
         Qt6::Widgets)
     add_test(NAME preview_panel COMMAND StarProcessorPreviewTests)
     set_tests_properties(preview_panel PROPERTIES
+        ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
+    add_executable(StarProcessorUiFoundationTests
+        tests/UiFoundationTests.cpp
+        src/ui/StyleTokens.cpp
+        src/ui/StyleTokens.h
+        src/ui/InspectorWidgets.cpp
+        src/ui/InspectorWidgets.h
+        src/ui/ViewStateStore.cpp
+        src/ui/ViewStateStore.h)
+    target_include_directories(StarProcessorUiFoundationTests PRIVATE
+        ${CMAKE_SOURCE_DIR}/src)
+    target_link_libraries(StarProcessorUiFoundationTests PRIVATE Qt6::Widgets)
+    add_test(NAME ui_foundation COMMAND StarProcessorUiFoundationTests)
+    set_tests_properties(ui_foundation PROPERTIES
         ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 endif()
 

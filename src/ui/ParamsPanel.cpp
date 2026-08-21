@@ -1,5 +1,5 @@
 #include "ParamsPanel.h"
-#include "SceneLauncher.h"
+#include "ProcessingScene.h"
 #include "UiAssets.h"
 #include "core/PresetManager.h"
 #include <QScrollArea>
