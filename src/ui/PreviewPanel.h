@@ -63,6 +63,14 @@ public:
     void setSelectedPoint(double normalizedX, double normalizedY);
     void clearSelectedPoint();
     void setBeforeAfterMode(bool enabled);
+    void cycleComparisonMode();
+    void showSplitComparison();
+    void toggleMaskOverlay();
+    void beginPointSelection();
+    void cancelInteractiveMode();
+    void adjustMaskBrushSize(int delta);
+    void zoomIn();
+    void zoomOut();
     void setBeforeImage(const QImage& image);
     void setAfterImage(const QImage& image);
     void setComparisonImages(const QImage& before, const QImage& after);
@@ -181,6 +189,7 @@ private:
     QPushButton* m_zoomInBtn = nullptr;
     QPushButton* m_zoomOutBtn = nullptr;
     QPushButton* m_resultBtn = nullptr;
+    QLabel* m_resultStateLabel = nullptr;
     QPushButton* m_maskOverlayBtn = nullptr;
     QWidget* m_maskEditControls = nullptr;
     QPushButton* m_maskBrushBtn = nullptr;

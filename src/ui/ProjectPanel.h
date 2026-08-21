@@ -7,6 +7,8 @@
 #include <QPixmap>
 #include <QPushButton>
 
+#include <optional>
+
 class QScrollArea;
 class QVBoxLayout;
 class QHBoxLayout;
@@ -19,6 +21,7 @@ class QGraphicsOpacityEffect;
 class QKeyEvent;
 class QPaintEvent;
 class QResizeEvent;
+class QTimer;
 class ThumbnailGenerator;
 class QImage;
 
@@ -80,6 +83,8 @@ public:
     void addFiles(const QStringList& filePaths);
     void clearFiles();
     void removeSelected();
+    void toggleSelectedExclusion();
+    bool undoLastRemoval();
     void setReferenceFrame(const QString& filePath);
     void setReferenceFrame(int index);
     void setScene(ProcessingScene scene);
@@ -106,6 +111,7 @@ signals:
     void referenceFrameChanged();
     void sceneChanged(ProcessingScene scene);
     void calibrationSettingsRequested();
+    void undoAvailabilityChanged(bool available, const QString& fileName);
     void requestProcess();
 
 private slots:
@@ -132,7 +138,9 @@ private:
     void setupEmptyState();
     void setupFileList();
     void setupBottomBar();
-    void addFileCard(const FileItem& item);
+    void addFileCard(const FileItem& item, int index = -1);
+    void removeAt(int index);
+    void toggleExclusionAt(int index);
     void updateCard(int index);
     void updateCardSelection(int index);
     void updateAllCardStyles();
@@ -178,6 +186,9 @@ private:
     QStringList m_pendingThumbnailPaths;
     ProcessingScene m_scene = ProcessingScene::Nightscape;
     bool m_editingEnabled = true;
+    std::optional<FileItem> m_lastRemovedItem;
+    int m_lastRemovedIndex = -1;
+    QTimer* m_undoTimer = nullptr;
     int m_currentIndex = -1;
     int m_contextMenuIndex = -1;
 };

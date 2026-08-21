@@ -1,6 +1,7 @@
 #include "workers/ProcessingWorker.h"
 #include "workers/QuickPreviewWorker.h"
 #include "workers/ExportWorker.h"
+#include "workers/HistoryPreviewWorker.h"
 
 #include <QCoreApplication>
 #include <QFileInfo>
@@ -52,6 +53,40 @@ void testExportWorkerLifecycle() {
     check(worker.wait(3000), "Export worker should finish promptly");
     check(worker.succeeded() && QFileInfo::exists(path),
           "Export worker should write a valid image off the caller thread");
+}
+
+void testHistoryPreviewWorker() {
+    QTemporaryDir directory;
+    check(directory.isValid(),
+          "History-preview temporary directory should be available");
+    if (!directory.isValid()) return;
+
+    constexpr int width = 24;
+    constexpr int height = 12;
+    std::vector<uint16_t> rgb(
+        static_cast<size_t>(width) * height * 3, 8192);
+    const QString path = directory.filePath("20260822_120000_stacked.tiff");
+    check(ImageExporter::exportRgb16(
+              rgb, width, height, path, ImageExporter::Tiff16),
+          "History-preview TIFF fixture should be writable");
+
+    QImage preview;
+    QString failure;
+    HistoryPreviewWorker worker(path);
+    QObject::connect(&worker, &HistoryPreviewWorker::loaded,
+                     [&](const QString&, const QImage& image) {
+                         preview = image;
+                     });
+    QObject::connect(&worker, &HistoryPreviewWorker::failed,
+                     [&](const QString&, const QString& reason) {
+                         failure = reason;
+                     });
+    worker.start();
+    check(worker.wait(3000),
+          "History-preview worker should finish promptly");
+    check(failure.isEmpty() && !preview.isNull() &&
+              preview.size() == QSize(width, height),
+          "History-preview worker should return a bounded RGB image");
 }
 
 void testRawLoaderFitsWorkerStack() {
@@ -218,6 +253,7 @@ int main(int argc, char* argv[]) {
     testEmptyInput();
     testCancellationBeforeStart();
     testExportWorkerLifecycle();
+    testHistoryPreviewWorker();
     testRawLoaderFitsWorkerStack();
     testSingleFrameFailureUsesDedicatedPath();
     testTimelapseRejectsTooFewFrames();

@@ -142,6 +142,16 @@ void PreviewPanel::setupTopBar() {
             this, &PreviewPanel::resultRequested);
     layout->addWidget(m_resultBtn);
 
+    m_resultStateLabel = new QLabel(m_topBar);
+    m_resultStateLabel->setProperty(
+        StyleTokens::Properties::kTextRole,
+        StyleTokens::Properties::kCaption);
+    m_resultStateLabel->setProperty(
+        StyleTokens::Properties::kStatusRole,
+        StyleTokens::Properties::kWarning);
+    m_resultStateLabel->hide();
+    layout->addWidget(m_resultStateLabel);
+
     m_fitBtn = createToolBtn(m_topBar, QString(),
                              QString::fromUtf8("适应视图 (F)"));
     m_fitBtn->setProperty(StyleTokens::Properties::kVariant,
@@ -447,6 +457,10 @@ void PreviewPanel::showImageCanvas() {
     m_scrollArea->setVisible(true);
     m_topBar->setVisible(true);
     if (m_infoBtn) m_infoBtn->setVisible(m_showingResult);
+    if (m_resultStateLabel) {
+        m_resultStateLabel->setVisible(
+            m_showingResult && !m_resultStateLabel->text().isEmpty());
+    }
     m_bottomBar->setVisible(false);
     positionCanvasOverlays();
 }
@@ -945,7 +959,13 @@ void PreviewPanel::setInfo(const QString& info) {
 
 void PreviewPanel::setResultLabel(const QString& label) {
     if (!m_showingResult) return;
-    m_imageFileName = label;
+    m_imageFileName = label.isEmpty()
+        ? QString::fromUtf8("处理结果") : label;
+    if (m_resultStateLabel) {
+        m_resultStateLabel->setText(label);
+        m_resultStateLabel->setVisible(!label.isEmpty());
+    }
+    positionCanvasOverlays();
     updateZoomDisplay();
 }
 
@@ -1473,6 +1493,46 @@ void PreviewPanel::setBeforeAfterMode(bool enabled) {
     }
 }
 
+void PreviewPanel::cycleComparisonMode() {
+    if (!hasComparison()) return;
+    onViewModeChanged((m_viewMode + 1) % 3);
+}
+
+void PreviewPanel::showSplitComparison() {
+    if (hasComparison()) onViewModeChanged(2);
+}
+
+void PreviewPanel::toggleMaskOverlay() {
+    if (hasMaskData()) setMaskOverlayVisible(!m_maskOverlayVisible);
+}
+
+void PreviewPanel::beginPointSelection() {
+    if (m_showingResult) setPointSelectionActive(true);
+}
+
+void PreviewPanel::cancelInteractiveMode() {
+    setPointSelectionActive(false);
+    m_maskPainting = false;
+    if (m_maskBrushBtn) m_maskBrushBtn->setChecked(false);
+    updateImageCursor();
+}
+
+void PreviewPanel::adjustMaskBrushSize(int delta) {
+    if (!m_maskBrushSize || !m_maskEditControls ||
+        !m_maskEditControls->isVisible()) return;
+    m_maskBrushSize->setValue(std::clamp(
+        m_maskBrushSize->value() + delta,
+        m_maskBrushSize->minimum(), m_maskBrushSize->maximum()));
+}
+
+void PreviewPanel::zoomIn() {
+    onZoomIn();
+}
+
+void PreviewPanel::zoomOut() {
+    onZoomOut();
+}
+
 void PreviewPanel::setBeforeImage(const QImage& image) {
     m_beforeImage = image;
     if (!m_beforeImage.isNull() && !m_afterImage.isNull()) {
@@ -1524,7 +1584,10 @@ bool PreviewPanel::isShowingResult() const {
 }
 
 void PreviewPanel::setResultAvailable(bool available, bool viewingResult) {
-    if (m_resultBtn) m_resultBtn->setVisible(available && !viewingResult);
+    if (m_resultBtn) {
+        m_resultBtn->setVisible(available && !viewingResult);
+        positionCanvasOverlays();
+    }
 }
 
 void PreviewPanel::showResultSummary(const QString& summary) {

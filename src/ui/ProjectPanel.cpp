@@ -24,6 +24,7 @@
 #include <QResizeEvent>
 #include <QSignalBlocker>
 #include <QStyle>
+#include <QTimer>
 #include <QDragEnterEvent>
 #include <QDropEvent>
 #include <QMimeData>
@@ -378,6 +379,14 @@ ProjectPanel::ProjectPanel(QWidget* parent)
             this, &ProjectPanel::onThumbnailReady);
     connect(m_thumbnailGen, &ThumbnailGenerator::metadataReady,
             this, &ProjectPanel::onMetadataReady);
+    m_undoTimer = new QTimer(this);
+    m_undoTimer->setSingleShot(true);
+    m_undoTimer->setInterval(5000);
+    connect(m_undoTimer, &QTimer::timeout, this, [this]() {
+        m_lastRemovedItem.reset();
+        m_lastRemovedIndex = -1;
+        emit undoAvailabilityChanged(false, QString());
+    });
 }
 
 ProjectPanel::~ProjectPanel() = default;
@@ -796,7 +805,7 @@ void ProjectPanel::requestThumbnail(const QString& filePath) {
     }
 }
 
-void ProjectPanel::addFileCard(const FileItem& item) {
+void ProjectPanel::addFileCard(const FileItem& item, int index) {
     auto* card = new FileCard(item, m_listContainer);
     connect(card, &FileCard::clicked, this, [this, card]() {
         setCurrentIndex(m_cards.indexOf(card));
@@ -821,9 +830,11 @@ void ProjectPanel::addFileCard(const FileItem& item) {
         m_contextMenu->exec(card->mapToGlobal(pos));
         m_contextMenuIndex = -1;
     });
-    m_cards.append(card);
-    // 插入到 stretch 之前
-    m_listLayout->insertWidget(m_listLayout->count() - 1, card);
+    const int insertionIndex = index < 0
+        ? m_cards.size()
+        : std::clamp(index, 0, static_cast<int>(m_cards.size()));
+    m_cards.insert(insertionIndex, card);
+    m_listLayout->insertWidget(insertionIndex, card);
 }
 
 void ProjectPanel::clearFiles() {
@@ -835,6 +846,10 @@ void ProjectPanel::clearFiles() {
     m_cards.clear();
     m_fileItems.clear();
     m_pendingThumbnailPaths.clear();
+    if (m_undoTimer) m_undoTimer->stop();
+    m_lastRemovedItem.reset();
+    m_lastRemovedIndex = -1;
+    emit undoAvailabilityChanged(false, QString());
     m_currentIndex = -1;
     showEmptyState();
     updateBottomBar();
@@ -845,21 +860,70 @@ void ProjectPanel::removeSelected() {
     if (!m_editingEnabled) return;
     if (m_currentIndex < 0 || m_currentIndex >= m_cards.size()) return;
 
+    removeAt(m_currentIndex);
+}
+
+void ProjectPanel::removeAt(int idx) {
+    if (!m_editingEnabled || idx < 0 || idx >= m_cards.size()) return;
+
     // Keep the canvas and list selection in sync after removing the active
     // source. Selecting the nearest surviving frame also invalidates any
     // asynchronous preview result that may arrive for the removed file.
-    const int idx = m_currentIndex;
+    m_lastRemovedItem = m_fileItems[idx];
+    m_lastRemovedIndex = idx;
+    if (m_undoTimer) m_undoTimer->start();
+    emit undoAvailabilityChanged(true, m_fileItems[idx].fileName);
+
+    const int previousCurrent = m_currentIndex;
+    const bool removedCurrent = previousCurrent == idx;
     auto* card = m_cards.takeAt(idx);
     card->deleteLater();
     m_fileItems.removeAt(idx);
-    m_currentIndex = -1;
 
     if (m_cards.isEmpty()) {
+        m_currentIndex = -1;
         showEmptyState();
         emit fileSelected(QString());
-    } else {
+    } else if (removedCurrent) {
+        m_currentIndex = -1;
         setCurrentIndex(std::min(idx, static_cast<int>(m_cards.size()) - 1));
+    } else {
+        m_currentIndex = previousCurrent > idx
+            ? previousCurrent - 1 : previousCurrent;
+        updateAllCardStyles();
     }
+    updateBottomBar();
+    emit filesChanged();
+}
+
+bool ProjectPanel::undoLastRemoval() {
+    if (!m_editingEnabled || !m_lastRemovedItem) return false;
+    if (m_undoTimer) m_undoTimer->stop();
+    const int index = std::clamp(
+        m_lastRemovedIndex, 0, static_cast<int>(m_fileItems.size()));
+    const FileItem item = *m_lastRemovedItem;
+    m_fileItems.insert(index, item);
+    addFileCard(item, index);
+    m_lastRemovedItem.reset();
+    m_lastRemovedIndex = -1;
+    showFileList();
+    setCurrentIndex(index);
+    updateBottomBar();
+    emit undoAvailabilityChanged(false, QString());
+    emit filesChanged();
+    return true;
+}
+
+void ProjectPanel::toggleSelectedExclusion() {
+    toggleExclusionAt(m_currentIndex);
+}
+
+void ProjectPanel::toggleExclusionAt(int index) {
+    if (!m_editingEnabled || index < 0 || index >= m_fileItems.size()) return;
+    FileItem& item = m_fileItems[index];
+    if (item.isReferenceFrame && !item.isExcluded) return;
+    item.isExcluded = !item.isExcluded;
+    updateCard(index);
     updateBottomBar();
     emit filesChanged();
 }
@@ -1060,14 +1124,7 @@ void ProjectPanel::onCustomContextMenu(const QPoint& pos) {
 }
 
 void ProjectPanel::onExcludeSelected() {
-    if (!m_editingEnabled) return;
-    if (m_contextMenuIndex < 0 || m_contextMenuIndex >= m_fileItems.size()) return;
-    if (m_fileItems[m_contextMenuIndex].isReferenceFrame &&
-        !m_fileItems[m_contextMenuIndex].isExcluded) return;
-    m_fileItems[m_contextMenuIndex].isExcluded = !m_fileItems[m_contextMenuIndex].isExcluded;
-    updateCard(m_contextMenuIndex);
-    updateBottomBar();
-    emit filesChanged();
+    toggleExclusionAt(m_contextMenuIndex);
 }
 
 void ProjectPanel::onSetReferenceFrame() {
@@ -1102,28 +1159,7 @@ void ProjectPanel::onRevealInFileManager() {
 void ProjectPanel::onRemoveFromList() {
     if (!m_editingEnabled) return;
     if (m_contextMenuIndex < 0 || m_contextMenuIndex >= m_fileItems.size()) return;
-
-    const int idx = m_contextMenuIndex;
-    const bool removedCurrent = m_currentIndex == idx;
-    auto* card = m_cards.takeAt(idx);
-    card->deleteLater();
-    m_fileItems.removeAt(idx);
-
-    if (removedCurrent) {
-        m_currentIndex = -1;
-    } else if (m_currentIndex > idx) {
-        m_currentIndex--;
-    }
-
-    if (m_cards.isEmpty()) {
-        showEmptyState();
-        emit fileSelected(QString());
-    } else if (removedCurrent) {
-        setCurrentIndex(std::min(idx, static_cast<int>(m_cards.size()) - 1));
-    }
-    updateAllCardStyles();
-    updateBottomBar();
-    emit filesChanged();
+    removeAt(m_contextMenuIndex);
 }
 
 void ProjectPanel::onImportClicked() {

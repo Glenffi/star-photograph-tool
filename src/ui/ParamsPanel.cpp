@@ -15,9 +15,12 @@
 #include <QLabel>
 #include <QTimer>
 #include <QLineEdit>
+#include <QListWidget>
+#include <QListWidgetItem>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QDir>
+#include <QDateTime>
 #include <QSettings>
 #include <QMessageBox>
 #include <QInputDialog>
@@ -65,7 +68,9 @@ void displayOutputPath(QLineEdit* edit, const QString& path) {
     if (!edit) return;
     edit->setText(path);
     edit->setToolTip(path);
-    edit->setCursorPosition(0);
+    // The directory tail usually distinguishes projects better than the
+    // repeated home-directory prefix; the tooltip retains the full path.
+    edit->setCursorPosition(path.size());
 }
 
 QString signedAdjustmentText(int value) {
@@ -87,6 +92,7 @@ ParamsPanel::ParamsPanel(QWidget* parent)
 {
     setupUI();
     loadPreset();
+    refreshRecentResults();
 }
 
 void ParamsPanel::setupUI() {
@@ -1073,6 +1079,7 @@ void ParamsPanel::setupUI() {
         QString dir = QFileDialog::getExistingDirectory(nullptr, QString::fromUtf8("选择输出目录"));
         if (!dir.isEmpty()) {
             displayOutputPath(m_outputPath, dir);
+            refreshRecentResults();
             markPresetCustom();
             emitParamsChanged();
         }
@@ -1081,6 +1088,58 @@ void ParamsPanel::setupUI() {
     outputLayout->addLayout(outputForm);
 
     outputPageLayout->addWidget(m_outputGroup, 0, Qt::AlignTop);
+
+    m_processingReportGroup = createCollapsibleGroup(
+        QString::fromUtf8("处理报告"), true);
+    auto* reportLayout = new QVBoxLayout(m_processingReportGroup);
+    m_processingReportLabel = new QLabel(m_processingReportGroup);
+    m_processingReportLabel->setWordWrap(true);
+    m_processingReportLabel->setTextInteractionFlags(
+        Qt::TextSelectableByMouse | Qt::TextSelectableByKeyboard);
+    setRole(m_processingReportLabel, "muted");
+    reportLayout->addWidget(m_processingReportLabel);
+    m_processingReportGroup->hide();
+    outputPageLayout->addWidget(m_processingReportGroup, 0, Qt::AlignTop);
+
+    m_recentResultsGroup = createCollapsibleGroup(
+        QString::fromUtf8("最近结果"), true);
+    auto* recentLayout = new QVBoxLayout(m_recentResultsGroup);
+    m_recentResultsList = new QListWidget(m_recentResultsGroup);
+    m_recentResultsList->setMaximumHeight(148);
+    m_recentResultsList->setAccessibleName(QString::fromUtf8("最近处理结果"));
+    recentLayout->addWidget(m_recentResultsList);
+    auto* recentButtons = new QHBoxLayout();
+    m_loadRecentResultBtn = new QPushButton(
+        QString::fromUtf8("只读预览"), m_recentResultsGroup);
+    setButtonVariant(m_loadRecentResultBtn, "secondary");
+    m_revealRecentResultBtn = new QPushButton(
+        QString::fromUtf8("在文件夹中显示"), m_recentResultsGroup);
+    setButtonVariant(m_revealRecentResultBtn, "ghost");
+    recentButtons->addWidget(m_loadRecentResultBtn);
+    recentButtons->addWidget(m_revealRecentResultBtn);
+    recentLayout->addLayout(recentButtons);
+    outputPageLayout->addWidget(m_recentResultsGroup, 0, Qt::AlignTop);
+
+    const auto selectedRecentPath = [this]() {
+        QListWidgetItem* item = m_recentResultsList
+            ? m_recentResultsList->currentItem() : nullptr;
+        return item ? item->data(Qt::UserRole).toString() : QString();
+    };
+    connect(m_loadRecentResultBtn, &QPushButton::clicked, this,
+            [this, selectedRecentPath]() {
+                const QString path = selectedRecentPath();
+                if (!path.isEmpty()) emit recentResultRequested(path);
+            });
+    connect(m_revealRecentResultBtn, &QPushButton::clicked, this,
+            [this, selectedRecentPath]() {
+                const QString path = selectedRecentPath();
+                if (!path.isEmpty()) emit revealResultRequested(path);
+            });
+    connect(m_recentResultsList, &QListWidget::itemDoubleClicked, this,
+            [this](QListWidgetItem* item) {
+                if (item) emit recentResultRequested(
+                    item->data(Qt::UserRole).toString());
+            });
 
     // 预设操作只属于输出页，避免在堆栈和调整阶段形成持续抢眼的操作栏。
     auto* btnBar = new QWidget(this);
@@ -2065,6 +2124,49 @@ void ParamsPanel::showCalibrationSettings() {
     }
 }
 
+void ParamsPanel::showOutputSettings() {
+    if (!m_tabs) return;
+    refreshRecentResults();
+    m_tabs->setCurrentIndex(2);
+}
+
+void ParamsPanel::setProcessingReport(const QString& report) {
+    if (!m_processingReportGroup || !m_processingReportLabel) return;
+    m_processingReportLabel->setText(report);
+    m_processingReportGroup->setVisible(!report.isEmpty());
+}
+
+void ParamsPanel::refreshRecentResults() {
+    if (!m_recentResultsList || !m_recentResultsGroup) return;
+    m_recentResultsList->clear();
+    QDir directory(outputPath());
+    const QStringList filters = {
+        QStringLiteral("*_stacked*.tif"),
+        QStringLiteral("*_stacked*.tiff"),
+        QStringLiteral("*_single*.tif"),
+        QStringLiteral("*_single*.tiff"),
+        QStringLiteral("*_star_trail*.tif"),
+        QStringLiteral("*_star_trail*.tiff")
+    };
+    const QFileInfoList files = directory.entryInfoList(
+        filters, QDir::Files | QDir::Readable, QDir::Time);
+    const int count = std::min(5, static_cast<int>(files.size()));
+    for (int index = 0; index < count; ++index) {
+        const QFileInfo& file = files[index];
+        auto* item = new QListWidgetItem(file.fileName(), m_recentResultsList);
+        item->setData(Qt::UserRole, file.absoluteFilePath());
+        item->setToolTip(QString::fromUtf8("%1\n%2 · %3 MB")
+            .arg(file.absoluteFilePath())
+            .arg(file.lastModified().toString(QStringLiteral("yyyy-MM-dd HH:mm")))
+            .arg(file.size() / (1024.0 * 1024.0), 0, 'f', 1));
+    }
+    const bool available = count > 0;
+    m_recentResultsGroup->setVisible(available);
+    m_loadRecentResultBtn->setEnabled(available);
+    m_revealRecentResultBtn->setEnabled(available);
+    if (available) m_recentResultsList->setCurrentRow(0);
+}
+
 void ParamsPanel::emitParamsChanged() {
     emit paramsChanged();
 }
@@ -2263,6 +2365,7 @@ QString ParamsPanel::outputPath() const {
 void ParamsPanel::setOutputPath(const QString& path) {
     if (m_outputPath) {
         displayOutputPath(m_outputPath, path);
+        refreshRecentResults();
         markPresetCustom();
         emitParamsChanged();
     }

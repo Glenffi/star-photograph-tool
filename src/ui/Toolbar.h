@@ -29,6 +29,8 @@ signals:
     void startProcessClicked();
     void exportResultClicked();
     void settingsClicked();
+    void checkUpdatesClicked();
+    void shortcutsClicked();
     void aboutClicked();
 
 private:
@@ -48,6 +50,8 @@ private:
     QMenu* m_overflowMenu = nullptr;
     QAction* m_clearProjectAction = nullptr;
     QAction* m_settingsAction = nullptr;
+    QAction* m_checkUpdatesAction = nullptr;
+    QAction* m_shortcutsAction = nullptr;
     QAction* m_aboutAction = nullptr;
     bool m_canProcess = false;
     bool m_canExport = false;

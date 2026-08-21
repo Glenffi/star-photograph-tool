@@ -16,16 +16,20 @@
 #include <QDir>
 #include <QDialog>
 #include <QLineEdit>
+#include <QPlainTextEdit>
+#include <QTextEdit>
+#include <QAbstractSpinBox>
 #include <QComboBox>
 #include <QCloseEvent>
+#include <QKeyEvent>
 #include <QLabel>
 #include <QDragEnterEvent>
 #include <QDropEvent>
 #include <QMimeData>
 #include <QNetworkProxyFactory>
-#include <QProgressDialog>
 #include <QProgressBar>
 #include <QDateTime>
+#include <QDesktopServices>
 #include <QDebug>
 #include <QSet>
 #include <QTimer>
@@ -41,6 +45,7 @@
 #include "ui/UiAssets.h"
 #include "ui/ProcessingScene.h"
 #include "ui/StyleTokens.h"
+#include "ui/TaskStatusBar.h"
 #include "update/UpdateManager.h"
 
 #include "core/RawImageLoader.h"
@@ -49,6 +54,7 @@
 #include "workers/ExportWorker.h"
 #include "workers/ProcessingWorker.h"
 #include "workers/QuickPreviewWorker.h"
+#include "workers/HistoryPreviewWorker.h"
 
 class MainWindow : public QMainWindow {
     Q_OBJECT
@@ -96,6 +102,16 @@ public:
         activateScene(scene);
     }
 
+    void selectStartupInspectorOutput() {
+        if (m_paramsPanel) m_paramsPanel->showOutputSettings();
+    }
+
+    void loadStartupHistory(const QString& path) {
+        QTimer::singleShot(0, this, [this, path]() {
+            loadRecentResultPreview(path);
+        });
+    }
+
     ~MainWindow() {
         if (m_quickPreviewWorker && m_quickPreviewWorker->isRunning()) {
             m_quickPreviewWorker->requestCancel();
@@ -109,6 +125,10 @@ public:
         if (m_exportWorker && m_exportWorker->isRunning()) {
             m_exportWorker->requestCancel();
             m_exportWorker->wait();
+        }
+        if (m_historyPreviewWorker && m_historyPreviewWorker->isRunning()) {
+            m_historyPreviewWorker->requestInterruption();
+            m_historyPreviewWorker->wait();
         }
         // 等待所有 MaskPreviewWorker 真正结束
         for (MaskPreviewWorker* w : m_activeMaskPreviewWorkers) {
@@ -154,6 +174,77 @@ protected:
                 QString("拖放导入 %1 个文件").arg(filePaths.size()),
                 5000
             );
+        }
+    }
+
+    void keyPressEvent(QKeyEvent* event) override {
+        QWidget* focused = QApplication::focusWidget();
+        const bool editingText = qobject_cast<QLineEdit*>(focused) ||
+            qobject_cast<QPlainTextEdit*>(focused) ||
+            qobject_cast<QTextEdit*>(focused) ||
+            qobject_cast<QAbstractSpinBox*>(focused) ||
+            (qobject_cast<QComboBox*>(focused) &&
+             qobject_cast<QComboBox*>(focused)->isEditable());
+        const Qt::KeyboardModifiers modifiers = event->modifiers();
+        const bool commandModifier = modifiers.testFlag(Qt::ControlModifier) ||
+            modifiers.testFlag(Qt::MetaModifier) ||
+            modifiers.testFlag(Qt::AltModifier);
+        if (editingText || commandModifier) {
+            QMainWindow::keyPressEvent(event);
+            return;
+        }
+
+        bool handled = true;
+        switch (event->key()) {
+        case Qt::Key_F:
+            m_previewPanel->fitToView();
+            break;
+        case Qt::Key_1:
+            m_previewPanel->resetZoom();
+            break;
+        case Qt::Key_B:
+            if (modifiers.testFlag(Qt::ShiftModifier)) {
+                m_previewPanel->showSplitComparison();
+            } else {
+                m_previewPanel->cycleComparisonMode();
+            }
+            break;
+        case Qt::Key_M:
+            m_previewPanel->toggleMaskOverlay();
+            break;
+        case Qt::Key_R:
+            showBestAvailableResult();
+            break;
+        case Qt::Key_G:
+            m_previewPanel->beginPointSelection();
+            break;
+        case Qt::Key_BracketLeft:
+            m_previewPanel->adjustMaskBrushSize(-4);
+            break;
+        case Qt::Key_BracketRight:
+            m_previewPanel->adjustMaskBrushSize(4);
+            break;
+        case Qt::Key_Plus:
+        case Qt::Key_Equal:
+            m_previewPanel->zoomIn();
+            break;
+        case Qt::Key_Minus:
+            m_previewPanel->zoomOut();
+            break;
+        case Qt::Key_Space:
+            if (!processingActive()) m_projectPanel->toggleSelectedExclusion();
+            break;
+        case Qt::Key_Escape:
+            m_previewPanel->cancelInteractiveMode();
+            break;
+        default:
+            handled = false;
+            break;
+        }
+        if (handled) {
+            event->accept();
+        } else {
+            QMainWindow::keyPressEvent(event);
         }
     }
 
@@ -242,7 +333,8 @@ private:
 
         if (changed) {
             m_paramsPanel->clearModifiedCameraGrayPoint();
-            invalidateCachedResult();
+            markCachedResultStale(
+                QString::fromUtf8("场景已切换 · 这是上次处理的成片"));
             m_paramsPanel->applySceneProfile(scene);
         }
         m_projectPanel->setScene(scene);
@@ -360,7 +452,14 @@ private:
         auto* viewMenu = menuBar()->addMenu("视图");
         viewMenu->setStyleSheet(menuStyleSheet());
 
-        m_beforeAfterAction = new QAction(QString::fromUtf8("处理前后分屏"), this);
+        auto* cycleCompareAction = new QAction(
+            QString::fromUtf8("循环对比\tB"), this);
+        connect(cycleCompareAction, &QAction::triggered,
+                m_previewPanel, &PreviewPanel::cycleComparisonMode);
+        viewMenu->addAction(cycleCompareAction);
+
+        m_beforeAfterAction = new QAction(
+            QString::fromUtf8("处理前后分屏\tShift+B"), this);
         m_beforeAfterAction->setCheckable(true);
         m_beforeAfterAction->setEnabled(false);
         connect(m_beforeAfterAction, &QAction::toggled,
@@ -369,15 +468,23 @@ private:
 
         viewMenu->addSeparator();
 
-        auto* fitViewAction = new QAction("适应视图", this);
-        fitViewAction->setShortcut(QKeySequence("Ctrl+0"));
+        auto* fitViewAction = new QAction(QString::fromUtf8("适应视图\tF"), this);
         connect(fitViewAction, &QAction::triggered, m_previewPanel, &PreviewPanel::fitToView);
         viewMenu->addAction(fitViewAction);
 
-        auto* actualPixelsAction = new QAction("实际像素 (1:1)", this);
-        actualPixelsAction->setShortcut(QKeySequence("Ctrl+1"));
+        auto* actualPixelsAction = new QAction(
+            QString::fromUtf8("实际像素 (1:1)\t1"), this);
         connect(actualPixelsAction, &QAction::triggered, m_previewPanel, &PreviewPanel::resetZoom);
         viewMenu->addAction(actualPixelsAction);
+
+        auto* maskAction = new QAction(QString::fromUtf8("蒙版叠加\tM"), this);
+        connect(maskAction, &QAction::triggered,
+                m_previewPanel, &PreviewPanel::toggleMaskOverlay);
+        viewMenu->addAction(maskAction);
+        auto* resultAction = new QAction(QString::fromUtf8("返回当前结果\tR"), this);
+        connect(resultAction, &QAction::triggered,
+                this, &MainWindow::showBestAvailableResult);
+        viewMenu->addAction(resultAction);
 
         // 处理菜单
         auto* processMenu = menuBar()->addMenu("处理");
@@ -389,7 +496,7 @@ private:
         processMenu->addAction(startAction);
 
         auto* exportAction = new QAction("导出结果", this);
-        exportAction->setShortcut(QKeySequence("Ctrl+Shift+E"));
+        exportAction->setShortcut(QKeySequence("Ctrl+E"));
         connect(exportAction, &QAction::triggered, this, &MainWindow::onExportClicked);
         processMenu->addAction(exportAction);
 
@@ -402,6 +509,10 @@ private:
             m_updateManager->checkForUpdates(true);
         });
         helpMenu->addAction(updateAction);
+        auto* shortcutsAction = new QAction(QString::fromUtf8("快捷键..."), this);
+        connect(shortcutsAction, &QAction::triggered,
+                this, &MainWindow::showShortcutsDialog);
+        helpMenu->addAction(shortcutsAction);
         helpMenu->addSeparator();
 
         auto* aboutAction = new QAction("关于", this);
@@ -410,7 +521,18 @@ private:
     }
 
     void setupStatusBar() {
-        statusBar()->setFixedHeight(StyleTokens::Layout::kStatusBarHeight);
+        m_taskStatusBar = new TaskStatusBar(this);
+        setStatusBar(m_taskStatusBar);
+        m_undoRemoveBtn = new QPushButton(statusBar());
+        m_undoRemoveBtn->setProperty(
+            StyleTokens::Properties::kVariant,
+            StyleTokens::Properties::kGhost);
+        m_undoRemoveBtn->setAccessibleName(QString::fromUtf8("撤销移除素材"));
+        m_undoRemoveBtn->hide();
+        statusBar()->addWidget(m_undoRemoveBtn);
+        connect(m_undoRemoveBtn, &QPushButton::clicked, this, [this]() {
+            m_projectPanel->undoLastRemoval();
+        });
         m_pixelInfoLabel = new QLabel(QString::fromUtf8("RGB —"), statusBar());
         m_pixelInfoLabel->setProperty(
             StyleTokens::Properties::kTextRole,
@@ -419,15 +541,7 @@ private:
         m_pixelInfoLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
         statusBar()->addPermanentWidget(m_pixelInfoLabel);
 
-        m_inlineProgress = new QProgressBar(statusBar());
-        m_inlineProgress->setProperty(
-            StyleTokens::Properties::kControlRole,
-            QString::fromLatin1(StyleTokens::Properties::kProgressLine));
-        m_inlineProgress->setRange(0, 100);
-        m_inlineProgress->setTextVisible(false);
-        m_inlineProgress->setFixedWidth(120);
-        m_inlineProgress->setVisible(false);
-        statusBar()->addPermanentWidget(m_inlineProgress);
+        m_inlineProgress = m_taskStatusBar->progressBar();
     }
 
     void setWorkflowStage(int stage, const QString& status, bool complete = false) {
@@ -459,11 +573,32 @@ private:
         connect(m_toolbar, &Toolbar::settingsClicked, this, [this]() {
             onSettingsClicked();
         });
+        connect(m_toolbar, &Toolbar::checkUpdatesClicked, this, [this]() {
+            m_updateManager->checkForUpdates(true);
+        });
+        connect(m_toolbar, &Toolbar::shortcutsClicked,
+                this, &MainWindow::showShortcutsDialog);
         connect(m_toolbar, &Toolbar::aboutClicked, this, &MainWindow::onAboutClicked);
         connect(m_projectPanel, &ProjectPanel::sceneChanged,
                 this, &MainWindow::activateScene);
         connect(m_projectPanel, &ProjectPanel::calibrationSettingsRequested,
                 m_paramsPanel, &ParamsPanel::showCalibrationSettings);
+        connect(m_projectPanel, &ProjectPanel::undoAvailabilityChanged,
+                this, [this](bool available, const QString& fileName) {
+                    if (!m_undoRemoveBtn) return;
+                    m_undoRemoveBtn->setText(
+                        available
+                            ? QString::fromUtf8("撤销移除 · %1").arg(fileName)
+                            : QString());
+                    m_undoRemoveBtn->setVisible(available);
+                });
+        connect(m_paramsPanel, &ParamsPanel::recentResultRequested,
+                this, &MainWindow::loadRecentResultPreview);
+        connect(m_paramsPanel, &ParamsPanel::revealResultRequested,
+                this, [](const QString& path) {
+                    QDesktopServices::openUrl(QUrl::fromLocalFile(
+                        QFileInfo(path).absolutePath()));
+                });
 
         // 文件选择 -> 预览加载
         connect(m_projectPanel, &ProjectPanel::fileSelected, this, [this](const QString& filePath) {
@@ -557,7 +692,6 @@ private:
 
         // 文件变化 -> 更新按钮状态 & 参考帧列表 & 智能推荐堆栈算法
         connect(m_projectPanel, &ProjectPanel::filesChanged, this, [this]() {
-            const bool wasShowingResult = m_previewPanel->isShowingResult();
             if (!m_editedSkyGroundMask.empty() &&
                 m_editedMaskProjectFiles != m_projectPanel->filePaths()) {
                 m_editedSkyGroundMask.clear();
@@ -569,13 +703,9 @@ private:
                 m_previewPanel->clearMaskOverlay();
             }
             m_paramsPanel->clearModifiedCameraGrayPoint();
-            invalidateCachedResult();
+            markCachedResultStale(
+                QString::fromUtf8("素材已修改 · 这是上次处理的成片"));
             updateProjectReadiness();
-            if (wasShowingResult) {
-                const QString currentFile = m_projectPanel->currentFilePath();
-                if (currentFile.isEmpty()) m_previewPanel->clearImage();
-                else m_previewPanel->loadImage(currentFile);
-            }
         });
 
         // 参考帧变化
@@ -802,6 +932,10 @@ private:
                 showBestAvailableResult();
             }
         } else if (quickPreviewEligible()) {
+            if (m_previewPanel->isShowingResult()) {
+                m_previewPanel->setResultLabel(
+                    QString::fromUtf8("参数已修改 · 这是上次处理的成片"));
+            }
             if (currentQuickPreviewAvailable()) {
                 setWorkflowStage(3, QString::fromUtf8(
                     "快速预览已更新 · 完整导出需重新处理"));
@@ -810,6 +944,10 @@ private:
             }
         } else {
             cancelQuickPreview(false);
+            if (m_previewPanel->isShowingResult()) {
+                m_previewPanel->setResultLabel(
+                    QString::fromUtf8("参数已修改 · 这是上次处理的成片"));
+            }
             setWorkflowStage(1,
                 QString::fromUtf8("参数已修改，重新处理后生效"));
         }
@@ -914,6 +1052,12 @@ private:
             m_previewPanel->loadRgb16BitImage(
                 m_cachedStackedData, m_cachedWidth, m_cachedHeight,
                 contentKey);
+        }
+        if (currentProcessingSignature() == m_lastProcessedSignature) {
+            m_previewPanel->setResultLabel(QString());
+        } else {
+            m_previewPanel->setResultLabel(
+                QString::fromUtf8("参数已修改 · 这是上次处理的成片"));
         }
         if (m_paramsPanel->modifiedCameraColorEnabled() &&
             m_paramsPanel->modifiedCameraColorMode() ==
@@ -1055,6 +1199,22 @@ private:
         }
     }
 
+    void markCachedResultStale(const QString& reason) {
+        cancelQuickPreview(false);
+        m_quickPreviewSource.reset();
+        m_quickPreviewMask.reset();
+        m_cachedQuickPreviewResult.clear();
+        m_cachedQuickPreviewResult.shrink_to_fit();
+        m_quickPreviewWidth = 0;
+        m_quickPreviewHeight = 0;
+        m_quickPreviewSignature.clear();
+        if (m_toolbar) m_toolbar->enableExport(false);
+        if (!m_previewPanel || m_cachedStackedData.empty()) return;
+        const bool viewingResult = m_previewPanel->isShowingResult();
+        m_previewPanel->setResultAvailable(true, viewingResult);
+        if (viewingResult) m_previewPanel->setResultLabel(reason);
+    }
+
 private slots:
     void onImportClicked() {
         if (processingActive()) {
@@ -1137,14 +1297,9 @@ private slots:
         QMessageBox::about(
             this,
             "关于 StarProcessor",
-            "<h2>StarProcessor</h2>"
-            "<p>为星空摄影师打造的跨平台 RAW 处理工具</p>"
-            "<p><b>版本：</b>" STARPROCESSOR_VERSION "</p>"
-            "<p><b>能力：</b>Bayer 深空校准、RAW 堆栈、天地分离、延时序列降噪、缩星与自动优化</p>"
-            "<p><b>技术栈：</b>C++17 + Qt6 + CMake + LibRaw</p>"
-            "<p><b>目标平台：</b>Windows + macOS</p>"
-            "<hr>"
-            "<p>全部代码开源，基于 MIT License</p>"
+            "StarProcessor\n"
+            "版本 " STARPROCESSOR_VERSION "\n"
+            "MIT License"
         );
     }
 
@@ -1358,32 +1513,11 @@ private slots:
                 ? QString::fromUtf8("正在准备 Bayer 校准")
                 : QString::fromUtf8("正在准备处理"));
 
-        // 3. 创建进度对话框
-        auto* dialog = new QProgressDialog(this);
-        dialog->setWindowTitle("处理中...");
-        dialog->setLabelText("初始化...");
-        dialog->setRange(0, 100);
-        dialog->setValue(0);
-        dialog->setMinimumDuration(0);
-        dialog->setCancelButtonText("取消");
-        dialog->setWindowModality(Qt::NonModal);
-        dialog->setStyleSheet(
-            "QProgressDialog { background-color: #171F21; color: #F3F7F6; }"
-            "QLabel { color: #D2DDDA; }"
-            "QProgressBar { border: 1px solid #344548; border-radius: 4px; "
-            "  background-color: #111719; color: #D2DDDA; text-align: center; }"
-            "QProgressBar::chunk { background-color: #4ED7AE; border-radius: 3px; }"
-            "QPushButton { background-color: #202A2D; color: #D2DDDA; "
-            "  border: 1px solid #344548; border-radius: 5px; padding: 6px 16px; }"
-        );
-
-        // 4. 创建后台线程
+        // 创建后台线程。进度与取消都留在主窗口，不再弹出第二个窗口。
         auto* worker = new ProcessingWorker(files, refFrame, params, this);
         m_worker = worker;
-        connect(worker, &ProcessingWorker::progress, dialog, &QProgressDialog::setValue);
         connect(worker, &ProcessingWorker::progress, m_inlineProgress, &QProgressBar::setValue);
-        connect(worker, &ProcessingWorker::stageMessage, dialog, [this, dialog](const QString& msg) {
-            dialog->setLabelText(msg);
+        connect(worker, &ProcessingWorker::stageMessage, this, [this](const QString& msg) {
             int stage = 1;
             if (m_scene == ProcessingScene::StarTrail) {
                 if (msg.contains(QString::fromUtf8("地景")) ||
@@ -1442,9 +1576,7 @@ private slots:
             }
             setWorkflowStage(stage, msg);
         });
-        connect(worker, &ProcessingWorker::finished, this, [this, dialog, worker]() {
-            dialog->close();
-            dialog->deleteLater();
+        connect(worker, &ProcessingWorker::finished, this, [this, worker]() {
             m_toolbar->setProcessing(false);
             m_projectPanel->setEditingEnabled(true);
             m_paramsPanel->setEnabled(true);
@@ -1491,6 +1623,50 @@ private slots:
                 const int rejectedCount = worker->qualityRejectedFiles().size();
                 const int skippedCount = static_cast<int>(
                     worker->skippedFrames().size());
+                QStringList reportLines;
+                reportLines << QString::fromUtf8("输出：%1×%2，%3 帧")
+                                   .arg(m_cachedWidth).arg(m_cachedHeight)
+                                   .arg(frameCount);
+                if (m_scene != ProcessingScene::SingleFrame &&
+                    m_scene != ProcessingScene::Timelapse &&
+                    m_scene != ProcessingScene::StarTrail) {
+                    reportLines << QString::fromUtf8(
+                        "对齐：RMS %1 px，P95 %2 px，最低网格覆盖 %3%")
+                        .arg(worker->averageAlignmentRms(), 0, 'f', 2)
+                        .arg(worker->worstAlignmentP95(), 0, 'f', 2)
+                        .arg(worker->minimumAlignmentGridCoverage() * 100.0,
+                             0, 'f', 0);
+                    reportLines << QString::fromUtf8(
+                        "模型：Affine %1 帧，Homography %2 帧")
+                        .arg(worker->affineFrameCount())
+                        .arg(worker->homographyFrameCount());
+                }
+                reportLines << QString::fromUtf8(
+                    "帧筛选：质量排除 %1，处理跳过 %2")
+                    .arg(rejectedCount).arg(skippedCount);
+                if (worker->photometricNormalizedFrameCount() > 0) {
+                    reportLines << QString::fromUtf8(
+                        "光度归一化：%1 帧，平均增益 %2，范围 %3–%4")
+                        .arg(worker->photometricNormalizedFrameCount())
+                        .arg(worker->averagePhotometricGain(), 0, 'f', 3)
+                        .arg(worker->minimumPhotometricGain(), 0, 'f', 3)
+                        .arg(worker->maximumPhotometricGain(), 0, 'f', 3);
+                }
+                if (m_scene == ProcessingScene::SkyGround) {
+                    reportLines << QString::fromUtf8(
+                        "天地蒙版：天空占比 %1%，来源 %2")
+                        .arg(worker->skyGroundSkyFraction() * 100.0, 0, 'f', 1)
+                        .arg(worker->skyGroundMaskSource());
+                }
+                reportLines << QString::fromUtf8("堆栈耗时：%1 s")
+                                   .arg(worker->stackingElapsedMs() / 1000.0,
+                                        0, 'f', 2);
+                if (!worker->outputFile().isEmpty()) {
+                    reportLines << QString::fromUtf8("文件：%1")
+                                       .arg(worker->outputFile());
+                }
+                m_paramsPanel->setProcessingReport(reportLines.join('\n'));
+                m_paramsPanel->refreshRecentResults();
                 const double medianEllipticity =
                     FrameQualityEvaluator::medianValidEllipticity(
                         worker->frameQualityMetrics());
@@ -1585,14 +1761,6 @@ private slots:
             worker->deleteLater();
             if (m_worker == worker) m_worker = nullptr;
         });
-        connect(dialog, &QProgressDialog::canceled, this, [this]() {
-            if (m_worker) {
-                m_worker->requestCancel();
-                setWorkflowStage(1, QString::fromUtf8("正在安全停止..."));
-                statusBar()->showMessage("处理已取消", 3000);
-            }
-        });
-
         worker->start();
     }
 
@@ -1644,23 +1812,12 @@ private slots:
         m_projectPanel->setEditingEnabled(false);
         m_paramsPanel->setEnabled(false);
         m_toolbar->setProcessing(true);
-        m_inlineProgress->setRange(0, 0);
-        m_inlineProgress->setVisible(true);
+        m_inlineProgress->setRange(0, 100);
+        m_inlineProgress->setVisible(false);
         statusBar()->showMessage(QString::fromUtf8("正在导出 %1...").arg(fileName));
 
-        auto* dialog = new QProgressDialog(
-            QString::fromUtf8("正在导出完整分辨率图像..."),
-            QString::fromUtf8("取消"), 0, 0, this);
-        dialog->setWindowTitle(QString::fromUtf8("导出"));
-        dialog->setWindowModality(Qt::NonModal);
-        dialog->setMinimumDuration(0);
-        connect(dialog, &QProgressDialog::canceled,
-                worker, &ExportWorker::requestCancel);
-
         connect(worker, &ExportWorker::finished, this,
-                [this, worker, image, fileName, dialog]() {
-                    dialog->close();
-                    dialog->deleteLater();
+                [this, worker, image, fileName]() {
                     m_cachedStackedData = std::move(*image);
                     m_toolbar->setProcessing(false);
                     m_toolbar->enableExport(true);
@@ -1669,6 +1826,7 @@ private slots:
                     m_inlineProgress->setRange(0, 100);
                     m_inlineProgress->setVisible(false);
                     if (worker->succeeded()) {
+                        m_paramsPanel->refreshRecentResults();
                         QMessageBox::information(
                             this, QString::fromUtf8("导出成功"),
                             QString::fromUtf8("已导出到：%1")
@@ -1691,25 +1849,16 @@ private slots:
     void onSettingsClicked() {
         auto* dialog = new QDialog(this);
         dialog->setWindowTitle("设置");
-        dialog->setFixedSize(480, 180);
-        dialog->setStyleSheet(
-            "QDialog { background-color: #171F21; color: #F3F7F6; }"
-            "QLabel { color: #D2DDDA; background-color: transparent; }"
-            "QLineEdit { background-color: #202A2D; color: #D2DDDA; "
-            "  border: 1px solid #344548; border-radius: 5px; padding: 5px 8px; }"
-            "QPushButton { background-color: #202A2D; color: #D2DDDA; "
-            "  border: 1px solid #344548; border-radius: 5px; padding: 6px 16px; }"
-            "QPushButton:hover { background-color: #273336; border-color: #4D6265; }"
-            "QComboBox { background-color: #202A2D; color: #D2DDDA; "
-            "  border: 1px solid #344548; border-radius: 5px; padding: 5px 8px; }"
-        );
+        dialog->setFixedSize(480, 160);
 
         auto* layout = new QVBoxLayout(dialog);
         layout->setSpacing(16);
         layout->setContentsMargins(20, 20, 20, 20);
 
         auto* title = new QLabel(QString::fromUtf8("应用设置"), dialog);
-        title->setStyleSheet("font-size: 16px; font-weight: 700; color: #F3F7F6;");
+        title->setProperty(
+            StyleTokens::Properties::kTextRole,
+            StyleTokens::Properties::kTitle);
         layout->addWidget(title);
 
         // 输出目录
@@ -1721,9 +1870,15 @@ private slots:
         outDirEdit->setReadOnly(true);
         auto* outDirBtn = new QPushButton(dialog);
         outDirBtn->setIcon(
-            UiAssets::icon(UiAssets::Glyph::Folder, QColor("#A7B8B4")));
+            UiAssets::icon(
+                UiAssets::Glyph::Folder,
+                StyleTokens::Colors::fromHex(
+                    StyleTokens::Colors::kTextSecondary)));
         outDirBtn->setToolTip(QString::fromUtf8("选择输出目录"));
         outDirBtn->setFixedSize(28, 28);
+        outDirBtn->setProperty(
+            StyleTokens::Properties::kVariant,
+            StyleTokens::Properties::kIcon);
         connect(outDirBtn, &QPushButton::clicked, this, [outDirEdit]() {
             QString dir = QFileDialog::getExistingDirectory(nullptr, "选择输出目录");
             if (!dir.isEmpty()) outDirEdit->setText(dir);
@@ -1739,11 +1894,9 @@ private slots:
         auto* btnRow = new QHBoxLayout();
         btnRow->addStretch();
         auto* okBtn = new QPushButton("确定", dialog);
-        okBtn->setStyleSheet(
-            "QPushButton { background-color: #4ED7AE; color: #0D211B; "
-            "  font-weight: 700; border: none; border-radius: 5px; padding: 6px 24px; }"
-            "QPushButton:hover { background-color: #67E2BE; }"
-        );
+        okBtn->setProperty(
+            StyleTokens::Properties::kVariant,
+            StyleTokens::Properties::kPrimary);
         connect(okBtn, &QPushButton::clicked, dialog, [this, dialog, outDirEdit]() {
             QSettings s("StarProcessor", "App");
             s.setValue("outputPath", outDirEdit->text());
@@ -1760,6 +1913,70 @@ private slots:
         dialog->deleteLater();
     }
 
+    void showShortcutsDialog() {
+        QMessageBox::information(
+            this, QString::fromUtf8("快捷键"),
+            QString::fromUtf8(
+                "导入文件    Cmd/Ctrl+O\n"
+                "导入目录    Shift+Cmd/Ctrl+O\n"
+                "处理/取消   Cmd/Ctrl+Return\n"
+                "导出结果    Cmd/Ctrl+E\n\n"
+                "适应视图    F\n"
+                "实际像素    1\n"
+                "缩放        + / -\n"
+                "循环对比    B\n"
+                "直接分屏    Shift+B\n"
+                "蒙版叠加    M\n"
+                "返回结果    R\n"
+                "灰点吸管    G\n"
+                "排除/恢复   Space\n"
+                "笔刷大小    [ / ]\n"
+                "退出工具    Esc"));
+    }
+
+    void loadRecentResultPreview(const QString& path) {
+        if (path.isEmpty() || !QFileInfo::exists(path)) return;
+        if (m_historyPreviewWorker && m_historyPreviewWorker->isRunning()) {
+            statusBar()->showMessage(
+                QString::fromUtf8("正在载入另一张历史结果，请稍候"), 3000);
+            return;
+        }
+        auto* worker = new HistoryPreviewWorker(path, this);
+        m_historyPreviewWorker = worker;
+        statusBar()->showMessage(
+            QString::fromUtf8("正在载入历史结果：%1")
+                .arg(QFileInfo(path).fileName()));
+        connect(worker, &HistoryPreviewWorker::loaded, this,
+                [this, worker](const QString& loadedPath,
+                               const QImage& preview) {
+                    if (m_historyPreviewWorker != worker) return;
+                    m_previewPanel->loadImage(
+                        preview, QStringLiteral("history:") + loadedPath);
+                    m_previewPanel->setResultAvailable(
+                        !m_cachedStackedData.empty(), false);
+                    m_toolbar->enableExport(false);
+                    statusBar()->showMessage(
+                        QString::fromUtf8("历史结果只读预览 · %1")
+                            .arg(QFileInfo(loadedPath).fileName()), 5000);
+                });
+        connect(worker, &HistoryPreviewWorker::failed, this,
+                [this, worker](const QString& failedPath,
+                               const QString& reason) {
+                    if (m_historyPreviewWorker != worker) return;
+                    statusBar()->showMessage(
+                        QString::fromUtf8("历史结果载入失败：%1 · %2")
+                            .arg(QFileInfo(failedPath).fileName(), reason),
+                        5000);
+                });
+        connect(worker, &QThread::finished, this, [this, worker]() {
+            if (m_historyPreviewWorker == worker) {
+                m_historyPreviewWorker = nullptr;
+            }
+            worker->deleteLater();
+        });
+        worker->start();
+    }
+
 private:
     Toolbar* m_toolbar = nullptr;
     QSplitter* m_contentSplitter = nullptr;
@@ -1767,7 +1984,9 @@ private:
     PreviewPanel* m_previewPanel = nullptr;
     ParamsPanel* m_paramsPanel = nullptr;
     QProgressBar* m_inlineProgress = nullptr;
+    TaskStatusBar* m_taskStatusBar = nullptr;
     QLabel* m_pixelInfoLabel = nullptr;
+    QPushButton* m_undoRemoveBtn = nullptr;
     ProcessingScene m_scene = ProcessingScene::Nightscape;
     bool m_sceneActive = false;
     QAction* m_beforeAfterAction = nullptr;
@@ -1777,6 +1996,7 @@ private:
     QSet<MaskPreviewWorker*> m_activeMaskPreviewWorkers;
     QuickPreviewWorker* m_quickPreviewWorker = nullptr;
     ExportWorker* m_exportWorker = nullptr;
+    HistoryPreviewWorker* m_historyPreviewWorker = nullptr;
     QTimer* m_quickPreviewTimer = nullptr;
     uint64_t m_quickPreviewGeneration = 0;
     uint64_t m_editedMaskRevision = 0;
@@ -1851,6 +2071,11 @@ int main(int argc, char* argv[]) {
             window.selectStartupScene(ProcessingScene::StarTrail);
         } else if (argument == "--scene=timelapse") {
             window.selectStartupScene(ProcessingScene::Timelapse);
+        } else if (argument == "--inspector=output") {
+            window.selectStartupInspectorOutput();
+        } else if (argument.startsWith("--history=")) {
+            window.loadStartupHistory(
+                argument.mid(QStringLiteral("--history=").size()));
         }
     }
 

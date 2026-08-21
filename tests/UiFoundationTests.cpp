@@ -1,10 +1,12 @@
 #include "ui/InspectorWidgets.h"
 #include "ui/StyleTokens.h"
 #include "ui/ViewStateStore.h"
+#include "ui/TaskStatusBar.h"
 
 #include <QApplication>
 #include <QColor>
 #include <QLabel>
+#include <QProgressBar>
 #include <QString>
 
 #include <algorithm>
@@ -106,6 +108,16 @@ int main(int argc, char* argv[]) {
                            && toggle->minimumSizeHint().width()
                                >= StyleTokens::Controls::kToggleWidth,
                        "Compact toggle state or geometry is incorrect");
+
+    TaskStatusBar statusBar;
+    statusBar.resize(640, StyleTokens::Layout::kStatusBarHeight);
+    statusBar.show();
+    QApplication::processEvents();
+    statusBar.setProgressVisible(true);
+    success &= require(statusBar.progressBar()->width() == 640 &&
+                           statusBar.progressBar()->height() ==
+                               StyleTokens::Controls::kProgressHeight,
+                       "Task progress line should span the status bar");
 
     return success ? 0 : 1;
 }

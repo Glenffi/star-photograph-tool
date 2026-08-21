@@ -134,6 +134,7 @@ set(APP_SOURCES
     src/ui/StyleTokens.cpp
     src/ui/InspectorWidgets.cpp
     src/ui/ViewStateStore.cpp
+    src/ui/TaskStatusBar.cpp
     src/update/UpdateManager.cpp
 )
 
@@ -177,6 +178,7 @@ set(APP_HEADERS
     src/ui/StyleTokens.h
     src/ui/InspectorWidgets.h
     src/ui/ViewStateStore.h
+    src/ui/TaskStatusBar.h
     src/ui/ProcessingScene.h
     src/update/UpdateManager.h
 )
@@ -225,6 +227,8 @@ add_library(StarProcessorWorkers STATIC
     src/workers/MaskPreviewWorker.h
     src/workers/QuickPreviewWorker.cpp
     src/workers/QuickPreviewWorker.h
+    src/workers/HistoryPreviewWorker.cpp
+    src/workers/HistoryPreviewWorker.h
 )
 target_include_directories(StarProcessorWorkers PUBLIC ${CMAKE_SOURCE_DIR}/src)
 target_link_libraries(StarProcessorWorkers PUBLIC StarProcessorCore Qt6::Core Qt6::Gui)
@@ -292,12 +296,33 @@ if(BUILD_TESTING)
         src/ui/InspectorWidgets.cpp
         src/ui/InspectorWidgets.h
         src/ui/ViewStateStore.cpp
-        src/ui/ViewStateStore.h)
+        src/ui/ViewStateStore.h
+        src/ui/TaskStatusBar.cpp
+        src/ui/TaskStatusBar.h)
     target_include_directories(StarProcessorUiFoundationTests PRIVATE
         ${CMAKE_SOURCE_DIR}/src)
     target_link_libraries(StarProcessorUiFoundationTests PRIVATE Qt6::Widgets)
     add_test(NAME ui_foundation COMMAND StarProcessorUiFoundationTests)
     set_tests_properties(ui_foundation PROPERTIES
+        ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
+    add_executable(StarProcessorProjectPanelTests
+        tests/ProjectPanelTests.cpp
+        src/core/ThumbnailGenerator.cpp
+        src/core/ThumbnailGenerator.h
+        src/ui/ProjectPanel.cpp
+        src/ui/ProjectPanel.h
+        src/ui/UiAssets.cpp
+        src/ui/UiAssets.h
+        src/ui/StyleTokens.cpp
+        src/ui/StyleTokens.h
+        src/ui/ProcessingScene.h)
+    target_include_directories(StarProcessorProjectPanelTests PRIVATE
+        ${CMAKE_SOURCE_DIR}/src)
+    target_link_libraries(StarProcessorProjectPanelTests PRIVATE
+        StarProcessorCore Qt6::Widgets)
+    add_test(NAME project_panel COMMAND StarProcessorProjectPanelTests)
+    set_tests_properties(project_panel PROPERTIES
         ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 endif()
 

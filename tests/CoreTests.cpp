@@ -2886,6 +2886,14 @@ void testTiffIccProfile() {
                                      ImageExporter::Tiff16),
           "RGB TIFF export should succeed");
 
+    std::vector<uint16_t> loadedRgb;
+    int loadedWidth = 0;
+    int loadedHeight = 0;
+    check(ImageExporter::loadTiffRgb16(
+              path, loadedRgb, loadedWidth, loadedHeight) &&
+              loadedWidth == 2 && loadedHeight == 2 && loadedRgb == rgb,
+          "RGB TIFF should round-trip through the history preview loader");
+
     TIFF* tiff = TIFFOpen(path.toStdString().c_str(), "r");
     check(tiff != nullptr, "Exported TIFF should be readable");
     if (!tiff) return;

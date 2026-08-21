@@ -113,12 +113,19 @@ void Toolbar::setupUI() {
     m_clearProjectAction = m_overflowMenu->addAction(tr("清空项目"));
     m_overflowMenu->addSeparator();
     m_settingsAction = m_overflowMenu->addAction(tr("设置"));
+    m_checkUpdatesAction = m_overflowMenu->addAction(tr("检查更新"));
+    m_shortcutsAction = m_overflowMenu->addAction(tr("快捷键"));
+    m_overflowMenu->addSeparator();
     m_aboutAction = m_overflowMenu->addAction(tr("关于"));
 
     connect(m_clearProjectAction, &QAction::triggered, this,
             &Toolbar::clearProjectClicked);
     connect(m_settingsAction, &QAction::triggered, this,
             &Toolbar::settingsClicked);
+    connect(m_checkUpdatesAction, &QAction::triggered, this,
+            &Toolbar::checkUpdatesClicked);
+    connect(m_shortcutsAction, &QAction::triggered, this,
+            &Toolbar::shortcutsClicked);
     connect(m_aboutAction, &QAction::triggered, this,
             &Toolbar::aboutClicked);
 
@@ -209,6 +216,7 @@ void Toolbar::updateButtonStates() {
     if (m_clearProjectAction) {
         m_clearProjectAction->setEnabled(!m_processing);
     }
+    if (m_settingsAction) m_settingsAction->setEnabled(!m_processing);
 }
 
 void Toolbar::showOverflowMenu() {

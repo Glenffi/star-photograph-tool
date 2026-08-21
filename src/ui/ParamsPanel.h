@@ -18,6 +18,7 @@ class QLabel;
 class QTimer;
 class QLineEdit;
 class QTabWidget;
+class QListWidget;
 
 class ParamsPanel : public QWidget {
     Q_OBJECT
@@ -86,11 +87,16 @@ public:
     void setDetectMaskEnabled(bool enabled);
     void applySceneProfile(ProcessingScene scene);
     void showCalibrationSettings();
+    void showOutputSettings();
+    void setProcessingReport(const QString& report);
+    void refreshRecentResults();
 
 signals:
     void paramsChanged();  // 参数发生任何变化时触发
     void maskPreviewRequested(); // 用户点击"检测地景"时发射
     void modifiedCameraGrayPointRequested();
+    void recentResultRequested(const QString& path);
+    void revealResultRequested(const QString& path);
 
 private slots:
     void onGroupToggled(bool checked);
@@ -249,6 +255,12 @@ private:
 
     // 输出组
     QWidget* m_outputGroup = nullptr;
+    QWidget* m_processingReportGroup = nullptr;
+    QLabel* m_processingReportLabel = nullptr;
+    QWidget* m_recentResultsGroup = nullptr;
+    QListWidget* m_recentResultsList = nullptr;
+    QPushButton* m_loadRecentResultBtn = nullptr;
+    QPushButton* m_revealRecentResultBtn = nullptr;
     QComboBox* m_outputFormat = nullptr;
     QLineEdit* m_outputPath = nullptr;
 
