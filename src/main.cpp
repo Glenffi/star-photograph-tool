@@ -404,7 +404,6 @@ private:
     void setupMenuBar() {
         // 文件菜单
         auto* fileMenu = menuBar()->addMenu("文件");
-        fileMenu->setStyleSheet(menuStyleSheet());
 
         auto* importAction = new QAction("导入 RAW...", this);
         importAction->setShortcut(QKeySequence::Open);
@@ -439,7 +438,6 @@ private:
 
         // 编辑菜单
         auto* editMenu = menuBar()->addMenu("编辑");
-        editMenu->setStyleSheet(menuStyleSheet());
 
         auto* removeAction = new QAction("移除所选", this);
         removeAction->setShortcut(QKeySequence::Delete);
@@ -450,7 +448,6 @@ private:
 
         // 视图菜单
         auto* viewMenu = menuBar()->addMenu("视图");
-        viewMenu->setStyleSheet(menuStyleSheet());
 
         auto* cycleCompareAction = new QAction(
             QString::fromUtf8("循环对比\tB"), this);
@@ -488,7 +485,6 @@ private:
 
         // 处理菜单
         auto* processMenu = menuBar()->addMenu("处理");
-        processMenu->setStyleSheet(menuStyleSheet());
 
         auto* startAction = new QAction("开始处理", this);
         startAction->setShortcut(QKeySequence("Ctrl+Return"));
@@ -502,7 +498,6 @@ private:
 
         // 帮助菜单
         auto* helpMenu = menuBar()->addMenu("帮助");
-        helpMenu->setStyleSheet(menuStyleSheet());
 
         auto* updateAction = new QAction("检查更新...", this);
         connect(updateAction, &QAction::triggered, this, [this]() {
@@ -845,10 +840,6 @@ private:
             });
             worker->start();
         });
-    }
-
-    QString menuStyleSheet() const {
-        return QString();
     }
 
     static QString formatExposureTime(double seconds) {
@@ -2076,6 +2067,18 @@ int main(int argc, char* argv[]) {
         } else if (argument.startsWith("--history=")) {
             window.loadStartupHistory(
                 argument.mid(QStringLiteral("--history=").size()));
+        } else if (argument.startsWith("--window-size=")) {
+            const QStringList dimensions = argument.mid(
+                QStringLiteral("--window-size=").size()).split('x');
+            if (dimensions.size() == 2) {
+                bool widthOk = false;
+                bool heightOk = false;
+                const int width = dimensions[0].toInt(&widthOk);
+                const int height = dimensions[1].toInt(&heightOk);
+                if (widthOk && heightOk && width > 0 && height > 0) {
+                    window.resize(width, height);
+                }
+            }
         }
     }
 
