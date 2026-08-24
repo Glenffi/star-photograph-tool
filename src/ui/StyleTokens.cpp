@@ -461,6 +461,9 @@ QPushButton[sizeRole="compactText"],
 QToolButton[sizeRole="compactText"] {
     padding: 0 6px;
 }
+)QSS");
+
+    styleSheet += QStringLiteral(R"QSS(
 
 QLineEdit,
 QPlainTextEdit,
@@ -683,6 +686,9 @@ QLabel[inspectorRole="value"] {
 QLabel[inspectorRole="muted"] {
     color: {{TEXT_SECONDARY}};
 }
+)QSS");
+
+    styleSheet += QStringLiteral(R"QSS(
 
 QListView,
 QTreeView,
