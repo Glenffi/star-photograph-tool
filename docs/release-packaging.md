@@ -30,9 +30,9 @@
 7. 无条件执行 `--runtime-check`，让 dyld 加载打包后的完整动态库树；有图形会话时再启动程序并生成截图，确认 Qt 平台插件可加载。
 8. 创建压缩 DMG 和 SHA-256 文件。
 
-设置 `SKIP_LAUNCH_TEST=1` 只会跳过需要图形会话的截图检查，不会跳过 dyld 运行时自检；设置 `SKIP_DMG_CREATE=1` 可只生成完成部署和签名的 staging 目录。当前包没有 Apple Developer ID 签名和 notarization；这不影响本机测试，但不等同于面向公众的正式签名发行。
+设置 `SKIP_LAUNCH_TEST=1` 只会跳过需要图形会话的截图检查，不会跳过 dyld 运行时自检；设置 `SKIP_DMG_CREATE=1` 可只生成完成部署和签名的 staging 目录。当本机依赖高于目标系统版本时脚本默认中止；`ALLOW_HIGHER_DEPLOYMENT_TARGET=1` 只允许用于本地兼容性验证，不得用于公开发布。当前包没有 Apple Developer ID 签名和 notarization；这不影响本机测试，但不等同于面向公众的正式签名发行。
 
-> 源码目标是 macOS 14，但客户端最终兼容范围由打包机上的预编译依赖共同决定。脚本会取 bundle 内所有 Mach-O 的最高最低版本，写入 `LSMinimumSystemVersion` 和 `BUILD-INFO.txt`。开发机 Homebrew 依赖若面向更高系统，本地 DMG 会如实提高要求。正式 arm64 包由 `.github/workflows/macos-package.yml` 在 macOS 14 runner 上构建，Qt 固定为 6.8.3，LibRaw/libtiff 使用项目内 `arm64-osx-dynamic` vcpkg triplet 从源码构建；只要任一 bundle 依赖高于 14.0，工作流就会失败而不是发布错误标记的包。
+> 源码目标是 macOS 14，但客户端最终兼容范围由打包机上的预编译依赖共同决定。脚本会取 bundle 内所有 Mach-O 的最高最低版本；默认要求它不高于目标版本，否则立即失败。显式允许本地兼容性构建时，真实要求会写入 `LSMinimumSystemVersion` 和 `BUILD-INFO.txt`。正式 arm64 包由 `.github/workflows/macos-package.yml` 在 macOS 14 runner 上构建，Qt 固定为 6.8.3，LibRaw/libtiff 使用项目内 `arm64-osx-dynamic` vcpkg triplet 从源码构建；只要任一 bundle 依赖高于 14.0，工作流就会失败而不是发布错误标记的包。
 
 ## Windows
 
@@ -42,8 +42,9 @@
 2. 配置 Release 构建并运行 CTest。
 3. 用 `windeployqt` 部署 Qt、平台插件和 MSVC runtime。
 4. 复制 vcpkg 动态依赖并确认 `platforms/qwindows.dll` 存在。
-5. 创建便携 ZIP、SHA-256 文件和 GitHub Actions artifact。
-6. 当触发来源是 `v*` 标签时，校验标签与 CMake 版本一致并发布 GitHub Release 资产。
+5. 从最终便携目录依次执行 `--runtime-check` 和 `--platform-runtime-check`：前者验证 EXE 的静态 DLL 闭包，后者初始化 `QApplication`，实际加载 `qwindows.dll` 及其传递依赖。
+6. 创建便携 ZIP、SHA-256 文件和 GitHub Actions artifact。
+7. 当触发来源是 `v*` 标签时，校验标签与 CMake 版本一致并发布 GitHub Release 资产。
 
 Windows 包必须由 Windows runner 验证，macOS 上不使用 MinGW 交叉编译替代 MSVC 发行结果。
 

@@ -52,5 +52,7 @@ public:
     // 读取本应用导出的 16-bit 连续平面 TIFF。灰度输入会复制为 RGB。
     static bool loadTiffRgb16(const QString& path,
                               std::vector<uint16_t>& rgb,
-                              int& width, int& height);
+                              int& width, int& height,
+                              int maximumLongSide = 0,
+                              const std::function<bool()>& cancelled = {});
 };

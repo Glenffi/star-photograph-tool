@@ -170,6 +170,26 @@ jobs:
             throw "Qt Windows platform plugin was not deployed"
           }
 
+          Push-Location $packageRoot
+          try {
+            $runtimeOutput = & $exe --runtime-check
+            if ($LASTEXITCODE -ne 0) {
+              throw "Packaged executable runtime check failed with exit code $LASTEXITCODE"
+            }
+            if ($runtimeOutput -notcontains "StarProcessor ${{ steps.package.outputs.version }}") {
+              throw "Unexpected packaged executable runtime output: $runtimeOutput"
+            }
+            $platformOutput = & $exe --platform-runtime-check
+            if ($LASTEXITCODE -ne 0) {
+              throw "Qt platform runtime check failed with exit code $LASTEXITCODE"
+            }
+            if ($platformOutput -notcontains "StarProcessor ${{ steps.package.outputs.version }} platform ready") {
+              throw "Unexpected Qt platform runtime output: $platformOutput"
+            }
+          } finally {
+            Pop-Location
+          }
+
       - name: Create ZIP archive
         shell: pwsh
         run: |

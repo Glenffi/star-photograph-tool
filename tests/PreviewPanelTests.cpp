@@ -127,6 +127,15 @@ int main(int argc, char** argv) {
     check(std::abs(panel.zoom() - 1.0) < 0.0001,
           "Returning to a source should restore its independent zoom state");
 
+    panel.loadReadOnlyResultPreview(
+        after, QStringLiteral("last-valid:test"),
+        QString::fromUtf8("上次有效结果 · 只读"));
+    processLayout();
+    check(panel.isShowingResult() &&
+              panel.currentContentKey() == QStringLiteral("last-valid:test"),
+          "A failed rerun should be able to restore the last valid result "
+          "as a bounded read-only preview");
+
     PreviewPanel maskPanel;
     maskPanel.resize(1000, 640);
     maskPanel.show();
@@ -197,6 +206,21 @@ int main(int argc, char** argv) {
     check(!maskPanel.hasEditedMask() &&
               maskPanel.editedMask() == automaticMask,
           "Undoing the only ground hint should restore automatic detection");
+
+    int restoredNotifications = 0;
+    QObject::connect(&maskPanel, &PreviewPanel::editedMaskChanged,
+                     [&]() { ++restoredNotifications; });
+    std::vector<uint8_t> restoredMask = automaticMask;
+    restoredMask[120U * width + width / 2] = 0;
+    maskPanel.loadImage(groundScene,
+                        QStringLiteral("source:restored-mask"));
+    maskPanel.restoreEditedMask(restoredMask, width, height);
+    processLayout();
+    check(maskPanel.hasEditedMask() &&
+              maskPanel.editedMask() == restoredMask &&
+              restoredNotifications == 0,
+          "Returning to the mask source should restore the edited mask "
+          "without changing its processing revision");
 
     const QByteArray screenshotPath = qgetenv(
         "STARPROCESSOR_PREVIEW_TEST_SCREENSHOT");

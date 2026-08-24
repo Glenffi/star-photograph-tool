@@ -17,6 +17,7 @@ class QMenu;
 class QAction;
 class QLabel;
 class QEnterEvent;
+class QFocusEvent;
 class QGraphicsOpacityEffect;
 class QKeyEvent;
 class QPaintEvent;
@@ -55,6 +56,8 @@ protected:
     void keyPressEvent(QKeyEvent* event) override;
     void enterEvent(QEnterEvent* event) override;
     void leaveEvent(QEvent* event) override;
+    void focusInEvent(QFocusEvent* event) override;
+    void focusOutEvent(QFocusEvent* event) override;
     void paintEvent(QPaintEvent* event) override;
     void resizeEvent(QResizeEvent* event) override;
 
@@ -98,6 +101,7 @@ public:
     QStringList includedFilePaths() const;  // 未排除的文件
     QString currentFilePath() const;
     QString referenceFramePath() const;
+    QString processingSourceSignature() const;
     void applyPreviewData(const QString& filePath, const QImage& image,
                           int iso, double exposureTime, double aperture,
                           int focalLength);

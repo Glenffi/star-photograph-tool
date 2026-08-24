@@ -14,6 +14,7 @@
 #include <QMenu>
 #include <QAction>
 #include <QDesktopServices>
+#include <QCryptographicHash>
 #include <QMouseEvent>
 #include <QGraphicsOpacityEffect>
 #include <QEnterEvent>
@@ -343,6 +344,17 @@ void FileCard::leaveEvent(QEvent* event) {
     QWidget::leaveEvent(event);
 }
 
+void FileCard::focusInEvent(QFocusEvent* event) {
+    QWidget::focusInEvent(event);
+    if (event->reason() != Qt::MouseFocusReason) emit clicked();
+    update();
+}
+
+void FileCard::focusOutEvent(QFocusEvent* event) {
+    QWidget::focusOutEvent(event);
+    update();
+}
+
 void FileCard::paintEvent(QPaintEvent* event) {
     QWidget::paintEvent(event);
 
@@ -358,6 +370,13 @@ void FileCard::paintEvent(QPaintEvent* event) {
     } else if (m_hovered) {
         painter.fillRect(rect(), StyleTokens::Colors::fromHex(
                                      StyleTokens::Colors::kBackgroundOverlay));
+    }
+    if (hasFocus()) {
+        painter.setBrush(Qt::NoBrush);
+        painter.setPen(QPen(StyleTokens::Colors::fromHex(
+                                StyleTokens::Colors::kAccent),
+                            1.0));
+        painter.drawRect(rect().adjusted(1, 1, -1, -1));
     }
 }
 
@@ -871,6 +890,7 @@ void ProjectPanel::removeAt(int idx) {
     // asynchronous preview result that may arrive for the removed file.
     m_lastRemovedItem = m_fileItems[idx];
     m_lastRemovedIndex = idx;
+    const bool removedReference = m_fileItems[idx].isReferenceFrame;
     if (m_undoTimer) m_undoTimer->start();
     emit undoAvailabilityChanged(true, m_fileItems[idx].fileName);
 
@@ -893,6 +913,7 @@ void ProjectPanel::removeAt(int idx) {
         updateAllCardStyles();
     }
     updateBottomBar();
+    if (removedReference) emit referenceFrameChanged();
     emit filesChanged();
 }
 
@@ -902,6 +923,13 @@ bool ProjectPanel::undoLastRemoval() {
     const int index = std::clamp(
         m_lastRemovedIndex, 0, static_cast<int>(m_fileItems.size()));
     const FileItem item = *m_lastRemovedItem;
+    if (item.isReferenceFrame) {
+        for (int i = 0; i < m_fileItems.size(); ++i) {
+            if (!m_fileItems[i].isReferenceFrame) continue;
+            m_fileItems[i].isReferenceFrame = false;
+            updateCard(i);
+        }
+    }
     m_fileItems.insert(index, item);
     addFileCard(item, index);
     m_lastRemovedItem.reset();
@@ -910,6 +938,7 @@ bool ProjectPanel::undoLastRemoval() {
     setCurrentIndex(index);
     updateBottomBar();
     emit undoAvailabilityChanged(false, QString());
+    if (item.isReferenceFrame) emit referenceFrameChanged();
     emit filesChanged();
     return true;
 }
@@ -969,6 +998,22 @@ QString ProjectPanel::referenceFramePath() const {
     return QString();
 }
 
+QString ProjectPanel::processingSourceSignature() const {
+    QCryptographicHash hash(QCryptographicHash::Sha256);
+    for (const FileItem& item : m_fileItems) {
+        if (item.isExcluded) continue;
+        const QFileInfo info(item.filePath);
+        QString identity = info.canonicalFilePath();
+        if (identity.isEmpty()) identity = info.absoluteFilePath();
+        const QByteArray encoded = identity.toUtf8();
+        hash.addData(QByteArray::number(encoded.size()));
+        hash.addData(QByteArrayView(":", 1));
+        hash.addData(encoded);
+        hash.addData(QByteArrayView("\n", 1));
+    }
+    return QString::fromLatin1(hash.result().toHex());
+}
+
 QStringList ProjectPanel::filePaths() const {
     QStringList paths;
     for (const auto& item : m_fileItems) {
@@ -988,6 +1033,10 @@ QString ProjectPanel::currentFilePath() const {
 
 void ProjectPanel::setCurrentIndex(int index) {
     if (index < 0 || index >= m_fileItems.size()) return;
+    if (m_currentIndex == index) {
+        m_scrollArea->ensureWidgetVisible(m_cards[index]);
+        return;
+    }
 
     // 清除旧选中
     if (m_currentIndex >= 0 && m_currentIndex < m_cards.size()) {

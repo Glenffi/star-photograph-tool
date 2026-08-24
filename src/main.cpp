@@ -19,6 +19,9 @@
 #include <QPlainTextEdit>
 #include <QTextEdit>
 #include <QAbstractSpinBox>
+#include <QAbstractButton>
+#include <QAbstractItemView>
+#include <QAbstractSlider>
 #include <QComboBox>
 #include <QCloseEvent>
 #include <QKeyEvent>
@@ -63,7 +66,7 @@ public:
     MainWindow(QWidget* parent = nullptr) : QMainWindow(parent) {
         setWindowTitle("StarProcessor — 星空摄影师 RAW 处理工具");
         resize(1400, 900);
-        setMinimumSize(1180, 760);
+        setMinimumSize(920, 540);
         setAcceptDrops(true);
 
         setupCentralWidget();
@@ -71,12 +74,17 @@ public:
         setupMenuBar();
         setupStatusBar();
         setupConnections();
+        qApp->installEventFilter(this);
 
         QSettings settings("StarProcessor", "App");
         const int storedScene = settings.value(
             "ui/processingScene",
             static_cast<int>(ProcessingScene::Nightscape)).toInt();
-        activateScene(static_cast<ProcessingScene>(std::clamp(storedScene, 0, 5)));
+        const bool hasPersistedProcessingSettings =
+            settings.contains("stackMethod");
+        activateScene(
+            static_cast<ProcessingScene>(std::clamp(storedScene, 0, 5)),
+            !hasPersistedProcessingSettings);
 
         connect(m_updateManager, &UpdateManager::statusMessage,
                 this, [this](const QString& message, int timeoutMs) {
@@ -113,6 +121,7 @@ public:
     }
 
     ~MainWindow() {
+        if (qApp) qApp->removeEventFilter(this);
         if (m_quickPreviewWorker && m_quickPreviewWorker->isRunning()) {
             m_quickPreviewWorker->requestCancel();
             m_quickPreviewWorker->wait();
@@ -177,78 +186,93 @@ protected:
         }
     }
 
+    bool eventFilter(QObject* watched, QEvent* event) override {
+        Q_UNUSED(watched)
+        if (event->type() == QEvent::KeyPress &&
+            handleSingleKeyShortcut(static_cast<QKeyEvent*>(event))) {
+            return true;
+        }
+        return QMainWindow::eventFilter(watched, event);
+    }
+
     void keyPressEvent(QKeyEvent* event) override {
+        if (handleSingleKeyShortcut(event)) {
+            event->accept();
+            return;
+        }
+        QMainWindow::keyPressEvent(event);
+    }
+
+private:
+    bool handleSingleKeyShortcut(QKeyEvent* event) {
+        if (QApplication::activeModalWidget() ||
+            QApplication::activePopupWidget()) {
+            return false;
+        }
         QWidget* focused = QApplication::focusWidget();
-        const bool editingText = qobject_cast<QLineEdit*>(focused) ||
+        const bool interactiveControl = qobject_cast<QLineEdit*>(focused) ||
             qobject_cast<QPlainTextEdit*>(focused) ||
             qobject_cast<QTextEdit*>(focused) ||
             qobject_cast<QAbstractSpinBox*>(focused) ||
-            (qobject_cast<QComboBox*>(focused) &&
-             qobject_cast<QComboBox*>(focused)->isEditable());
+            qobject_cast<QAbstractButton*>(focused) ||
+            qobject_cast<QAbstractItemView*>(focused) ||
+            qobject_cast<QAbstractSlider*>(focused) ||
+            qobject_cast<QComboBox*>(focused);
         const Qt::KeyboardModifiers modifiers = event->modifiers();
         const bool commandModifier = modifiers.testFlag(Qt::ControlModifier) ||
             modifiers.testFlag(Qt::MetaModifier) ||
             modifiers.testFlag(Qt::AltModifier);
-        if (editingText || commandModifier) {
-            QMainWindow::keyPressEvent(event);
-            return;
+        if (interactiveControl || commandModifier) {
+            return false;
         }
 
-        bool handled = true;
         switch (event->key()) {
         case Qt::Key_F:
             m_previewPanel->fitToView();
-            break;
+            return true;
         case Qt::Key_1:
             m_previewPanel->resetZoom();
-            break;
+            return true;
         case Qt::Key_B:
             if (modifiers.testFlag(Qt::ShiftModifier)) {
                 m_previewPanel->showSplitComparison();
             } else {
                 m_previewPanel->cycleComparisonMode();
             }
-            break;
+            return true;
         case Qt::Key_M:
             m_previewPanel->toggleMaskOverlay();
-            break;
+            return true;
         case Qt::Key_R:
             showBestAvailableResult();
-            break;
+            return true;
         case Qt::Key_G:
             m_previewPanel->beginPointSelection();
-            break;
+            return true;
         case Qt::Key_BracketLeft:
             m_previewPanel->adjustMaskBrushSize(-4);
-            break;
+            return true;
         case Qt::Key_BracketRight:
             m_previewPanel->adjustMaskBrushSize(4);
-            break;
+            return true;
         case Qt::Key_Plus:
         case Qt::Key_Equal:
             m_previewPanel->zoomIn();
-            break;
+            return true;
         case Qt::Key_Minus:
             m_previewPanel->zoomOut();
-            break;
+            return true;
         case Qt::Key_Space:
             if (!processingActive()) m_projectPanel->toggleSelectedExclusion();
-            break;
+            return true;
         case Qt::Key_Escape:
             m_previewPanel->cancelInteractiveMode();
-            break;
+            return true;
         default:
-            handled = false;
-            break;
-        }
-        if (handled) {
-            event->accept();
-        } else {
-            QMainWindow::keyPressEvent(event);
+            return false;
         }
     }
 
-private:
     void setupCentralWidget() {
         auto* centralWidget = new QWidget(this);
         setCentralWidget(centralWidget);
@@ -326,7 +350,7 @@ private:
         return 2;
     }
 
-    void activateScene(ProcessingScene scene) {
+    void activateScene(ProcessingScene scene, bool resetParameters = true) {
         const bool changed = !m_sceneActive || m_scene != scene;
         m_scene = scene;
         m_sceneActive = true;
@@ -335,7 +359,7 @@ private:
             m_paramsPanel->clearModifiedCameraGrayPoint();
             markCachedResultStale(
                 QString::fromUtf8("场景已切换 · 这是上次处理的成片"));
-            m_paramsPanel->applySceneProfile(scene);
+            m_paramsPanel->applySceneProfile(scene, resetParameters);
         }
         m_projectPanel->setScene(scene);
         QSettings("StarProcessor", "App").setValue(
@@ -422,6 +446,8 @@ private:
             if (processingActive()) return;
             m_projectPanel->clearFiles();
             m_previewPanel->clearImage();
+            m_lastValidResultPreview = QImage();
+            m_lastValidResultPreviewKey.clear();
             m_toolbar->enableProcess(false);
             m_toolbar->enableExport(false);
             updateProjectReadiness();
@@ -558,6 +584,8 @@ private:
             if (processingActive()) return;
             m_projectPanel->clearFiles();
             m_previewPanel->clearImage();
+            m_lastValidResultPreview = QImage();
+            m_lastValidResultPreviewKey.clear();
             m_toolbar->enableProcess(false);
             m_toolbar->enableExport(false);
             updateProjectReadiness();
@@ -575,7 +603,9 @@ private:
                 this, &MainWindow::showShortcutsDialog);
         connect(m_toolbar, &Toolbar::aboutClicked, this, &MainWindow::onAboutClicked);
         connect(m_projectPanel, &ProjectPanel::sceneChanged,
-                this, &MainWindow::activateScene);
+                this, [this](ProcessingScene scene) {
+                    activateScene(scene, true);
+                });
         connect(m_projectPanel, &ProjectPanel::calibrationSettingsRequested,
                 m_paramsPanel, &ParamsPanel::showCalibrationSettings);
         connect(m_projectPanel, &ProjectPanel::undoAvailabilityChanged,
@@ -598,7 +628,13 @@ private:
         // 文件选择 -> 预览加载
         connect(m_projectPanel, &ProjectPanel::fileSelected, this, [this](const QString& filePath) {
             m_previewPanel->loadImage(filePath);
-            m_previewPanel->setResultAvailable(!m_cachedStackedData.empty(), false);
+            m_previewPanel->setResultAvailable(
+                !m_cachedStackedData.empty() ||
+                    !m_lastValidResultPreview.isNull(),
+                false);
+            if (m_scene == ProcessingScene::SingleFrame) {
+                handleProcessingParametersChanged();
+            }
             statusBar()->showMessage(
                 QString("正在加载：%1").arg(QFileInfo(filePath).fileName()));
         });
@@ -610,6 +646,16 @@ private:
                         filePath, image, iso, exposureTime, aperture,
                         focalLength);
                     if (m_projectPanel->currentFilePath() == filePath) {
+                        if (!m_editedSkyGroundMask.empty() &&
+                            m_editedMaskSourceFile == filePath &&
+                            m_editedMaskProjectFiles ==
+                                m_projectPanel->filePaths()) {
+                            m_maskOverlaySourceFile = filePath;
+                            m_previewPanel->restoreEditedMask(
+                                m_editedSkyGroundMask,
+                                m_editedSkyGroundMaskWidth,
+                                m_editedSkyGroundMaskHeight);
+                        }
                         m_pixelInfoLabel->setText(
                             QString::fromUtf8("%1×%2 · RGB —")
                                 .arg(image.width()).arg(image.height()));
@@ -866,6 +912,16 @@ private:
         return files.contains(reference) ? reference : QString();
     }
 
+    QString effectiveSingleFrameSource() const {
+        const QStringList files = m_projectPanel->includedFilePaths();
+        if (files.isEmpty()) return QString();
+        QString source = m_projectPanel->currentFilePath();
+        if (source.isEmpty() || !files.contains(source)) source = files.first();
+        const QFileInfo info(source);
+        const QString canonical = info.canonicalFilePath();
+        return canonical.isEmpty() ? info.absoluteFilePath() : canonical;
+    }
+
     bool discardEditedMaskForDifferentReference() {
         if (m_editedSkyGroundMask.empty()) return false;
         const QString reference = effectiveReferenceFrame();
@@ -887,6 +943,13 @@ private:
         // context-menu reference choice. Sign the effective value used by the
         // worker so cache/export validity follows both controls.
         return m_paramsPanel->upstreamSignature() +
+            QStringLiteral("|scene=") +
+            QString::number(static_cast<int>(m_scene)) +
+            QStringLiteral("|processing-sources=") +
+            m_projectPanel->processingSourceSignature() +
+            QStringLiteral("|single-source=") +
+            (m_scene == ProcessingScene::SingleFrame
+                 ? effectiveSingleFrameSource() : QString()) +
             QStringLiteral("|effective-reference=") + effectiveReferenceFrame() +
             QStringLiteral("|edited-mask-source=") + m_editedMaskSourceFile +
             QStringLiteral("|edited-mask-revision=") +
@@ -912,7 +975,8 @@ private:
         }
         const bool current =
             currentProcessingSignature() == m_lastProcessedSignature;
-        m_toolbar->enableExport(current);
+        m_toolbar->enableExport(
+            current && !m_previewPanel->isShowingHistoryResult());
         if (current) {
             cancelQuickPreview(false);
             setWorkflowStage(3,
@@ -1030,7 +1094,17 @@ private:
             m_previewPanel->setResultAvailable(true, true);
             return;
         }
-        if (m_cachedStackedData.empty()) return;
+        if (m_cachedStackedData.empty()) {
+            if (!m_lastValidResultPreview.isNull()) {
+                m_previewPanel->loadReadOnlyResultPreview(
+                    m_lastValidResultPreview,
+                    m_lastValidResultPreviewKey,
+                    QString::fromUtf8("上次有效结果 · 只读"));
+                m_previewPanel->setResultAvailable(true, true);
+                m_toolbar->enableExport(false);
+            }
+            return;
+        }
         const QString contentKey = QStringLiteral("result:") +
             m_lastProcessedSignature;
         if (!m_cachedBeforePreview.isNull()) {
@@ -1061,6 +1135,9 @@ private:
             m_previewPanel->clearSelectedPoint();
         }
         m_previewPanel->setResultAvailable(true, true);
+        m_toolbar->enableExport(
+            currentProcessingSignature() == m_lastProcessedSignature &&
+            m_scene != ProcessingScene::Timelapse);
     }
 
     void cancelQuickPreview(bool waitForDone) {
@@ -1206,6 +1283,20 @@ private:
         if (viewingResult) m_previewPanel->setResultLabel(reason);
     }
 
+    void restoreLastValidResultAfterFailedRun() {
+        if (m_lastValidResultPreview.isNull()) return;
+        if (m_resultWasVisibleBeforeRun) {
+            m_previewPanel->loadReadOnlyResultPreview(
+                m_lastValidResultPreview,
+                m_lastValidResultPreviewKey,
+                QString::fromUtf8("上次有效结果 · 本次处理未完成"));
+            m_previewPanel->setResultAvailable(true, true);
+        } else {
+            m_previewPanel->setResultAvailable(true, false);
+        }
+        m_toolbar->enableExport(false);
+    }
+
 private slots:
     void onImportClicked() {
         if (processingActive()) {
@@ -1326,8 +1417,7 @@ private slots:
             return;
         }
         if (m_scene == ProcessingScene::SingleFrame) {
-            QString source = m_projectPanel->currentFilePath();
-            if (source.isEmpty() || !files.contains(source)) source = files.first();
+            const QString source = effectiveSingleFrameSource();
             files = {source};
         }
         if (m_scene == ProcessingScene::DeepSky &&
@@ -1487,6 +1577,7 @@ private slots:
 
         // A new run invalidates the previous export immediately. A cancelled or
         // failed run must never leave an old result looking current.
+        m_resultWasVisibleBeforeRun = m_previewPanel->isShowingResult();
         invalidateCachedResult();
         m_runningParamsSignature = currentProcessingSignature();
         m_runningUpstreamSignature = currentUpstreamSignature();
@@ -1497,7 +1588,7 @@ private slots:
         m_projectPanel->setEditingEnabled(false);
         m_paramsPanel->setEnabled(false);
         m_inlineProgress->setValue(0);
-        m_inlineProgress->setVisible(true);
+        m_taskStatusBar->setProgressVisible(true);
         setWorkflowStage(
             m_scene == ProcessingScene::DeepSky ? 0 : 1,
             m_scene == ProcessingScene::DeepSky
@@ -1571,8 +1662,9 @@ private slots:
             m_toolbar->setProcessing(false);
             m_projectPanel->setEditingEnabled(true);
             m_paramsPanel->setEnabled(true);
-            m_inlineProgress->setVisible(false);
+            m_taskStatusBar->setProgressVisible(false);
             if (worker->wasCancelled()) {
+                restoreLastValidResultAfterFailedRun();
                 setWorkflowStage(1, QString::fromUtf8("处理已取消，可调整参数后重试"));
                 statusBar()->showMessage("处理已取消", 3000);
             } else if (worker->errorString().isEmpty()) {
@@ -1606,6 +1698,9 @@ private slots:
                     m_runningUpstreamSignature;
 
                 showBestAvailableResult();
+                m_lastValidResultPreview = m_previewPanel->currentImage();
+                m_lastValidResultPreviewKey =
+                    QStringLiteral("last-valid:") + m_lastProcessedSignature;
                 m_toolbar->enableExport(
                     m_scene != ProcessingScene::Timelapse);
                 int frameCount = m_cachedFrameCount;
@@ -1745,6 +1840,7 @@ private slots:
                     advice->open();
                 }
             } else {
+                restoreLastValidResultAfterFailedRun();
                 QMessageBox::warning(this, "处理失败", worker->errorString());
                 setWorkflowStage(1, QString::fromUtf8("处理失败，请检查素材或参数"));
                 statusBar()->showMessage("处理失败", 3000);
@@ -1764,6 +1860,13 @@ private slots:
             QMessageBox::information(
                 this, QString::fromUtf8("延时图片序列"),
                 QString::fromUtf8("处理完成时已经逐张输出整个序列，无需再次导出。"));
+            return;
+        }
+        if (m_previewPanel->isShowingHistoryResult()) {
+            QMessageBox::information(
+                this, QString::fromUtf8("历史结果只读"),
+                QString::fromUtf8(
+                    "历史结果仅用于查看。按 R 返回当前会话结果后再导出。"));
             return;
         }
         if (m_cachedStackedData.empty()) {
@@ -1804,7 +1907,7 @@ private slots:
         m_paramsPanel->setEnabled(false);
         m_toolbar->setProcessing(true);
         m_inlineProgress->setRange(0, 100);
-        m_inlineProgress->setVisible(false);
+        m_taskStatusBar->setProgressVisible(false);
         statusBar()->showMessage(QString::fromUtf8("正在导出 %1...").arg(fileName));
 
         connect(worker, &ExportWorker::finished, this,
@@ -1815,7 +1918,7 @@ private slots:
                     m_projectPanel->setEditingEnabled(true);
                     m_paramsPanel->setEnabled(true);
                     m_inlineProgress->setRange(0, 100);
-                    m_inlineProgress->setVisible(false);
+                    m_taskStatusBar->setProgressVisible(false);
                     if (worker->succeeded()) {
                         m_paramsPanel->refreshRecentResults();
                         QMessageBox::information(
@@ -1944,7 +2047,9 @@ private slots:
                     m_previewPanel->loadImage(
                         preview, QStringLiteral("history:") + loadedPath);
                     m_previewPanel->setResultAvailable(
-                        !m_cachedStackedData.empty(), false);
+                        !m_cachedStackedData.empty() ||
+                            !m_lastValidResultPreview.isNull(),
+                        false);
                     m_toolbar->enableExport(false);
                     statusBar()->showMessage(
                         QString::fromUtf8("历史结果只读预览 · %1")
@@ -2010,6 +2115,9 @@ private:
     std::shared_ptr<const std::vector<uint16_t>> m_quickPreviewSource;
     std::shared_ptr<const std::vector<uint8_t>> m_quickPreviewMask;
     std::vector<uint16_t> m_cachedQuickPreviewResult;
+    QImage m_lastValidResultPreview;
+    QString m_lastValidResultPreviewKey;
+    bool m_resultWasVisibleBeforeRun = false;
     int m_quickPreviewWidth = 0;
     int m_quickPreviewHeight = 0;
     QString m_quickPreviewSignature;
@@ -2029,6 +2137,14 @@ int main(int argc, char* argv[]) {
         }
     }
 
+    bool platformRuntimeCheck = false;
+    for (int i = 1; i < argc; ++i) {
+        if (std::strcmp(argv[i], "--platform-runtime-check") == 0) {
+            platformRuntimeCheck = true;
+            break;
+        }
+    }
+
     QApplication::setHighDpiScaleFactorRoundingPolicy(
         Qt::HighDpiScaleFactorRoundingPolicy::PassThrough
     );
@@ -2038,6 +2154,14 @@ int main(int argc, char* argv[]) {
     app.setApplicationVersion(STARPROCESSOR_VERSION);
     app.setOrganizationName("StarProcessor");
     app.setWindowIcon(UiAssets::appIcon());
+
+    // The Windows packaging job uses this path to load the deployed platform
+    // plugin and its transitive DLLs without opening the main window.
+    if (platformRuntimeCheck) {
+        std::cout << "StarProcessor " << STARPROCESSOR_VERSION
+                  << " platform ready\n";
+        return 0;
+    }
 
     // QNetworkAccessManager otherwise defaults to NoProxy. Respect the
     // operating system proxy/PAC configuration for update checks and package

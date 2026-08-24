@@ -2918,6 +2918,72 @@ void testTiffIccProfile() {
                                      ImageExporter::Tiff16) &&
               QFileInfo::exists(unicodePath),
           "RGB TIFF export should support a Unicode file path");
+    loadedRgb.clear();
+    loadedWidth = 0;
+    loadedHeight = 0;
+    check(ImageExporter::loadTiffRgb16(
+              unicodePath, loadedRgb, loadedWidth, loadedHeight) &&
+              loadedRgb == rgb,
+          "RGB TIFF history loading should support a Unicode file path");
+
+    loadedRgb.clear();
+    check(ImageExporter::loadTiffRgb16(
+              path, loadedRgb, loadedWidth, loadedHeight, 1) &&
+              loadedWidth == 1 && loadedHeight == 1 &&
+              loadedRgb.size() == 3,
+          "History loading should downsample before allocating RGB storage");
+    loadedRgb.clear();
+    check(!ImageExporter::loadTiffRgb16(
+              path, loadedRgb, loadedWidth, loadedHeight, 2400,
+              []() { return true; }) && loadedRgb.empty(),
+          "History loading should honor cancellation during TIFF decoding");
+
+    const auto writeUnsupportedTiff = [&](const QString& fixturePath,
+                                           uint16_t compression,
+                                           uint32_t rowsPerStrip) {
+        TIFF* fixture = TIFFOpen(fixturePath.toStdString().c_str(), "w");
+        if (!fixture) return false;
+        const bool fieldsSet =
+            TIFFSetField(fixture, TIFFTAG_IMAGEWIDTH, 2) == 1 &&
+            TIFFSetField(fixture, TIFFTAG_IMAGELENGTH, 2) == 1 &&
+            TIFFSetField(fixture, TIFFTAG_BITSPERSAMPLE, 16) == 1 &&
+            TIFFSetField(fixture, TIFFTAG_SAMPLESPERPIXEL, 3) == 1 &&
+            TIFFSetField(fixture, TIFFTAG_COMPRESSION, compression) == 1 &&
+            TIFFSetField(fixture, TIFFTAG_PHOTOMETRIC,
+                         PHOTOMETRIC_RGB) == 1 &&
+            TIFFSetField(fixture, TIFFTAG_PLANARCONFIG,
+                         PLANARCONFIG_CONTIG) == 1 &&
+            TIFFSetField(fixture, TIFFTAG_ORIENTATION,
+                         ORIENTATION_TOPLEFT) == 1 &&
+            TIFFSetField(fixture, TIFFTAG_ROWSPERSTRIP,
+                         rowsPerStrip) == 1;
+        bool written = fieldsSet;
+        for (uint32_t row = 0; written && row < 2; ++row) {
+            written = TIFFWriteScanline(
+                          fixture,
+                          const_cast<uint16_t*>(rgb.data()) + row * 6,
+                          row, 0) >= 0;
+        }
+        TIFFClose(fixture);
+        return written;
+    };
+
+    const QString compressedPath = directory.filePath("compressed.tiff");
+    check(writeUnsupportedTiff(compressedPath, COMPRESSION_LZW, 1),
+          "Compressed TIFF fixture should be writable");
+    loadedRgb.clear();
+    check(!ImageExporter::loadTiffRgb16(
+              compressedPath, loadedRgb, loadedWidth, loadedHeight),
+          "History loading should reject compressed TIFF input");
+
+    const QString multiRowStripPath = directory.filePath("multi-row-strip.tiff");
+    check(writeUnsupportedTiff(
+              multiRowStripPath, COMPRESSION_NONE, 2),
+          "Multi-row strip TIFF fixture should be writable");
+    loadedRgb.clear();
+    check(!ImageExporter::loadTiffRgb16(
+              multiRowStripPath, loadedRgb, loadedWidth, loadedHeight),
+          "History loading should reject multi-row TIFF strips");
 }
 
 void testPngTransferAndColorSpace() {

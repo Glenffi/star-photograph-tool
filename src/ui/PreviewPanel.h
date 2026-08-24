@@ -29,6 +29,9 @@ public:
     void loadImage(const QString& filePath);     // 通过 RawImageLoader 加载
     void loadImage(const QImage& image);         // 直接加载 QImage
     void loadImage(const QImage& image, const QString& contentKey);
+    void loadReadOnlyResultPreview(const QImage& image,
+                                   const QString& contentKey,
+                                   const QString& label);
     void load16BitImage(const std::vector<uint16_t>& data, int w, int h); // 加载 16-bit 单通道并 tone mapping
     void load16BitImage(const std::vector<uint16_t>& data, int w, int h,
                         const QString& contentKey);
@@ -76,11 +79,15 @@ public:
     void setComparisonImages(const QImage& before, const QImage& after);
     bool hasComparison() const;
     bool isShowingResult() const;
+    bool isShowingHistoryResult() const {
+        return m_currentContentKey.startsWith(QStringLiteral("history:"));
+    }
     void setResultAvailable(bool available, bool viewingResult = false);
     void showResultSummary(const QString& summary);
     void clearComparison();
 
     void setMaskOverlay(const std::vector<uint8_t>& mask, int w, int h);
+    void restoreEditedMask(const std::vector<uint8_t>& mask, int w, int h);
     void clearMaskOverlay();
     bool hasEditedMask() const;
     bool maskRefinementActive() const { return m_maskRefinementActive; }
@@ -153,6 +160,8 @@ private:
     bool maskPositionAt(const QPoint& labelPosition, QPoint& maskPoint) const;
     bool hasMaskData() const;
     void rebuildMaskOverlay();
+    void applyMaskOverlay(const std::vector<uint8_t>& mask, int w, int h,
+                          bool userEdited, bool notify);
     void rebuildGroundHints();
     void paintGroundHintSegment(const QPoint& from, const QPoint& to,
                                 int radius);

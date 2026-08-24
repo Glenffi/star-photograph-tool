@@ -324,6 +324,25 @@ if(BUILD_TESTING)
     add_test(NAME project_panel COMMAND StarProcessorProjectPanelTests)
     set_tests_properties(project_panel PROPERTIES
         ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
+    add_executable(StarProcessorParamsPanelTests
+        tests/ParamsPanelTests.cpp
+        src/ui/ParamsPanel.cpp
+        src/ui/ParamsPanel.h
+        src/ui/UiAssets.cpp
+        src/ui/UiAssets.h
+        src/ui/StyleTokens.cpp
+        src/ui/StyleTokens.h
+        src/ui/InspectorWidgets.cpp
+        src/ui/InspectorWidgets.h
+        src/ui/ProcessingScene.h)
+    target_include_directories(StarProcessorParamsPanelTests PRIVATE
+        ${CMAKE_SOURCE_DIR}/src)
+    target_link_libraries(StarProcessorParamsPanelTests PRIVATE
+        StarProcessorCore Qt6::Widgets)
+    add_test(NAME params_panel COMMAND StarProcessorParamsPanelTests)
+    set_tests_properties(params_panel PROPERTIES
+        ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 endif()
 
 if(BUILD_SAMPLE_TOOLS)

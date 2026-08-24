@@ -85,7 +85,8 @@ public:
     QString processingSignature() const;
     void setMaskPreview(const std::vector<uint8_t>& mask, int w, int h);
     void setDetectMaskEnabled(bool enabled);
-    void applySceneProfile(ProcessingScene scene);
+    void applySceneProfile(ProcessingScene scene,
+                           bool resetParameters = true);
     void showCalibrationSettings();
     void showOutputSettings();
     void setProcessingReport(const QString& report);

@@ -9,6 +9,8 @@
 #include <cmath>
 #include <iostream>
 #include <limits>
+#include <new>
+#include <stdexcept>
 
 #ifdef HAS_LIBTIFF
 #include <tiffio.h>
@@ -297,7 +299,9 @@ bool ImageExporter::exportRgb16(const std::vector<uint16_t>& rgb,
 
 bool ImageExporter::loadTiffRgb16(const QString& path,
                                   std::vector<uint16_t>& rgb,
-                                  int& width, int& height) {
+                                  int& width, int& height,
+                                  int maximumLongSide,
+                                  const std::function<bool()>& cancelled) {
     rgb.clear();
     width = 0;
     height = 0;
@@ -311,6 +315,10 @@ bool ImageExporter::loadTiffRgb16(const QString& path,
     uint16_t samplesPerPixel = 0;
     uint16_t planarConfig = 0;
     uint16_t orientation = ORIENTATION_TOPLEFT;
+    uint16_t photometric = 0;
+    uint16_t sampleFormat = SAMPLEFORMAT_UINT;
+    uint16_t compression = COMPRESSION_NONE;
+    uint32_t rowsPerStrip = 0;
     const bool fieldsValid =
         TIFFGetField(tiff, TIFFTAG_IMAGEWIDTH, &imageWidth) == 1 &&
         TIFFGetField(tiff, TIFFTAG_IMAGELENGTH, &imageHeight) == 1 &&
@@ -321,58 +329,124 @@ bool ImageExporter::loadTiffRgb16(const QString& path,
         TIFFGetFieldDefaulted(tiff, TIFFTAG_PLANARCONFIG,
                               &planarConfig) == 1 &&
         TIFFGetFieldDefaulted(tiff, TIFFTAG_ORIENTATION,
-                              &orientation) == 1;
+                              &orientation) == 1 &&
+        TIFFGetField(tiff, TIFFTAG_PHOTOMETRIC, &photometric) == 1 &&
+        TIFFGetFieldDefaulted(tiff, TIFFTAG_SAMPLEFORMAT,
+                              &sampleFormat) == 1 &&
+        TIFFGetFieldDefaulted(tiff, TIFFTAG_COMPRESSION,
+                              &compression) == 1 &&
+        TIFFGetFieldDefaulted(tiff, TIFFTAG_ROWSPERSTRIP,
+                              &rowsPerStrip) == 1;
     if (!fieldsValid || imageWidth == 0 || imageHeight == 0 ||
         imageWidth > static_cast<uint32_t>(std::numeric_limits<int>::max()) ||
         imageHeight > static_cast<uint32_t>(std::numeric_limits<int>::max()) ||
         bitsPerSample != 16 ||
         (samplesPerPixel != 1 && samplesPerPixel != 3) ||
+        sampleFormat != SAMPLEFORMAT_UINT ||
+        compression != COMPRESSION_NONE || rowsPerStrip != 1 ||
+        (samplesPerPixel == 1 && photometric != PHOTOMETRIC_MINISBLACK) ||
+        (samplesPerPixel == 3 && photometric != PHOTOMETRIC_RGB) ||
         planarConfig != PLANARCONFIG_CONTIG ||
-        orientation != ORIENTATION_TOPLEFT) {
+        orientation != ORIENTATION_TOPLEFT || TIFFIsTiled(tiff)) {
         TIFFClose(tiff);
         return false;
     }
 
+    int outputWidth = static_cast<int>(imageWidth);
+    int outputHeight = static_cast<int>(imageHeight);
+    if (maximumLongSide > 0 &&
+        std::max(imageWidth, imageHeight) >
+            static_cast<uint32_t>(maximumLongSide)) {
+        const double scale = static_cast<double>(maximumLongSide) /
+            std::max(imageWidth, imageHeight);
+        outputWidth = std::max(1, static_cast<int>(
+            std::lround(imageWidth * scale)));
+        outputHeight = std::max(1, static_cast<int>(
+            std::lround(imageHeight * scale)));
+    }
+
     size_t outputSamples = 0;
-    if (!checkedSampleCount(static_cast<int>(imageWidth),
-                            static_cast<int>(imageHeight), 3,
+    if (!checkedSampleCount(outputWidth, outputHeight, 3,
                             outputSamples)) {
+        TIFFClose(tiff);
+        return false;
+    }
+    // Full-resolution loading is only used by small trusted test fixtures.
+    // History previews always pass a long-side bound; keep an independent
+    // hard ceiling so a forged header cannot request an unbounded allocation.
+    constexpr size_t kMaximumDecodedSamples = 150'000'000;
+    if (outputSamples > kMaximumDecodedSamples) {
         TIFFClose(tiff);
         return false;
     }
     const tmsize_t scanlineBytes = TIFFScanlineSize(tiff);
     const size_t requiredBytes = static_cast<size_t>(imageWidth) *
         samplesPerPixel * sizeof(uint16_t);
+    constexpr size_t kMaximumScanlineBytes = 256U * 1024U * 1024U;
     if (scanlineBytes <= 0 ||
+        static_cast<uint64_t>(scanlineBytes) > kMaximumScanlineBytes ||
         static_cast<size_t>(scanlineBytes) < requiredBytes) {
         TIFFClose(tiff);
         return false;
     }
 
-    rgb.resize(outputSamples);
-    std::vector<uint8_t> scanline(static_cast<size_t>(scanlineBytes));
-    for (uint32_t row = 0; row < imageHeight; ++row) {
-        if (TIFFReadScanline(tiff, scanline.data(), row, 0) < 0) {
-            rgb.clear();
-            TIFFClose(tiff);
-            return false;
-        }
-        const auto* input = reinterpret_cast<const uint16_t*>(scanline.data());
-        uint16_t* output = rgb.data() +
-            static_cast<size_t>(row) * imageWidth * 3;
-        if (samplesPerPixel == 3) {
-            std::copy_n(input, static_cast<size_t>(imageWidth) * 3, output);
-        } else {
-            for (uint32_t column = 0; column < imageWidth; ++column) {
-                output[column * 3] = input[column];
-                output[column * 3 + 1] = input[column];
-                output[column * 3 + 2] = input[column];
+    try {
+        rgb.resize(outputSamples);
+        std::vector<uint16_t> scanline(
+            (static_cast<size_t>(scanlineBytes) + sizeof(uint16_t) - 1) /
+            sizeof(uint16_t));
+        for (int outputRow = 0; outputRow < outputHeight; ++outputRow) {
+            if (cancelled && cancelled()) {
+                rgb.clear();
+                TIFFClose(tiff);
+                return false;
+            }
+            const uint32_t sourceRow = std::min(
+                imageHeight - 1,
+                static_cast<uint32_t>(
+                    (static_cast<uint64_t>(outputRow) * 2 + 1) *
+                    imageHeight / (static_cast<uint64_t>(outputHeight) * 2)));
+            if (TIFFReadScanline(tiff, scanline.data(), sourceRow, 0) < 0) {
+                rgb.clear();
+                TIFFClose(tiff);
+                return false;
+            }
+            uint16_t* output = rgb.data() +
+                static_cast<size_t>(outputRow) * outputWidth * 3;
+            for (int outputColumn = 0;
+                 outputColumn < outputWidth; ++outputColumn) {
+                const uint32_t sourceColumn = std::min(
+                    imageWidth - 1,
+                    static_cast<uint32_t>(
+                        (static_cast<uint64_t>(outputColumn) * 2 + 1) *
+                        imageWidth /
+                        (static_cast<uint64_t>(outputWidth) * 2)));
+                if (samplesPerPixel == 3) {
+                    const size_t source =
+                        static_cast<size_t>(sourceColumn) * 3;
+                    output[outputColumn * 3] = scanline[source];
+                    output[outputColumn * 3 + 1] = scanline[source + 1];
+                    output[outputColumn * 3 + 2] = scanline[source + 2];
+                } else {
+                    const uint16_t value = scanline[sourceColumn];
+                    output[outputColumn * 3] = value;
+                    output[outputColumn * 3 + 1] = value;
+                    output[outputColumn * 3 + 2] = value;
+                }
             }
         }
+    } catch (const std::bad_alloc&) {
+        rgb.clear();
+        TIFFClose(tiff);
+        return false;
+    } catch (const std::length_error&) {
+        rgb.clear();
+        TIFFClose(tiff);
+        return false;
     }
     TIFFClose(tiff);
-    width = static_cast<int>(imageWidth);
-    height = static_cast<int>(imageHeight);
+    width = outputWidth;
+    height = outputHeight;
     return true;
 #else
     Q_UNUSED(path)

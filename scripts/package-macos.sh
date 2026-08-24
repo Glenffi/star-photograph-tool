@@ -286,8 +286,16 @@ if [[ "${external_dependency_found}" -ne 0 ]]; then
 fi
 
 if version_is_greater "${actual_deployment_target}" "${DEPLOYMENT_TARGET}"; then
-    echo "Warning: bundled dependencies raise the minimum macOS version from" \
-         "${DEPLOYMENT_TARGET} to ${actual_deployment_target}." >&2
+    if [[ "${ALLOW_HIGHER_DEPLOYMENT_TARGET:-0}" != "1" ]]; then
+        echo "Bundled dependencies raise the minimum macOS version from" \
+             "${DEPLOYMENT_TARGET} to ${actual_deployment_target}." >&2
+        echo "Refusing to create a public package with a higher OS requirement." >&2
+        echo "Use matching dependencies, or set ALLOW_HIGHER_DEPLOYMENT_TARGET=1" \
+             "only for a local compatibility build." >&2
+        exit 5
+    fi
+    echo "Warning: creating a local package that requires macOS" \
+         "${actual_deployment_target}." >&2
 fi
 
 # The deployment target requested from CMake can be lower than the prebuilt
@@ -308,7 +316,7 @@ codesign --verify --deep --strict --verbose=2 "${STAGED_APP}"
 runtime_check_output="$("${STAGED_APP}/Contents/MacOS/StarProcessor" --runtime-check)"
 if [[ "${runtime_check_output}" != "StarProcessor ${VERSION}" ]]; then
     echo "Packaged application runtime check returned: ${runtime_check_output}" >&2
-    exit 5
+    exit 6
 fi
 
 if [[ "${SKIP_LAUNCH_TEST:-0}" != "1" ]]; then
@@ -317,7 +325,7 @@ if [[ "${SKIP_LAUNCH_TEST:-0}" != "1" ]]; then
         "--screenshot=${SCREENSHOT}"
     if [[ ! -s "${SCREENSHOT}" ]]; then
         echo "Packaged application did not create its launch-check screenshot" >&2
-        exit 6
+        exit 7
     fi
 fi
 

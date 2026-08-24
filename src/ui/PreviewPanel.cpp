@@ -770,6 +770,16 @@ void PreviewPanel::loadImage(const QImage& image,
     finishContentSwitch();
 }
 
+void PreviewPanel::loadReadOnlyResultPreview(const QImage& image,
+                                             const QString& contentKey,
+                                             const QString& label) {
+    loadImage(image, contentKey);
+    if (image.isNull()) return;
+    m_showingResult = true;
+    showImageCanvas();
+    setResultLabel(label);
+}
+
 void PreviewPanel::load16BitImage(const std::vector<uint16_t>& data, int w, int h) {
     load16BitImage(data, w, h, legacyResultContentKey());
 }
@@ -1618,6 +1628,17 @@ QImage PreviewPanel::currentImage() const {
 }
 
 void PreviewPanel::setMaskOverlay(const std::vector<uint8_t>& mask, int w, int h) {
+    applyMaskOverlay(mask, w, h, false, true);
+}
+
+void PreviewPanel::restoreEditedMask(const std::vector<uint8_t>& mask,
+                                     int w, int h) {
+    applyMaskOverlay(mask, w, h, true, false);
+}
+
+void PreviewPanel::applyMaskOverlay(const std::vector<uint8_t>& mask,
+                                    int w, int h, bool userEdited,
+                                    bool notify) {
     if (w <= 0 || h <= 0 ||
         mask.size() != static_cast<size_t>(w) * h) return;
     ++m_maskRefinementGeneration;
@@ -1633,7 +1654,7 @@ void PreviewPanel::setMaskOverlay(const std::vector<uint8_t>& mask, int w, int h
     m_groundHintOverlay.fill(Qt::transparent);
     m_maskOverlayVisible = true;
     m_maskEditingActive = true;
-    m_maskHasUserEdits = false;
+    m_maskHasUserEdits = userEdited;
     m_maskRefinementActive = false;
     if (m_maskBrushBtn) m_maskBrushBtn->setChecked(true);
     if (m_maskEditControls) m_maskEditControls->setVisible(true);
@@ -1642,7 +1663,7 @@ void PreviewPanel::setMaskOverlay(const std::vector<uint8_t>& mask, int w, int h
     positionCanvasOverlays();
     rebuildMaskOverlay();
     updateImageDisplay();
-    emit editedMaskChanged();
+    if (notify) emit editedMaskChanged();
 }
 
 void PreviewPanel::clearMaskOverlay() {

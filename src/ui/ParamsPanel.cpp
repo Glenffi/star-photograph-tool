@@ -1577,6 +1577,7 @@ void ParamsPanel::loadCustomPresets() {
 
 void ParamsPanel::loadPreset() {
     QSettings settings("StarProcessor", "App");
+    const bool hasPersistedStackMethod = settings.contains("stackMethod");
 
     // 加载自定义预设列表
     loadCustomPresets();
@@ -1776,6 +1777,9 @@ void ParamsPanel::loadPreset() {
     if (lastPresetIndex >= 0 && lastPresetIndex < m_presetCombo->count()) {
         m_presetCombo->setCurrentIndex(lastPresetIndex);
     }
+    // A restored algorithm is an explicit user choice. Do not replace it with
+    // the frame-count recommendation immediately after the next import.
+    m_userChangedStackMethod = hasPersistedStackMethod;
 }
 
 void ParamsPanel::onPresetChanged(int index) {
@@ -2008,7 +2012,8 @@ void ParamsPanel::applyPreset(const Preset& preset) {
     emitParamsChanged();
 }
 
-void ParamsPanel::applySceneProfile(ProcessingScene scene) {
+void ParamsPanel::applySceneProfile(ProcessingScene scene,
+                                    bool resetParameters) {
     const QList<Preset> builtins = PresetManager::builtinPresets();
     Preset preset;
     int presetIndex = 0;
@@ -2071,10 +2076,10 @@ void ParamsPanel::applySceneProfile(ProcessingScene scene) {
         break;
     }
 
-    m_userChangedStackMethod = false;
-    applyPreset(preset);
+    if (resetParameters) {
+        m_userChangedStackMethod = false;
+        applyPreset(preset);
 
-    {
         const QSignalBlocker presetBlocker(m_presetCombo);
         const QSignalBlocker skyGroundBlocker(m_skyGroundCheck);
         m_presetCombo->setCurrentIndex(
