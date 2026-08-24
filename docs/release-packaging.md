@@ -42,7 +42,7 @@
 2. 配置 Release 构建并运行 CTest。
 3. 用 `windeployqt` 部署 Qt、平台插件和 MSVC runtime。
 4. 复制 vcpkg 动态依赖并确认 `platforms/qwindows.dll` 存在。
-5. 从最终便携目录依次执行 `--runtime-check` 和 `--platform-runtime-check`：前者验证 EXE 的静态 DLL 闭包，后者初始化 `QApplication`，实际加载 `qwindows.dll` 及其传递依赖。
+5. 从最终便携目录依次执行 `--runtime-check` 和 `--platform-runtime-check` 并检查退出码：前者验证 EXE 的静态 DLL 闭包，后者初始化 `QApplication`，实际加载 `qwindows.dll` 及其传递依赖。Windows GUI 子系统不依赖控制台标准输出。
 6. 创建便携 ZIP、SHA-256 文件和 GitHub Actions artifact。
 7. 当触发来源是 `v*` 标签时，校验标签与 CMake 版本一致并发布 GitHub Release 资产。
 
