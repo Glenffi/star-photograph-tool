@@ -99,6 +99,7 @@ public:
 
     QStringList filePaths() const;
     QStringList includedFilePaths() const;  // 未排除的文件
+    int totalFileCount() const { return m_fileItems.size(); }
     QString currentFilePath() const;
     QString referenceFramePath() const;
     QString processingSourceSignature() const;
@@ -160,7 +161,7 @@ private:
     QComboBox* m_sceneCombo = nullptr;
     QScrollArea* m_scrollArea = nullptr;
     QWidget* m_listContainer = nullptr;
-    QVBoxLayout* m_listLayout = nullptr;
+    QHBoxLayout* m_listLayout = nullptr;
     QWidget* m_emptyState = nullptr;
     QVBoxLayout* m_emptyLayout = nullptr;
     QLabel* m_countLabel = nullptr;

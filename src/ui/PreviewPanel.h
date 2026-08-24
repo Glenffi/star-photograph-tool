@@ -4,6 +4,7 @@
 
 #include <QWidget>
 #include <QImage>
+#include <QPixmap>
 #include <QPointF>
 #include <QThreadPool>
 #include <QVector>
@@ -171,6 +172,7 @@ private:
     double maximumSafeZoom() const;
     const QImage& displayedImage() const;
     void resetComparison();
+    void invalidateComparisonRenderCache();
     QString formatExposureTime(double seconds) const;
 
     // 空状态
@@ -224,12 +226,18 @@ private:
     QImage m_currentImage;
     QImage m_beforeImage;
     QImage m_afterImage;
+    QPixmap m_scaledBeforeCache;
+    QPixmap m_scaledAfterCache;
+    QPixmap m_splitComposite;
+    QSize m_scaledComparisonSize;
     double m_zoom = 1.0;
     bool m_fitToView = true;
     bool m_fitUpdatePending = false;
     bool m_panning = false;
     QPoint m_lastPanPos;
     bool m_beforeAfterMode = false;
+    double m_splitPosition = 0.5;
+    bool m_splitDragging = false;
     bool m_showInfo = true;
     bool m_showingResult = false;
     bool m_pointSelectionActive = false;

@@ -2,6 +2,7 @@
 #include "ui/StyleTokens.h"
 #include "ui/ViewStateStore.h"
 #include "ui/TaskStatusBar.h"
+#include "ui/WorkflowRail.h"
 
 #include <QApplication>
 #include <QColor>
@@ -78,6 +79,7 @@ int main(int argc, char* argv[]) {
     first.horizontalScroll = 140;
     first.verticalScroll = 80;
     first.comparisonMode = ViewStateStore::ComparisonMode::Split;
+    first.splitPosition = 0.31;
     first.maskOverlayVisible = true;
     states.save(QStringLiteral("first"), first);
     states.save(QStringLiteral("second"), ViewStateStore::ViewState{});
@@ -86,6 +88,7 @@ int main(int argc, char* argv[]) {
                            && restored->horizontalScroll == 140
                            && restored->comparisonMode
                                == ViewStateStore::ComparisonMode::Split
+                           && std::abs(restored->splitPosition - 0.31) < 0.0001
                            && restored->maskOverlayVisible,
                        "View state did not round-trip");
     states.save(QStringLiteral("third"), ViewStateStore::ViewState{});
@@ -118,6 +121,29 @@ int main(int argc, char* argv[]) {
                            statusBar.progressBar()->height() ==
                                StyleTokens::Controls::kProgressHeight,
                        "Task progress line should span the status bar");
+
+    WorkflowRail rail;
+    success &= require(
+        rail.width() == StyleTokens::Layout::kWorkflowRailWidth &&
+            rail.currentStage() == WorkflowStage::Adjustment,
+        "Workflow rail should use the instrument layout and default stage");
+    int stageChanges = 0;
+    QObject::connect(&rail, &WorkflowRail::stageChanged,
+                     [&](WorkflowStage) { ++stageChanges; });
+    rail.setCurrentStage(WorkflowStage::Stacking, true);
+    success &= require(
+        rail.currentStage() == WorkflowStage::Stacking && stageChanges == 1,
+        "Workflow stage selection should notify exactly once");
+    rail.setScene(ProcessingScene::SingleFrame);
+    success &= require(
+        rail.currentStage() == WorkflowStage::Adjustment && stageChanges == 2,
+        "Single-frame mode should leave only relevant workflow stages active");
+    rail.setScene(ProcessingScene::Nightscape);
+    rail.setCurrentStage(WorkflowStage::Adjustment, false);
+    rail.setScene(ProcessingScene::Timelapse);
+    success &= require(
+        rail.currentStage() == WorkflowStage::Stacking && stageChanges == 3,
+        "Timelapse should hide stages without user-facing settings");
 
     return success ? 0 : 1;
 }

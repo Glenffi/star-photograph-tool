@@ -19,10 +19,12 @@
 #include <QListWidgetItem>
 #include <QFileDialog>
 #include <QFileInfo>
+#include <QGraphicsOpacityEffect>
 #include <QDir>
 #include <QDateTime>
 #include <QSettings>
 #include <QMessageBox>
+#include <QPropertyAnimation>
 #include <QInputDialog>
 #include <QSet>
 #include <QTabWidget>
@@ -85,6 +87,19 @@ QString exposureText(int tenths) {
         .arg(ev, 0, 'f', 1);
 }
 
+QString defaultOutputPath() {
+    return QDir::homePath() + QString::fromUtf8("/星炼/Output");
+}
+
+QString legacyDefaultOutputPath() {
+    return QDir::homePath() + QStringLiteral("/StarProcessor/Output");
+}
+
+QString migrateDefaultOutputPath(const QString& path) {
+    return QDir::cleanPath(path) == QDir::cleanPath(legacyDefaultOutputPath())
+        ? defaultOutputPath() : path;
+}
+
 } // namespace
 
 ParamsPanel::ParamsPanel(QWidget* parent)
@@ -103,11 +118,22 @@ void ParamsPanel::setupUI() {
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(0);
 
-    // 场景名称仍由 applySceneProfile() 维护，但新版检查器不再重复展示
-    // 大标题；场景上下文已经由左侧素材栏和工具带提供。
-    m_titleLabel = new QLabel(QString::fromUtf8("处理参数"), this);
+    auto* titleBar = new QWidget(this);
+    titleBar->setObjectName(QStringLiteral("paramsTitleBar"));
+    titleBar->setFixedHeight(74);
+    auto* titleLayout = new QVBoxLayout(titleBar);
+    titleLayout->setContentsMargins(
+        StyleTokens::Spacing::kPanelPadding, 12,
+        StyleTokens::Spacing::kPanelPadding, 10);
+    titleLayout->setSpacing(3);
+    m_stageKicker = new QLabel(QStringLiteral("05 / ADJUST"), titleBar);
+    m_stageKicker->setObjectName(QStringLiteral("inspectorKicker"));
+    titleLayout->addWidget(m_stageKicker);
+    m_titleLabel = new QLabel(QString::fromUtf8("成片调整"), titleBar);
     setRole(m_titleLabel, "panelTitle");
-    m_titleLabel->hide();
+    m_titleLabel->setObjectName(QStringLiteral("inspectorTitle"));
+    titleLayout->addWidget(m_titleLabel);
+    layout->addWidget(titleBar);
 
     m_presetBar = new QWidget(this);
     m_presetBar->setObjectName("paramsPresetBar");
@@ -136,6 +162,7 @@ void ParamsPanel::setupUI() {
     m_tabs->setDocumentMode(true);
     m_tabs->tabBar()->setExpanding(true);
     m_tabs->tabBar()->setDrawBase(false);
+    m_tabs->tabBar()->hide();
 
     auto createPage = [this](const QString& name) -> QVBoxLayout* {
         auto* page = new QWidget(m_tabs);
@@ -170,6 +197,54 @@ void ParamsPanel::setupUI() {
     QVBoxLayout* outputPageLayout = createPage(QString::fromUtf8("输出"));
     layout->addWidget(m_tabs, 1);
 
+    m_assetsGroup = createCollapsibleGroup(
+        QString::fromUtf8("素材与序列"), true);
+    auto* assetsLayout = new QVBoxLayout(m_assetsGroup);
+    auto* assetsSummary = new QLabel(
+        QString::fromUtf8(
+            "底部胶片带管理 Light 素材。点击缩略图查看源文件，"
+            "空格排除或恢复，右键可设为参考帧。"),
+        m_assetsGroup);
+    assetsSummary->setWordWrap(true);
+    setRole(assetsSummary, "note");
+    assetsLayout->addWidget(assetsSummary);
+    auto* assetMetrics = new QGridLayout();
+    assetMetrics->setContentsMargins(0, 6, 0, 0);
+    assetMetrics->setHorizontalSpacing(12);
+    assetMetrics->setVerticalSpacing(10);
+    const auto addAssetMetric = [this, assetMetrics](
+                                    int row, const QString& name,
+                                    QLabel*& value) {
+        auto* label = new QLabel(name, m_assetsGroup);
+        setRole(label, "muted");
+        assetMetrics->addWidget(label, row, 0);
+        value = new QLabel(QStringLiteral("--"), m_assetsGroup);
+        value->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+        setRole(value, "value");
+        value->setProperty("inspectorRole", "assetSummary");
+        value->setMinimumWidth(120);
+        assetMetrics->addWidget(value, row, 1);
+    };
+    addAssetMetric(0, QString::fromUtf8("可用素材"), m_assetCountValue);
+    addAssetMetric(1, QString::fromUtf8("场景门槛"), m_assetThresholdValue);
+    addAssetMetric(2, QString::fromUtf8("参考帧"), m_assetReferenceValue);
+    assetsLayout->addLayout(assetMetrics);
+    stackPageLayout->addWidget(m_assetsGroup);
+
+    m_lightCalibrationGroup = createCollapsibleGroup(
+        QString::fromUtf8("镜头与传感器"), true);
+    auto* lightCalibrationLayout = new QVBoxLayout(m_lightCalibrationGroup);
+    auto* linearNote = new QLabel(
+        QString::fromUtf8(
+            "当前场景使用 LibRaw 线性 16-bit 解码，并在处理阶段完成"
+            "黑电平、白平衡和星点色差校正。深空模式可在此设置"
+            " Dark、Flat、Bias 与 Dark Flat。"),
+        m_lightCalibrationGroup);
+    linearNote->setWordWrap(true);
+    setRole(linearNote, "note");
+    lightCalibrationLayout->addWidget(linearNote);
+    stackPageLayout->addWidget(m_lightCalibrationGroup);
+
     // Deep-sky calibration runs before alignment and stacking. The paths are
     // intentionally session-only because removable disks and capture folders
     // often move between launches.
@@ -181,8 +256,8 @@ void ParamsPanel::setupUI() {
 
     auto* calibrationNote = new QLabel(
         QString::fromUtf8(
-            "Light 主帧在左侧素材栏导入。\n"
-            "每类可使用一组 RAW 原片，或一个由 StarProcessor 生成的 "
+            "Light 主帧在底部素材胶片带导入。\n"
+            "每类可使用一组 RAW 原片，或一个由星炼生成的 "
             ".spmaster，二者自动互斥。\n"
             "生成 Master Flat 时，Bias 与 Dark Flat 选择一种；"
             "每组 RAW 至少 3 张，建议 10–20 张。"),
@@ -221,7 +296,9 @@ void ParamsPanel::setupUI() {
         row->addWidget(sourceLabel, 1);
 
         auto* rawButton = new QPushButton(QStringLiteral("RAW"), m_calibrationGroup);
-        rawButton->setFixedSize(48, 28);
+        rawButton->setProperty(StyleTokens::Properties::kSizeRole,
+                               "compactText");
+        rawButton->setFixedSize(54, 28);
         rawButton->setToolTip(
             QString::fromUtf8("导入%1 RAW 原片组：%2").arg(name, purpose));
         rawButton->setAccessibleName(rawButton->toolTip());
@@ -229,9 +306,11 @@ void ParamsPanel::setupUI() {
 
         auto* masterButton = new QPushButton(
             QString::fromUtf8("主帧"), m_calibrationGroup);
-        masterButton->setFixedSize(48, 28);
+        masterButton->setProperty(StyleTokens::Properties::kSizeRole,
+                                  "compactText");
+        masterButton->setFixedSize(54, 28);
         masterButton->setToolTip(QString::fromUtf8(
-            "导入 StarProcessor %1（仅支持 .spmaster）").arg(name));
+            "导入星炼 %1（仅支持 .spmaster）").arg(name));
         masterButton->setAccessibleName(masterButton->toolTip());
         row->addWidget(masterButton);
 
@@ -1064,7 +1143,7 @@ void ParamsPanel::setupUI() {
     m_outputPath = pathEdit;
     pathEdit->setReadOnly(true);
     displayOutputPath(
-        pathEdit, QDir::homePath() + "/StarProcessor/Output");
+        pathEdit, defaultOutputPath());
     outputForm->addWidget(pathEdit, 1, 1);
     auto* pathBtn = new QPushButton(m_outputGroup);
     pathBtn->setIcon(
@@ -1142,32 +1221,32 @@ void ParamsPanel::setupUI() {
             });
 
     // 预设操作只属于输出页，避免在堆栈和调整阶段形成持续抢眼的操作栏。
-    auto* btnBar = new QWidget(this);
-    btnBar->setObjectName("paramsFooter");
-    btnBar->setFixedHeight(44);
-    auto* btnLayout = new QHBoxLayout(btnBar);
+    m_footerBar = new QWidget(this);
+    m_footerBar->setObjectName("paramsFooter");
+    m_footerBar->setFixedHeight(52);
+    auto* btnLayout = new QHBoxLayout(m_footerBar);
     btnLayout->setContentsMargins(0, StyleTokens::Spacing::kBase, 0, 0);
     btnLayout->setSpacing(8);
 
-    m_restoreBtn = new QPushButton(QString::fromUtf8("恢复默认"), btnBar);
+    m_restoreBtn = new QPushButton(QString::fromUtf8("恢复默认"), m_footerBar);
     setButtonVariant(m_restoreBtn, "ghost");
     connect(m_restoreBtn, &QPushButton::clicked, this, &ParamsPanel::onRestoreDefaults);
     btnLayout->addWidget(m_restoreBtn);
 
     btnLayout->addStretch();
 
-    m_savePresetBtn = new QPushButton(QString::fromUtf8("保存预设"), btnBar);
+    m_savePresetBtn = new QPushButton(QString::fromUtf8("保存预设"), m_footerBar);
     setButtonVariant(m_savePresetBtn, "secondary");
     connect(m_savePresetBtn, &QPushButton::clicked, this, &ParamsPanel::onSavePreset);
     btnLayout->addWidget(m_savePresetBtn);
 
     outputPageLayout->addStretch(1);
-    outputPageLayout->addWidget(btnBar);
+    layout->addWidget(m_footerBar);
 
     // Debounce 定时器
     m_debounceTimer = new QTimer(this);
     m_debounceTimer->setSingleShot(true);
-    m_debounceTimer->setInterval(200);
+    m_debounceTimer->setInterval(StyleTokens::Motion::kPreviewDebounceMs);
     connect(m_debounceTimer, &QTimer::timeout, this, &ParamsPanel::emitParamsChanged);
 
     // 连接复选框和滑块的启用/禁用关系
@@ -1289,9 +1368,12 @@ void ParamsPanel::updateModifiedCameraColorControls() {
 }
 
 QGroupBox* ParamsPanel::createCollapsibleGroup(const QString& title, bool expanded) {
-    Q_UNUSED(expanded)
     auto* group = new QGroupBox(title, this);
-    group->setCheckable(false);
+    group->setCheckable(true);
+    group->setChecked(expanded);
+    group->setProperty("collapsible", true);
+    connect(group, &QGroupBox::toggled,
+            this, &ParamsPanel::onGroupToggled);
     return group;
 }
 
@@ -1307,16 +1389,8 @@ void ParamsPanel::onGroupToggled(bool checked) {
     auto* group = qobject_cast<QGroupBox*>(sender());
     if (!group) return;
 
-    // 切换展开/折叠图标
-    QString title = group->title();
-    if (checked) {
-        title.replace("▶", "▼");
-    } else {
-        title.replace("▼", "▶");
-    }
-    group->setTitle(title);
-
-    // 折叠时隐藏内部内容
+    // The 3px title indicator is styled globally; collapsing only changes the
+    // content visibility and never turns the section into a disabled form.
     for (auto* child : group->findChildren<QWidget*>()) {
         if (child != group) {
             child->setVisible(checked);
@@ -1324,7 +1398,7 @@ void ParamsPanel::onGroupToggled(bool checked) {
     }
     if (checked && group == m_stackGroup) updateSkyGroundControls();
     if (checked && group == m_calibrationGroup) updateCalibrationStatus();
-    group->setMinimumHeight(checked ? 0 : 28);
+    group->setMinimumHeight(checked ? 0 : 34);
 }
 
 void ParamsPanel::onSliderValueChanged(int value) {
@@ -1616,7 +1690,13 @@ void ParamsPanel::loadPreset() {
     bool starReduce = settings.value("starReduceEnabled", false).toBool();
     int starReduceStrength = settings.value("starReduceStrength", 70).toInt();
     int outputFormat = settings.value("outputFormat", 0).toInt();
-    QString outputPath = settings.value("outputPath", QDir::homePath() + "/StarProcessor/Output").toString();
+    QString outputPath = settings.value(
+        "outputPath", defaultOutputPath()).toString();
+    const QString migratedOutputPath = migrateDefaultOutputPath(outputPath);
+    if (migratedOutputPath != outputPath) {
+        outputPath = migratedOutputPath;
+        settings.setValue("outputPath", outputPath);
+    }
     int lastPresetIndex = settings.value("lastPresetIndex", 0).toInt();
 
     // 天地分离参数
@@ -1849,7 +1929,9 @@ void ParamsPanel::onPresetChanged(int index) {
             applyPreset(preset);
 
             // 恢复自定义预设中保存的其他参数
-            QString op = settings.value("outputPath", QDir::homePath() + "/StarProcessor/Output").toString();
+            QString op = settings.value(
+                "outputPath", defaultOutputPath()).toString();
+            op = migrateDefaultOutputPath(op);
             displayOutputPath(m_outputPath, op);
 
             // 天地分离参数
@@ -2014,6 +2096,7 @@ void ParamsPanel::applyPreset(const Preset& preset) {
 
 void ParamsPanel::applySceneProfile(ProcessingScene scene,
                                     bool resetParameters) {
+    m_scene = scene;
     const QList<Preset> builtins = PresetManager::builtinPresets();
     Preset preset;
     int presetIndex = 0;
@@ -2111,14 +2194,161 @@ void ParamsPanel::applySceneProfile(ProcessingScene scene,
         m_tabs->setTabVisible(1, !timelapse);
         m_tabs->setCurrentIndex(activeTab);
     }
+    showWorkflowStage(m_activeWorkflowStage);
     emitParamsChanged();
 }
 
+void ParamsPanel::showWorkflowStage(WorkflowStage stage) {
+    if (!m_tabs) return;
+    m_activeWorkflowStage = stage;
+
+    int tabIndex = 0;
+    QString kicker;
+    QString title;
+    switch (stage) {
+    case WorkflowStage::Assets:
+        kicker = QStringLiteral("01 / ASSETS");
+        title = QString::fromUtf8("素材与序列");
+        break;
+    case WorkflowStage::Calibration:
+        kicker = QStringLiteral("02 / CALIBRATE");
+        title = QString::fromUtf8("镜头与传感器");
+        break;
+    case WorkflowStage::Alignment:
+        kicker = QStringLiteral("03 / ALIGN");
+        title = QString::fromUtf8("星点与地景对齐");
+        break;
+    case WorkflowStage::Stacking:
+        kicker = QStringLiteral("04 / STACK");
+        title = QString::fromUtf8("帧合成");
+        break;
+    case WorkflowStage::Adjustment:
+        kicker = QStringLiteral("05 / ADJUST");
+        title = QString::fromUtf8("成片调整");
+        tabIndex = 1;
+        break;
+    case WorkflowStage::Output:
+        kicker = QStringLiteral("06 / OUTPUT");
+        title = QString::fromUtf8("输出与历史");
+        tabIndex = 2;
+        refreshRecentResults();
+        break;
+    }
+
+    if (m_stageKicker) m_stageKicker->setText(kicker);
+    if (m_titleLabel) m_titleLabel->setText(title);
+    m_tabs->setCurrentIndex(tabIndex);
+
+    const bool stackPage = tabIndex == 0;
+    const bool sequence = m_scene == ProcessingScene::StarTrail ||
+        m_scene == ProcessingScene::Timelapse;
+    if (m_assetsGroup) {
+        m_assetsGroup->setVisible(
+            stackPage && stage == WorkflowStage::Assets);
+    }
+    if (m_lightCalibrationGroup) {
+        m_lightCalibrationGroup->setVisible(
+            stackPage && stage == WorkflowStage::Calibration &&
+            m_scene != ProcessingScene::DeepSky);
+    }
+    if (m_calibrationGroup) {
+        m_calibrationGroup->setVisible(
+            stackPage && stage == WorkflowStage::Calibration &&
+            m_scene == ProcessingScene::DeepSky);
+    }
+    if (m_alignGroup) {
+        m_alignGroup->setVisible(
+            stackPage && stage == WorkflowStage::Alignment && !sequence);
+    }
+    if (m_stackGroup) {
+        m_stackGroup->setVisible(
+            stackPage && stage == WorkflowStage::Stacking && !sequence);
+    }
+    if (m_starTrailGroup) {
+        m_starTrailGroup->setVisible(
+            stackPage && stage == WorkflowStage::Stacking &&
+            m_scene == ProcessingScene::StarTrail);
+    }
+    if (m_timelapseGroup) {
+        m_timelapseGroup->setVisible(
+            stackPage && stage == WorkflowStage::Stacking &&
+            m_scene == ProcessingScene::Timelapse);
+    }
+    if (m_presetBar) {
+        m_presetBar->setVisible(stage == WorkflowStage::Adjustment &&
+                                m_scene != ProcessingScene::Timelapse);
+    }
+    if (m_footerBar) {
+        m_footerBar->setVisible(stage == WorkflowStage::Adjustment &&
+                                m_scene != ProcessingScene::Timelapse);
+    }
+    if (m_starReduceGroup) {
+        m_starReduceGroup->setVisible(
+            stage == WorkflowStage::Adjustment &&
+            m_scene != ProcessingScene::StarTrail);
+    }
+
+    QWidget* page = m_tabs->currentWidget();
+    if (!page || !isVisible()) return;
+    if (m_stageAnimation) {
+        m_stageAnimation->stop();
+        m_stageAnimation->deleteLater();
+        m_stageAnimation = nullptr;
+    }
+    if (m_animatedPage) {
+        m_animatedPage->setGraphicsEffect(nullptr);
+        m_animatedPage = nullptr;
+    }
+    auto* effect = new QGraphicsOpacityEffect(page);
+    page->setGraphicsEffect(effect);
+    auto* animation = new QPropertyAnimation(effect, "opacity", page);
+    m_stageAnimation = animation;
+    m_animatedPage = page;
+    animation->setDuration(StyleTokens::Motion::kBaseMs);
+    animation->setStartValue(0.35);
+    animation->setEndValue(1.0);
+    animation->setEasingCurve(QEasingCurve::OutCubic);
+    connect(animation, &QPropertyAnimation::finished, page,
+            [this, page, animation]() {
+                if (m_stageAnimation != animation) return;
+                page->setGraphicsEffect(nullptr);
+                m_stageAnimation = nullptr;
+                m_animatedPage = nullptr;
+                animation->deleteLater();
+            });
+    animation->start();
+}
+
+void ParamsPanel::setAssetSummary(int total, int available,
+                                  const QString& reference, bool ready) {
+    if (m_assetCountValue) {
+        m_assetCountValue->setText(
+            QStringLiteral("%1 / %2").arg(available).arg(total));
+    }
+    if (m_assetThresholdValue) {
+        m_assetThresholdValue->setText(
+            ready ? QString::fromUtf8("已满足")
+                  : QString::fromUtf8("素材不足"));
+        m_assetThresholdValue->setProperty(
+            StyleTokens::Properties::kStatusRole,
+            QString::fromLatin1(
+                ready ? StyleTokens::Properties::kSuccess
+                      : StyleTokens::Properties::kWarning));
+        m_assetThresholdValue->style()->unpolish(m_assetThresholdValue);
+        m_assetThresholdValue->style()->polish(m_assetThresholdValue);
+    }
+    if (m_assetReferenceValue) {
+        m_assetReferenceValue->setText(
+            reference.isEmpty() ? QString::fromUtf8("自动") : reference);
+        m_assetReferenceValue->setToolTip(reference);
+    }
+}
+
 void ParamsPanel::showCalibrationSettings() {
-    if (!m_tabs || !m_calibrationGroup || !m_calibrationGroup->isVisible()) {
+    if (!m_tabs || !m_calibrationGroup) {
         return;
     }
-    m_tabs->setCurrentIndex(0);
+    showWorkflowStage(WorkflowStage::Calibration);
     QWidget* ancestor = m_calibrationGroup->parentWidget();
     while (ancestor) {
         if (auto* scrollArea = qobject_cast<QScrollArea*>(ancestor)) {
@@ -2131,8 +2361,7 @@ void ParamsPanel::showCalibrationSettings() {
 
 void ParamsPanel::showOutputSettings() {
     if (!m_tabs) return;
-    refreshRecentResults();
-    m_tabs->setCurrentIndex(2);
+    showWorkflowStage(WorkflowStage::Output);
 }
 
 void ParamsPanel::setProcessingReport(const QString& report) {
@@ -2144,7 +2373,6 @@ void ParamsPanel::setProcessingReport(const QString& report) {
 void ParamsPanel::refreshRecentResults() {
     if (!m_recentResultsList || !m_recentResultsGroup) return;
     m_recentResultsList->clear();
-    QDir directory(outputPath());
     const QStringList filters = {
         QStringLiteral("*_stacked*.tif"),
         QStringLiteral("*_stacked*.tiff"),
@@ -2153,8 +2381,27 @@ void ParamsPanel::refreshRecentResults() {
         QStringLiteral("*_star_trail*.tif"),
         QStringLiteral("*_star_trail*.tiff")
     };
-    const QFileInfoList files = directory.entryInfoList(
-        filters, QDir::Files | QDir::Readable, QDir::Time);
+    QFileInfoList files;
+    QSet<QString> seenPaths;
+    const QStringList directories = {
+        outputPath(), legacyDefaultOutputPath()
+    };
+    for (const QString& path : directories) {
+        QDir directory(path);
+        if (!directory.exists()) continue;
+        const QFileInfoList candidates = directory.entryInfoList(
+            filters, QDir::Files | QDir::Readable, QDir::Time);
+        for (const QFileInfo& candidate : candidates) {
+            const QString identity = candidate.absoluteFilePath();
+            if (seenPaths.contains(identity)) continue;
+            seenPaths.insert(identity);
+            files.append(candidate);
+        }
+    }
+    std::sort(files.begin(), files.end(),
+              [](const QFileInfo& left, const QFileInfo& right) {
+                  return left.lastModified() > right.lastModified();
+              });
     const int count = std::min(5, static_cast<int>(files.size()));
     for (int index = 0; index < count; ++index) {
         const QFileInfo& file = files[index];
@@ -2364,7 +2611,8 @@ QString ParamsPanel::outputFormat() const {
 }
 
 QString ParamsPanel::outputPath() const {
-    return m_outputPath ? m_outputPath->text() : (QDir::homePath() + "/StarProcessor/Output");
+    return m_outputPath ? m_outputPath->text()
+                        : defaultOutputPath();
 }
 
 void ParamsPanel::setOutputPath(const QString& path) {
@@ -2620,7 +2868,7 @@ void ParamsPanel::importCalibrationMaster(QString& masterPath,
                                           bool confirmNormalizedFlat) {
     const QString selected = QFileDialog::getOpenFileName(
         this, QString::fromUtf8("选择 Master %1").arg(roleName), QString(),
-        QString::fromUtf8("StarProcessor Master (*.spmaster)"));
+        QString::fromUtf8("星炼 Master (*.spmaster)"));
     if (selected.isEmpty()) return;
 
     const QFileInfo selectedInfo(selected);
@@ -2629,7 +2877,7 @@ void ParamsPanel::importCalibrationMaster(QString& masterPath,
         QMessageBox::warning(
             this, QString::fromUtf8("不支持的 Master 文件"),
             QString::fromUtf8(
-                "Master 只能导入由 StarProcessor 生成的 .spmaster 文件。"));
+                "Master 只能导入由星炼生成的 .spmaster 文件。"));
         return;
     }
     const QString absolutePath = QDir::cleanPath(selectedInfo.absoluteFilePath());
@@ -2646,7 +2894,7 @@ void ParamsPanel::importCalibrationMaster(QString& masterPath,
         QMessageBox::information(
             this, QString::fromUtf8("Master Flat 校验"),
             QString::fromUtf8(
-                "StarProcessor 会读取 .spmaster 内的处理状态。只有已经"
+                "星炼会读取 .spmaster 内的处理状态。只有已经"
                 "完成偏移校准并按 CFA phase 分相归一化的 Master Flat "
                 "才能通过正式预检。"));
     }

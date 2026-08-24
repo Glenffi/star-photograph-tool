@@ -1,11 +1,16 @@
 #pragma once
 
+#include "ProcessingScene.h"
+
 #include <QIcon>
 #include <QWidget>
 
 class QAction;
 class QMenu;
 class QPushButton;
+class QComboBox;
+class QLabel;
+class QGraphicsDropShadowEffect;
 
 class Toolbar : public QWidget {
     Q_OBJECT
@@ -14,15 +19,13 @@ public:
     void enableProcess(bool enabled);
     void enableExport(bool enabled);
     void setProcessing(bool processing);
+    void setProgress(int value);
+    void setScene(ProcessingScene scene);
 
-    // Compatibility shim for the previous branded toolbar. Project status now
-    // belongs in the status bar and this method intentionally does nothing.
     void setProjectSummary(const QString& summary);
 
 signals:
-    // Kept while MainWindow migrates scene selection into ProjectPanel. The
-    // compact toolbar no longer exposes a scene control, so it is not emitted.
-    void sceneSelectorClicked();
+    void sceneChanged(ProcessingScene scene);
     void importFilesClicked();
     void importFolderClicked();
     void clearProjectClicked();
@@ -42,12 +45,15 @@ private:
     QPushButton* createActionButton(const QIcon& icon, const QString& text,
                                     const char* variant);
 
-    QPushButton* m_importFilesBtn = nullptr;
-    QPushButton* m_importFolderBtn = nullptr;
+    QComboBox* m_sceneCombo = nullptr;
+    QLabel* m_projectSummary = nullptr;
+    QGraphicsDropShadowEffect* m_processGlow = nullptr;
     QPushButton* m_exportResultBtn = nullptr;
     QPushButton* m_startProcessBtn = nullptr;
     QPushButton* m_overflowBtn = nullptr;
     QMenu* m_overflowMenu = nullptr;
+    QAction* m_importFilesAction = nullptr;
+    QAction* m_importFolderAction = nullptr;
     QAction* m_clearProjectAction = nullptr;
     QAction* m_settingsAction = nullptr;
     QAction* m_checkUpdatesAction = nullptr;
@@ -56,4 +62,5 @@ private:
     bool m_canProcess = false;
     bool m_canExport = false;
     bool m_processing = false;
+    int m_progress = 0;
 };

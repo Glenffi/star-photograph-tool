@@ -1,6 +1,8 @@
 #include "ui/ProjectPanel.h"
+#include "ui/StyleTokens.h"
 
 #include <QApplication>
+#include <QScrollArea>
 #include <QString>
 
 #include <cstdlib>
@@ -19,6 +21,15 @@ void check(bool condition, const char* message) {
 int main(int argc, char* argv[]) {
     QApplication app(argc, argv);
     ProjectPanel panel;
+    panel.resize(1000, StyleTokens::Layout::kFilmstripHeight);
+    check(panel.height() == StyleTokens::Layout::kFilmstripHeight,
+          "ProjectPanel should render as a fixed-height filmstrip");
+    auto* filmstrip = panel.findChild<QScrollArea*>(
+        QStringLiteral("filmstripScroll"));
+    check(filmstrip &&
+              filmstrip->horizontalScrollBarPolicy() == Qt::ScrollBarAsNeeded &&
+              filmstrip->verticalScrollBarPolicy() == Qt::ScrollBarAlwaysOff,
+          "Filmstrip should scroll horizontally without a vertical bar");
     panel.setScene(ProcessingScene::SingleFrame);
     check(panel.currentScene() == ProcessingScene::SingleFrame,
           "Scene selector should round-trip through ProjectPanel");

@@ -1,7 +1,11 @@
 #include "ui/ParamsPanel.h"
 
 #include <QApplication>
+#include <QDir>
 #include <QSettings>
+#include <QLabel>
+#include <QGroupBox>
+#include <QSlider>
 #include <QTemporaryDir>
 
 #include <cstdlib>
@@ -36,6 +40,8 @@ int main(int argc, char* argv[]) {
         settings.setValue("exposureTenths", 13);
         settings.setValue("starReduceEnabled", true);
         settings.setValue("starReduceStrength", 63);
+        settings.setValue("outputPath",
+                          QDir::homePath() + "/StarProcessor/Output");
         settings.sync();
     }
 
@@ -45,7 +51,8 @@ int main(int argc, char* argv[]) {
               panel.noiseReductionStrength() == 47 &&
               panel.basicAdjustmentOptions().exposureTenths == 13 &&
               panel.starReduceEnabled() &&
-              panel.starReduceStrength() == 63,
+              panel.starReduceStrength() == 63 &&
+              panel.outputPath() == QDir::homePath() + "/星炼/Output",
           "ParamsPanel should load persisted processing settings");
 
     panel.applySceneProfile(ProcessingScene::Nightscape, false);
@@ -58,6 +65,52 @@ int main(int argc, char* argv[]) {
     panel.recommendStackMethod(10);
     check(panel.stackMethod() == QStringLiteral("winsorized"),
           "Automatic recommendation must preserve a restored user choice");
+
+    panel.showWorkflowStage(WorkflowStage::Output);
+    auto* inspectorTitle = panel.findChild<QLabel*>(
+        QStringLiteral("inspectorTitle"));
+    check(inspectorTitle &&
+              inspectorTitle->text() == QString::fromUtf8("输出与历史"),
+          "Workflow stage selection should update the stage inspector");
+
+    panel.showWorkflowStage(WorkflowStage::Adjustment);
+    QGroupBox* basicGroup = nullptr;
+    for (QGroupBox* group : panel.findChildren<QGroupBox*>()) {
+        if (group->title() == QString::fromUtf8("基础调色")) {
+            basicGroup = group;
+            break;
+        }
+    }
+    check(basicGroup && basicGroup->isCheckable(),
+          "Inspector sections should be genuinely collapsible");
+    basicGroup->setChecked(false);
+    QApplication::processEvents();
+    check(basicGroup->minimumHeight() == 34,
+          "Collapsed inspector sections should keep only their heading");
+
+    QGroupBox* optimizeGroup = nullptr;
+    for (QGroupBox* group : panel.findChildren<QGroupBox*>()) {
+        if (group->title() == QString::fromUtf8("降噪与增强")) {
+            optimizeGroup = group;
+            break;
+        }
+    }
+    QSlider* disabledDependentSlider = nullptr;
+    if (optimizeGroup) {
+        for (QSlider* slider : optimizeGroup->findChildren<QSlider*>()) {
+            if (!slider->isEnabled()) {
+                disabledDependentSlider = slider;
+                break;
+            }
+        }
+    }
+    check(disabledDependentSlider,
+          "Adjustment fixture should contain a disabled dependent slider");
+    optimizeGroup->setChecked(false);
+    optimizeGroup->setChecked(true);
+    QApplication::processEvents();
+    check(!disabledDependentSlider->isEnabled(),
+          "Collapsing a section must preserve dependent control state");
 
     std::cout << "Params panel tests passed\n";
     return 0;

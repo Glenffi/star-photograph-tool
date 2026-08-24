@@ -27,6 +27,7 @@ public:
         int horizontalScroll = 0;
         int verticalScroll = 0;
         ComparisonMode comparisonMode = ComparisonMode::After;
+        double splitPosition = 0.5;
         bool maskOverlayVisible = false;
     };
 

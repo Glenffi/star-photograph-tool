@@ -1,6 +1,7 @@
 #include "UiAssets.h"
 
 #include <QImage>
+#include <QLinearGradient>
 #include <QPainter>
 #include <QPainterPath>
 #include <QPen>
@@ -244,6 +245,16 @@ QIcon UiAssets::icon(Glyph glyph, const QColor& color, int logicalSize) {
 }
 
 QPixmap UiAssets::logoMark(int logicalSize) {
+    QPixmap brand(QStringLiteral(":/branding/XingLian.png"));
+    if (!brand.isNull()) {
+        const int pixels = qMax(1, qRound(logicalSize * kDeviceScale));
+        QPixmap scaled = brand.scaled(
+            pixels, pixels, Qt::KeepAspectRatio,
+            Qt::SmoothTransformation);
+        scaled.setDevicePixelRatio(kDeviceScale);
+        return scaled;
+    }
+
     const int pixels = qMax(1, qRound(logicalSize * kDeviceScale));
     QImage image(pixels, pixels, QImage::Format_ARGB32_Premultiplied);
     image.fill(Qt::transparent);
@@ -252,18 +263,37 @@ QPixmap UiAssets::logoMark(int logicalSize) {
     painter.setRenderHint(QPainter::Antialiasing, true);
     painter.scale(pixels / 32.0, pixels / 32.0);
 
-    // Two offset frames express stack alignment; the star identifies the
-    // subject without relying on a generic camera silhouette.
-    painter.setPen(iconPen(QColor("#6FA8FF"), 1.8));
-    painter.setBrush(QColor(111, 168, 255, 34));
-    painter.drawRoundedRect(QRectF(8.0, 9.0, 17.0, 17.0), 4.0, 4.0);
-    painter.setPen(iconPen(QColor("#4ED7AE"), 2.0));
-    painter.setBrush(QColor(78, 215, 174, 28));
-    painter.drawRoundedRect(QRectF(5.0, 6.0, 17.0, 17.0), 4.0, 4.0);
+    QLinearGradient plate(0.0, 0.0, 0.0, 32.0);
+    plate.setColorAt(0.0, QColor("#292D2E"));
+    plate.setColorAt(1.0, QColor("#151819"));
+    painter.setPen(QPen(QColor("#414849"), 1.0));
+    painter.setBrush(plate);
+    painter.drawRoundedRect(QRectF(2.5, 2.5, 27.0, 27.0), 6.0, 6.0);
+
+    // Offset registration frames describe alignment and stacking. The open
+    // amber frame and cool registration point form the new XingLian mark
+    // without relying on a camera, magic wand or decorative star icon.
+    painter.setBrush(Qt::NoBrush);
+    painter.setPen(iconPen(QColor("#59605F"), 1.2));
+    painter.drawRoundedRect(QRectF(10.0, 9.0, 14.0, 14.0), 3.0, 3.0);
+    painter.setPen(iconPen(QColor("#777A74"), 1.2));
+    painter.drawRoundedRect(QRectF(8.0, 7.0, 14.0, 14.0), 3.0, 3.0);
+
+    painter.setPen(iconPen(QColor("#D5AA67"), 1.8));
+    QPainterPath front;
+    front.moveTo(18.5, 5.5);
+    front.lineTo(6.0, 5.5);
+    front.quadTo(4.5, 5.5, 4.5, 7.0);
+    front.lineTo(4.5, 19.5);
+    front.quadTo(4.5, 21.0, 6.0, 21.0);
+    front.lineTo(18.5, 21.0);
+    painter.drawPath(front);
+
+    painter.setPen(QPen(QColor(111, 168, 163, 80), 4.5));
+    painter.drawPoint(QPointF(14.0, 13.5));
     painter.setPen(Qt::NoPen);
-    painter.setBrush(QColor("#4ED7AE"));
-    painter.drawEllipse(QPointF(13.5, 14.5), 3.2, 3.2);
-    drawSpark(painter, QPointF(23.5, 7.5), 5.0, 1.4, QColor("#F2B65A"));
+    painter.setBrush(QColor("#78A8A2"));
+    painter.drawEllipse(QPointF(14.0, 13.5), 2.2, 2.2);
     painter.end();
 
     QPixmap pixmap = QPixmap::fromImage(image);

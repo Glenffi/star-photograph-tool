@@ -6,8 +6,8 @@
 
 namespace UiAssets {
 
-// A small, coherent icon vocabulary drawn by StarProcessor itself. Keeping the
-// geometry in code avoids platform-specific system glyphs and external SVGs.
+// A deliberately small operational icon vocabulary. Workflow, scenes and
+// parameter sections use typography instead of decorative pictograms.
 enum class Glyph {
     AddPhotos,
     Add,

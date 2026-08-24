@@ -6,7 +6,7 @@ if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Darwin" AND
         "Minimum supported macOS version")
 endif()
 
-project(StarProcessor VERSION 0.11.0 LANGUAGES CXX)
+project(StarProcessor VERSION 0.12.0 LANGUAGES CXX)
 
 include(CTest)
 option(BUILD_SAMPLE_TOOLS "Build local RAW sample regression tools" ON)
@@ -125,6 +125,7 @@ set(CORE_SOURCES
 
 set(APP_SOURCES
     src/main.cpp
+    resources/branding.qrc
     src/core/ThumbnailGenerator.cpp
     src/ui/ProjectPanel.cpp
     src/ui/PreviewPanel.cpp
@@ -135,6 +136,7 @@ set(APP_SOURCES
     src/ui/InspectorWidgets.cpp
     src/ui/ViewStateStore.cpp
     src/ui/TaskStatusBar.cpp
+    src/ui/WorkflowRail.cpp
     src/update/UpdateManager.cpp
 )
 
@@ -179,6 +181,7 @@ set(APP_HEADERS
     src/ui/InspectorWidgets.h
     src/ui/ViewStateStore.h
     src/ui/TaskStatusBar.h
+    src/ui/WorkflowRail.h
     src/ui/ProcessingScene.h
     src/update/UpdateManager.h
 )
@@ -276,9 +279,11 @@ if(BUILD_TESTING)
         tests/PreviewPanelTests.cpp
         src/ui/PreviewPanel.cpp
         src/ui/UiAssets.cpp
+        src/ui/StyleTokens.cpp
         src/ui/ViewStateStore.cpp
         src/ui/PreviewPanel.h
         src/ui/UiAssets.h
+        src/ui/StyleTokens.h
         src/ui/ViewStateStore.h)
     target_include_directories(StarProcessorPreviewTests PRIVATE
         ${CMAKE_SOURCE_DIR}/src)
@@ -298,7 +303,10 @@ if(BUILD_TESTING)
         src/ui/ViewStateStore.cpp
         src/ui/ViewStateStore.h
         src/ui/TaskStatusBar.cpp
-        src/ui/TaskStatusBar.h)
+        src/ui/TaskStatusBar.h
+        src/ui/WorkflowRail.cpp
+        src/ui/WorkflowRail.h
+        src/ui/ProcessingScene.h)
     target_include_directories(StarProcessorUiFoundationTests PRIVATE
         ${CMAKE_SOURCE_DIR}/src)
     target_link_libraries(StarProcessorUiFoundationTests PRIVATE Qt6::Widgets)
@@ -362,7 +370,7 @@ if(APPLE)
     set_target_properties(${PROJECT_NAME} PROPERTIES
         MACOSX_BUNDLE TRUE
         MACOSX_BUNDLE_INFO_PLIST "${CMAKE_SOURCE_DIR}/cmake/Info.plist.in"
-        MACOSX_BUNDLE_BUNDLE_NAME "StarProcessor"
+        MACOSX_BUNDLE_BUNDLE_NAME "星炼"
         MACOSX_BUNDLE_ICON_FILE "StarProcessor.icns"
         MACOSX_BUNDLE_BUNDLE_VERSION "${PROJECT_VERSION}"
         MACOSX_BUNDLE_SHORT_VERSION_STRING "${PROJECT_VERSION}"

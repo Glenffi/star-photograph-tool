@@ -157,7 +157,7 @@ jobs:
           $runtimeDlls | Copy-Item -Destination $packageRoot -Force
 
           @(
-            "StarProcessor ${{ steps.package.outputs.version }}"
+            "星炼 ${{ steps.package.outputs.version }}"
             "Platform: Windows x64"
             "Build: Release / MSVC 2022 / Qt $env:QT_VERSION"
             "Commit: $env:GITHUB_SHA"
@@ -227,7 +227,7 @@ jobs:
           gh release view $tag 2>$null
           if ($LASTEXITCODE -ne 0) {
             gh release create $tag `
-              --title "StarProcessor $tag" `
+              --title "星炼 $tag" `
               --generate-notes
             if ($LASTEXITCODE -ne 0) {
               gh release view $tag

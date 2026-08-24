@@ -334,7 +334,7 @@ ditto "${ROOT_DIR}/LICENSE" "${DMG_ROOT}/LICENSE.txt"
 ditto "${ROOT_DIR}/THIRD_PARTY_NOTICES.md" \
     "${DMG_ROOT}/THIRD_PARTY_NOTICES.md"
 printf '%s\n' \
-    "StarProcessor ${VERSION}" \
+    "星炼 ${VERSION}" \
     "Platform: macOS ${ARCH}" \
     "Requested deployment target: macOS ${DEPLOYMENT_TARGET}" \
     "Actual bundled minimum: macOS ${actual_deployment_target}" \
@@ -349,7 +349,7 @@ if [[ "${SKIP_DMG_CREATE:-0}" == "1" ]]; then
 fi
 
 hdiutil create \
-    -volname "StarProcessor ${VERSION}" \
+    -volname "星炼 ${VERSION}" \
     -srcfolder "${DMG_ROOT}" \
     -format UDZO \
     -ov "${DMG_PATH}"

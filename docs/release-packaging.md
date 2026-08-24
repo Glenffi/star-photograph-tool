@@ -1,6 +1,6 @@
-# StarProcessor 客户端打包
+# 星炼客户端打包
 
-本文说明 macOS 和 Windows 客户端的可重复构建、验证与发布流程。
+本文说明星炼 macOS 和 Windows 客户端的可重复构建、验证与发布流程。为兼容 v0.11.0 更新协议，发行文件名暂时保留 `StarProcessor` 前缀；安装后的显示名称、DMG 卷名和 Release 标题使用“星炼”。
 
 ## 发行物
 

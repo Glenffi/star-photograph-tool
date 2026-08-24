@@ -48,48 +48,12 @@ void refreshStyle(QWidget* widget) {
     widget->update();
 }
 
-UiAssets::Glyph sceneGlyph(ProcessingScene scene) {
-    switch (scene) {
-    case ProcessingScene::SingleFrame:
-        return UiAssets::Glyph::SingleFrame;
-    case ProcessingScene::Nightscape:
-        return UiAssets::Glyph::Nightscape;
-    case ProcessingScene::DeepSky:
-        return UiAssets::Glyph::DeepSky;
-    case ProcessingScene::SkyGround:
-        return UiAssets::Glyph::SkyGround;
-    case ProcessingScene::StarTrail:
-        return UiAssets::Glyph::StarTrail;
-    case ProcessingScene::Timelapse:
-        return UiAssets::Glyph::Timelapse;
-    }
-    return UiAssets::Glyph::Scenes;
-}
-
-QString sceneName(ProcessingScene scene) {
-    switch (scene) {
-    case ProcessingScene::SingleFrame:
-        return QString::fromUtf8("单张精修");
-    case ProcessingScene::Nightscape:
-        return QString::fromUtf8("银河星景");
-    case ProcessingScene::DeepSky:
-        return QString::fromUtf8("深空天体");
-    case ProcessingScene::SkyGround:
-        return QString::fromUtf8("天地分离");
-    case ProcessingScene::StarTrail:
-        return QString::fromUtf8("星轨合成");
-    case ProcessingScene::Timelapse:
-        return QString::fromUtf8("延时序列");
-    }
-    return QString();
-}
-
 class RoundedThumbnailLabel final : public QLabel {
 public:
     explicit RoundedThumbnailLabel(QWidget* parent = nullptr)
         : QLabel(parent) {
         setAttribute(Qt::WA_TransparentForMouseEvents);
-        setFixedSize(48, 48);
+        setFixedSize(96, 76);
     }
 
     void setThumbnail(const QPixmap& thumbnail) {
@@ -193,39 +157,29 @@ FileCard::FileCard(const FileItem& item, QWidget* parent)
     , m_isExcluded(item.isExcluded)
     , m_fileName(item.fileName)
 {
-    setFixedHeight(StyleTokens::Controls::kMaterialRowHeight);
-    setMinimumWidth(0);
+    setFixedSize(96, StyleTokens::Controls::kMaterialRowHeight);
     setAttribute(Qt::WA_Hover, true);
     setCursor(Qt::PointingHandCursor);
     setContextMenuPolicy(Qt::CustomContextMenu);
     setFocusPolicy(Qt::StrongFocus);
-
-    auto* layout = new QHBoxLayout(this);
-    layout->setContentsMargins(4, 4, 8, 4);
-    layout->setSpacing(8);
 
     m_thumbnailLabel = new RoundedThumbnailLabel(this);
     if (!item.thumbnail.isNull() && item.hasThumbnail) {
         static_cast<RoundedThumbnailLabel*>(m_thumbnailLabel)
             ->setThumbnail(item.thumbnail);
     }
-    layout->addWidget(m_thumbnailLabel, 0, Qt::AlignVCenter);
-
-    m_referenceDot = new ReferenceDot(m_thumbnailLabel);
-    m_referenceDot->move(m_thumbnailLabel->width() - 10, 2);
-
-    auto* textLayout = new QVBoxLayout();
-    textLayout->setSpacing(1);
-    textLayout->setContentsMargins(0, 0, 0, 0);
+    m_referenceDot = new ReferenceDot(this);
+    m_referenceDot->hide();
 
     m_nameLabel = new QLabel(this);
+    m_nameLabel->setAttribute(Qt::WA_TransparentForMouseEvents);
+    m_nameLabel->setObjectName(QStringLiteral("filmstripFileName"));
     m_nameLabel->setMinimumWidth(0);
     m_nameLabel->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
     m_nameLabel->setToolTip(item.fileName);
     setStringProperty(m_nameLabel, StyleTokens::Properties::kTextRole,
                       StyleTokens::Properties::kMono);
     m_nameLabel->setText(m_fileName);
-    textLayout->addWidget(m_nameLabel);
 
     m_metaLabel = new QLabel(this);
     m_metaLabel->setMinimumWidth(0);
@@ -233,17 +187,14 @@ FileCard::FileCard(const FileItem& item, QWidget* parent)
     m_metaLabel->setText(formatMetadata(item));
     setStringProperty(m_metaLabel, StyleTokens::Properties::kTextRole,
                       StyleTokens::Properties::kCaption);
-    textLayout->addWidget(m_metaLabel);
-
-    layout->addLayout(textLayout, 1);
+    m_metaLabel->hide();
 
     m_statusLabel = new QLabel(this);
-    m_statusLabel->setFixedWidth(52);
+    m_statusLabel->setAttribute(Qt::WA_TransparentForMouseEvents);
+    m_statusLabel->setObjectName(QStringLiteral("filmstripStatus"));
     m_statusLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
     setStringProperty(m_statusLabel, StyleTokens::Properties::kTextRole,
                       StyleTokens::Properties::kCaption);
-    layout->addWidget(m_statusLabel, 0, Qt::AlignVCenter);
-
     m_opacityEffect = new QGraphicsOpacityEffect(this);
     setGraphicsEffect(m_opacityEffect);
     updateStyle();
@@ -284,16 +235,16 @@ void FileCard::updateStyle() {
     setProperty("excluded", m_isExcluded);
 
     if (m_isReference && m_isExcluded) {
-        m_statusLabel->setText(QString::fromUtf8("参考·排除"));
+        m_statusLabel->setText(QStringLiteral("REF / OUT"));
     } else if (m_isReference) {
-        m_statusLabel->setText(QString::fromUtf8("参考"));
+        m_statusLabel->setText(QStringLiteral("REF"));
     } else if (m_isExcluded) {
-        m_statusLabel->setText(QString::fromUtf8("已排除"));
+        m_statusLabel->setText(QStringLiteral("OUT"));
     } else {
         m_statusLabel->setText("");
     }
 
-    m_referenceDot->setVisible(m_isReference);
+    m_referenceDot->setVisible(false);
     m_opacityEffect->setOpacity(m_isExcluded ? 0.4 : 1.0);
 
     QString accessible = m_fileName + QString::fromUtf8("，") +
@@ -362,11 +313,20 @@ void FileCard::paintEvent(QPaintEvent* event) {
     if (m_selected) {
         QColor selection = StyleTokens::Colors::fromHex(
             StyleTokens::Colors::kAccent);
-        selection.setAlpha(31);
+        selection.setAlpha(22);
         painter.fillRect(rect(), selection);
-        painter.fillRect(QRect(0, 0, 2, height()),
-                         StyleTokens::Colors::fromHex(
-                             StyleTokens::Colors::kAccent));
+        for (int inset = 0; inset < 3; ++inset) {
+            QColor edge = StyleTokens::Colors::fromHex(
+                StyleTokens::Colors::kAccentStrong);
+            edge.setAlpha(170 - inset * 52);
+            painter.setPen(QPen(edge, 1.0));
+            painter.setBrush(Qt::NoBrush);
+            painter.drawRoundedRect(
+                QRectF(rect()).adjusted(inset + 0.5, inset + 0.5,
+                                        -inset - 0.5, -inset - 0.5),
+                StyleTokens::Radius::kSmall,
+                StyleTokens::Radius::kSmall);
+        }
     } else if (m_hovered) {
         painter.fillRect(rect(), StyleTokens::Colors::fromHex(
                                      StyleTokens::Colors::kBackgroundOverlay));
@@ -382,6 +342,14 @@ void FileCard::paintEvent(QPaintEvent* event) {
 
 void FileCard::resizeEvent(QResizeEvent* event) {
     QWidget::resizeEvent(event);
+    if (m_thumbnailLabel) m_thumbnailLabel->setGeometry(rect());
+    if (m_nameLabel) {
+        m_nameLabel->setGeometry(5, height() - 21,
+                                 std::max(1, width() - 10), 16);
+    }
+    if (m_statusLabel) {
+        m_statusLabel->setGeometry(width() - 48, 4, 43, 16);
+    }
     updateElidedName();
 }
 
@@ -463,18 +431,16 @@ void ProjectPanel::setupUI() {
     setStringProperty(this, StyleTokens::Properties::kUiRole,
                       StyleTokens::Properties::kPanel);
 
-    auto* layout = new QVBoxLayout(this);
+    setFixedHeight(StyleTokens::Layout::kFilmstripHeight);
+
+    auto* layout = new QHBoxLayout(this);
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(0);
 
     layout->addWidget(setupHeader());
 
-    auto* headerSeparator = new QFrame(this);
-    setStringProperty(headerSeparator, StyleTokens::Properties::kUiRole,
-                      StyleTokens::Properties::kSeparator);
-    layout->addWidget(headerSeparator);
-
     auto* contentWidget = new QWidget(this);
+    contentWidget->setObjectName(QStringLiteral("filmstripContent"));
     setStringProperty(contentWidget, StyleTokens::Properties::kUiRole,
                       StyleTokens::Properties::kPanel);
     auto* contentLayout = new QVBoxLayout(contentWidget);
@@ -482,7 +448,7 @@ void ProjectPanel::setupUI() {
     contentLayout->setSpacing(0);
 
     setupEmptyState();
-    contentLayout->addWidget(m_emptyState, 1, Qt::AlignCenter);
+    contentLayout->addWidget(m_emptyState, 1);
 
     setupFileList();
     contentLayout->addWidget(m_scrollArea, 1);
@@ -490,16 +456,8 @@ void ProjectPanel::setupUI() {
 
     layout->addWidget(contentWidget, 1);
 
-    m_calibrationSummary = setupCalibrationSummary();
-    m_calibrationSummary->setVisible(false);
-    layout->addWidget(m_calibrationSummary);
-
     setupBottomBar();
-    auto* bottomSeparator = new QFrame(this);
-    setStringProperty(bottomSeparator, StyleTokens::Properties::kUiRole,
-                      StyleTokens::Properties::kSeparator);
-    layout->addWidget(bottomSeparator);
-    layout->addWidget(m_bottomLabel);
+    m_bottomLabel->hide();
 
     m_contextMenu = new QMenu(this);
 
@@ -533,29 +491,23 @@ void ProjectPanel::setupUI() {
 
 QWidget* ProjectPanel::setupHeader() {
     auto* header = new QWidget(this);
-    header->setObjectName("projectHeader");
+    header->setObjectName(QStringLiteral("filmstripHeader"));
+    header->setFixedWidth(112);
     setStringProperty(header, StyleTokens::Properties::kUiRole,
                       StyleTokens::Properties::kPanel);
 
     auto* headerLayout = new QVBoxLayout(header);
-    headerLayout->setContentsMargins(
-        StyleTokens::Spacing::kPanelPadding, 12,
-        StyleTokens::Spacing::kPanelPadding, 12);
-    headerLayout->setSpacing(StyleTokens::Spacing::kControlGap);
+    headerLayout->setContentsMargins(13, 12, 10, 10);
+    headerLayout->setSpacing(6);
 
     auto* titleRow = new QHBoxLayout();
     titleRow->setContentsMargins(0, 0, 0, 0);
     titleRow->setSpacing(StyleTokens::Spacing::kBase);
 
-    auto* titleLabel = new QLabel(QString::fromUtf8("素材"), header);
-    setStringProperty(titleLabel, StyleTokens::Properties::kTextRole,
-                      StyleTokens::Properties::kTitle);
+    auto* titleLabel = new QLabel(QStringLiteral("LIGHT"), header);
+    titleLabel->setObjectName(QStringLiteral("filmstripKicker"));
     titleRow->addWidget(titleLabel);
 
-    m_countLabel = new QLabel(QString::fromUtf8("0 张"), header);
-    setStringProperty(m_countLabel, StyleTokens::Properties::kTextRole,
-                      StyleTokens::Properties::kCaption);
-    titleRow->addWidget(m_countLabel);
     titleRow->addStretch();
 
     m_headerImportBtn = new QPushButton(header);
@@ -575,35 +527,18 @@ QWidget* ProjectPanel::setupHeader() {
     titleRow->addWidget(m_headerImportBtn);
     headerLayout->addLayout(titleRow);
 
-    m_sceneCombo = new QComboBox(header);
-    m_sceneCombo->setAccessibleName(QString::fromUtf8("处理场景"));
-    m_sceneCombo->setToolTip(QString::fromUtf8("选择处理场景"));
-    const QColor iconColor = StyleTokens::Colors::fromHex(
-        StyleTokens::Colors::kTextSecondary);
-    const ProcessingScene scenes[] = {
-        ProcessingScene::SingleFrame,
-        ProcessingScene::Nightscape,
-        ProcessingScene::DeepSky,
-        ProcessingScene::SkyGround,
-        ProcessingScene::StarTrail,
-        ProcessingScene::Timelapse
-    };
-    for (const ProcessingScene scene : scenes) {
-        m_sceneCombo->addItem(
-            UiAssets::icon(sceneGlyph(scene), iconColor), sceneName(scene),
-            static_cast<int>(scene));
-    }
-    m_sceneCombo->setCurrentIndex(
-        m_sceneCombo->findData(static_cast<int>(m_scene)));
-    connect(m_sceneCombo, &QComboBox::currentIndexChanged,
-            this, [this](int index) {
-                if (index < 0) return;
-                m_scene = static_cast<ProcessingScene>(
-                    m_sceneCombo->itemData(index).toInt());
-                updateBottomBar();
-                emit sceneChanged(m_scene);
-            });
-    headerLayout->addWidget(m_sceneCombo);
+    m_countLabel = new QLabel(QStringLiteral("0 / 0"), header);
+    m_countLabel->setObjectName(QStringLiteral("filmstripCount"));
+    setStringProperty(m_countLabel, StyleTokens::Properties::kTextRole,
+                      StyleTokens::Properties::kTitle);
+    headerLayout->addWidget(m_countLabel);
+    auto* hint = new QLabel(QString::fromUtf8("点击查看 · 空格排除"), header);
+    hint->setToolTip(hint->text());
+    hint->setText(QString::fromUtf8("空格排除"));
+    setStringProperty(hint, StyleTokens::Properties::kTextRole,
+                      StyleTokens::Properties::kCaption);
+    headerLayout->addWidget(hint);
+    headerLayout->addStretch(1);
     return header;
 }
 
@@ -676,20 +611,16 @@ void ProjectPanel::setupEmptyState() {
     setStringProperty(m_emptyState, StyleTokens::Properties::kUiRole,
                       StyleTokens::Properties::kPanel);
     m_emptyLayout = new QVBoxLayout(m_emptyState);
-    m_emptyLayout->setContentsMargins(
-        StyleTokens::Spacing::kPanelPadding,
-        StyleTokens::Spacing::kPanelPadding,
-        StyleTokens::Spacing::kPanelPadding,
-        StyleTokens::Spacing::kPanelPadding);
-    m_emptyLayout->setSpacing(StyleTokens::Spacing::kBase);
+    m_emptyLayout->setContentsMargins(20, 10, 20, 10);
+    m_emptyLayout->setSpacing(4);
     m_emptyLayout->setAlignment(Qt::AlignCenter);
 
     auto* promptLabel = new QLabel(
-        QString::fromUtf8("拖入一组 RAW 开始"), m_emptyState);
+        QString::fromUtf8("暂无素材 · 可拖入"), m_emptyState);
     setStringProperty(promptLabel, StyleTokens::Properties::kTextRole,
                       StyleTokens::Properties::kSecondary);
     promptLabel->setAlignment(Qt::AlignCenter);
-    promptLabel->setWordWrap(true);
+    promptLabel->setWordWrap(false);
     m_emptyLayout->addWidget(promptLabel);
 
     m_emptyImportBtn = new QPushButton(QString::fromUtf8("选择文件"), m_emptyState);
@@ -699,14 +630,16 @@ void ProjectPanel::setupEmptyState() {
     m_emptyImportBtn->setAccessibleName(
         QString::fromUtf8("选择 RAW 素材文件"));
     connect(m_emptyImportBtn, &QPushButton::clicked, this, &ProjectPanel::onImportClicked);
-    m_emptyLayout->addWidget(m_emptyImportBtn, 0, Qt::AlignCenter);
+    m_emptyImportBtn->hide();
 }
 
 void ProjectPanel::setupFileList() {
     m_scrollArea = new QScrollArea(this);
     m_scrollArea->setFrameShape(QFrame::NoFrame);
     m_scrollArea->setWidgetResizable(true);
-    m_scrollArea->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    m_scrollArea->setObjectName(QStringLiteral("filmstripScroll"));
+    m_scrollArea->setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    m_scrollArea->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     setStringProperty(m_scrollArea, StyleTokens::Properties::kUiRole,
                       StyleTokens::Properties::kPanel);
     setStringProperty(m_scrollArea->viewport(),
@@ -714,11 +647,15 @@ void ProjectPanel::setupFileList() {
                       StyleTokens::Properties::kPanel);
 
     m_listContainer = new QWidget();
+    m_listContainer->setObjectName(QStringLiteral("filmstripContent"));
+    m_listContainer->setSizePolicy(QSizePolicy::Minimum,
+                                   QSizePolicy::Fixed);
     setStringProperty(m_listContainer, StyleTokens::Properties::kUiRole,
                       StyleTokens::Properties::kPanel);
-    m_listLayout = new QVBoxLayout(m_listContainer);
-    m_listLayout->setContentsMargins(8, 4, 8, 4);
-    m_listLayout->setSpacing(0);
+    m_listLayout = new QHBoxLayout(m_listContainer);
+    m_listLayout->setSizeConstraint(QLayout::SetMinimumSize);
+    m_listLayout->setContentsMargins(10, 9, 10, 9);
+    m_listLayout->setSpacing(7);
     m_listLayout->addStretch();
 
     m_scrollArea->setWidget(m_listContainer);
@@ -1100,7 +1037,9 @@ void ProjectPanel::updateBottomBar() {
                                   : StyleTokens::Properties::kWarning));
     refreshStyle(m_bottomLabel);
     if (m_countLabel) {
-        m_countLabel->setText(QString::fromUtf8("%1 张").arg(total));
+        m_countLabel->setText(QStringLiteral("%1 / %2")
+                                  .arg(available)
+                                  .arg(total));
     }
 }
 

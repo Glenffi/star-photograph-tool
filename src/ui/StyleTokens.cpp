@@ -132,16 +132,126 @@ QWidget#paramsTitleBar,
 QWidget#paramsPresetBar,
 QWidget#paramsFooter,
 QStatusBar {
-    background-color: {{BG_RAISED}};
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                stop:0 #292D2E, stop:1 {{BG_BASE}});
     border: none;
 }
 QWidget#paramsPanel,
 QWidget#projectPanel {
-    background-color: {{BG_BASE}};
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                                stop:0 {{BG_BASE}}, stop:1 {{BG_RAISED}});
     border: none;
 }
 QWidget#mainToolbar {
     border-bottom: 1px solid {{LINE_SUBTLE}};
+}
+QLabel#brandName {
+    color: {{TEXT_PRIMARY}};
+    font-size: 16px;
+    font-weight: 600;
+}
+QLabel#brandTag,
+QLabel#toolbarKicker {
+    color: {{TEXT_FAINT}};
+    font-family: {{FONT_MONO}};
+    font-size: 8px;
+    letter-spacing: 1px;
+}
+QLabel#toolbarProjectSummary {
+    min-width: 120px;
+    padding-left: 16px;
+    color: {{TEXT_SECONDARY}};
+    border-left: 1px solid {{LINE_SUBTLE}};
+    font-size: {{TYPE_BODY}}px;
+}
+QFrame#toolbarVerticalDivider {
+    background-color: {{LINE_STRONG}};
+    border: none;
+}
+QComboBox#toolbarSceneCombo {
+    min-height: 26px;
+    max-height: 26px;
+    padding-left: 0;
+    background-color: transparent;
+    border: none;
+    color: {{TEXT_PRIMARY}};
+    font-size: {{TYPE_BODY}}px;
+    font-weight: 600;
+}
+QComboBox#toolbarSceneCombo:hover,
+QComboBox#toolbarSceneCombo:focus {
+    border: none;
+    color: {{ACCENT_STRONG}};
+}
+QWidget#workflowRail {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                                stop:0 #171A1B, stop:1 {{BG_BASE}});
+    border-right: 1px solid {{LINE_SUBTLE}};
+}
+QLabel#workflowKicker {
+    min-height: 18px;
+    max-height: 18px;
+    color: {{TEXT_FAINT}};
+    background-color: transparent;
+    font-family: {{FONT_MONO}};
+    font-size: 8px;
+    letter-spacing: 1px;
+}
+QWidget#filmstripHeader,
+QWidget#filmstripContent,
+QScrollArea#filmstripScroll,
+QScrollArea#filmstripScroll QWidget#qt_scrollarea_viewport {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                stop:0 #191D1E, stop:1 #131617);
+    border: none;
+}
+QWidget#filmstripHeader {
+    border-right: 1px solid {{LINE_SUBTLE}};
+}
+QLabel#filmstripKicker {
+    color: {{TEXT_FAINT}};
+    font-family: {{FONT_MONO}};
+    font-size: 8px;
+    letter-spacing: 1px;
+}
+QLabel#filmstripCount {
+    color: {{TEXT_PRIMARY}};
+    font-family: {{FONT_MONO}};
+    font-size: 13px;
+    font-weight: 600;
+}
+QLabel#filmstripFileName {
+    padding: 0 4px;
+    color: {{TEXT_PRIMARY}};
+    background-color: #090B0CC8;
+    border-radius: 3px;
+    font-family: {{FONT_MONO}};
+    font-size: 8px;
+}
+QLabel#filmstripStatus {
+    padding: 0 3px;
+    color: {{ACCENT_STRONG}};
+    background-color: #090B0CD9;
+    border-radius: 3px;
+    font-family: {{FONT_MONO}};
+    font-size: 7px;
+}
+QWidget#previewCanvas {
+    background-color: {{BG_CANVAS}};
+}
+QLabel#previewImageLabel {
+    border: 1px solid {{ACCENT_DIM}};
+}
+QLabel#inspectorKicker {
+    color: {{ACCENT_STRONG}};
+    font-family: {{FONT_MONO}};
+    font-size: 9px;
+    letter-spacing: 1px;
+}
+QLabel#inspectorTitle {
+    color: {{TEXT_PRIMARY}};
+    font-size: 17px;
+    font-weight: 600;
 }
 QStatusBar {
     min-height: {{STATUS_HEIGHT}}px;
@@ -254,12 +364,14 @@ QToolButton:disabled {
 QPushButton[variant="primary"],
 QToolButton[variant="primary"] {
     color: {{ACTION_TEXT}};
-    background-color: {{ACTION}};
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                stop:0 {{ACTION_HOVER}}, stop:1 {{ACTION}});
     border-color: {{ACTION}};
 }
 QPushButton[variant="primary"]:hover,
 QToolButton[variant="primary"]:hover {
-    background-color: {{ACTION_HOVER}};
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                stop:0 #EAC98F, stop:1 {{ACTION_HOVER}});
     border-color: {{ACTION_HOVER}};
 }
 QPushButton[variant="primary"]:pressed,
@@ -281,7 +393,8 @@ QToolButton[variant="primary"]:disabled {
 QPushButton[variant="secondary"],
 QToolButton[variant="secondary"] {
     color: {{TEXT_PRIMARY}};
-    background-color: transparent;
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                stop:0 #2A2E2F, stop:1 {{BG_RAISED}});
     border-color: {{LINE_STRONG}};
 }
 QPushButton[variant="secondary"]:disabled,
@@ -344,6 +457,10 @@ QToolButton[sizeRole="dialog"] {
     min-height: {{DIALOG_CONTROL_HEIGHT}}px;
     max-height: {{DIALOG_CONTROL_HEIGHT}}px;
 }
+QPushButton[sizeRole="compactText"],
+QToolButton[sizeRole="compactText"] {
+    padding: 0 6px;
+}
 
 QLineEdit,
 QPlainTextEdit,
@@ -358,7 +475,8 @@ QComboBox {
     max-height: {{CONTROL_HEIGHT}}px;
     padding: 0 {{INPUT_PADDING}}px;
     color: {{TEXT_PRIMARY}};
-    background-color: {{BG_RAISED}};
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                stop:0 #292D2E, stop:1 {{BG_RAISED}});
     border: 1px solid {{LINE_SUBTLE}};
     border-radius: {{RADIUS_SMALL}}px;
     selection-color: {{TEXT_PRIMARY}};
@@ -483,13 +601,15 @@ QSlider::handle:horizontal {
     width: {{SLIDER_HANDLE}}px;
     height: {{SLIDER_HANDLE}}px;
     margin: -5px 0;
-    background-color: {{BG_BASE}};
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                stop:0 {{ACCENT_STRONG}}, stop:1 {{ACTION_PRESSED}});
     border: 2px solid {{ACCENT}};
     border-radius: 6px;
 }
 QSlider::handle:horizontal:hover,
 QSlider::handle:horizontal:pressed {
-    background-color: {{ACCENT}};
+    background-color: {{ACCENT_STRONG}};
+    border-color: {{ACCENT_STRONG}};
 }
 QSlider::groove:horizontal:disabled,
 QSlider::sub-page:horizontal:disabled {
@@ -541,6 +661,27 @@ QGroupBox::title {
     padding: 0 8px 0 0;
     color: {{TEXT_PRIMARY}};
     background-color: {{BG_BASE}};
+}
+QGroupBox[collapsible="true"]::indicator {
+    width: 3px;
+    height: 3px;
+    margin-right: 8px;
+    background-color: {{TEXT_FAINT}};
+    border: none;
+    border-radius: 2px;
+}
+QGroupBox[collapsible="true"]::indicator:checked {
+    background-color: {{ACCENT}};
+}
+QLabel[inspectorRole="value"] {
+    min-width: {{SLIDER_VALUE_WIDTH}}px;
+    max-width: {{SLIDER_VALUE_WIDTH}}px;
+    color: {{TEXT_PRIMARY}};
+    font-family: {{FONT_MONO}};
+    font-size: {{TYPE_MONO}}px;
+}
+QLabel[inspectorRole="muted"] {
+    color: {{TEXT_SECONDARY}};
 }
 
 QListView,
@@ -727,6 +868,8 @@ QScrollBar::sub-page {
                  Controls::kSliderTrackHeight);
     replaceToken(styleSheet, "{{SLIDER_HANDLE}}",
                  Controls::kSliderHandleSize);
+    replaceToken(styleSheet, "{{SLIDER_VALUE_WIDTH}}",
+                 Controls::kSliderValueWidth);
     replaceToken(styleSheet, "{{TOGGLE_WIDTH}}", Controls::kToggleWidth);
     replaceToken(styleSheet, "{{TOGGLE_HEIGHT}}", Controls::kToggleHeight);
     replaceToken(styleSheet, "{{PROGRESS_HEIGHT}}",

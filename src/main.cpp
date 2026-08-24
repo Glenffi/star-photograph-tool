@@ -49,6 +49,7 @@
 #include "ui/ProcessingScene.h"
 #include "ui/StyleTokens.h"
 #include "ui/TaskStatusBar.h"
+#include "ui/WorkflowRail.h"
 #include "update/UpdateManager.h"
 
 #include "core/RawImageLoader.h"
@@ -64,7 +65,7 @@ class MainWindow : public QMainWindow {
 
 public:
     MainWindow(QWidget* parent = nullptr) : QMainWindow(parent) {
-        setWindowTitle("StarProcessor — 星空摄影师 RAW 处理工具");
+        setWindowTitle(QString::fromUtf8("星炼 — 星空影像工作台"));
         resize(1400, 900);
         setMinimumSize(920, 540);
         setAcceptDrops(true);
@@ -111,7 +112,13 @@ public:
     }
 
     void selectStartupInspectorOutput() {
-        if (m_paramsPanel) m_paramsPanel->showOutputSettings();
+        if (m_workflowRail) {
+            m_workflowRail->setCurrentStage(WorkflowStage::Output, true);
+        }
+    }
+
+    void selectStartupWorkflowStage(WorkflowStage stage) {
+        if (m_workflowRail) m_workflowRail->setCurrentStage(stage, true);
     }
 
     void loadStartupHistory(const QString& path) {
@@ -285,17 +292,32 @@ private:
         m_toolbar = new Toolbar(this);
         mainLayout->addWidget(m_toolbar);
 
-        // 主内容区：素材、预览、参数三栏。
-        m_contentSplitter = new QSplitter(Qt::Horizontal, centralWidget);
+        auto* workspace = new QWidget(centralWidget);
+        workspace->setObjectName(QStringLiteral("mainWorkspace"));
+        auto* workspaceLayout = new QHBoxLayout(workspace);
+        workspaceLayout->setContentsMargins(0, 0, 0, 0);
+        workspaceLayout->setSpacing(0);
+
+        m_workflowRail = new WorkflowRail(workspace);
+        workspaceLayout->addWidget(m_workflowRail);
+
+        // The image canvas keeps the largest share; the filmstrip is part of
+        // the editor column instead of competing with it as a left panel.
+        m_contentSplitter = new QSplitter(Qt::Horizontal, workspace);
         m_contentSplitter->setHandleWidth(1);
 
-        m_projectPanel = new ProjectPanel(m_contentSplitter);
-        m_projectPanel->setMinimumWidth(StyleTokens::Layout::kLeftPanelMinimumWidth);
-        m_projectPanel->setMaximumWidth(StyleTokens::Layout::kLeftPanelMaximumWidth);
-        m_contentSplitter->addWidget(m_projectPanel);
+        auto* editorColumn = new QWidget(m_contentSplitter);
+        editorColumn->setObjectName(QStringLiteral("editorColumn"));
+        auto* editorLayout = new QVBoxLayout(editorColumn);
+        editorLayout->setContentsMargins(0, 0, 0, 0);
+        editorLayout->setSpacing(0);
 
-        m_previewPanel = new PreviewPanel(m_contentSplitter);
-        m_contentSplitter->addWidget(m_previewPanel);
+        m_previewPanel = new PreviewPanel(editorColumn);
+        editorLayout->addWidget(m_previewPanel, 1);
+
+        m_projectPanel = new ProjectPanel(editorColumn);
+        editorLayout->addWidget(m_projectPanel);
+        m_contentSplitter->addWidget(editorColumn);
 
         m_paramsPanel = new ParamsPanel(m_contentSplitter);
         m_paramsPanel->setMinimumWidth(StyleTokens::Layout::kRightPanelMinimumWidth);
@@ -303,26 +325,23 @@ private:
         m_contentSplitter->addWidget(m_paramsPanel);
 
         QSettings settings("StarProcessor", "App");
-        const int leftWidth = std::clamp(
-            settings.value("ui/leftPanelWidth",
-                           StyleTokens::Layout::kLeftPanelWidth).toInt(),
-            StyleTokens::Layout::kLeftPanelMinimumWidth,
-            StyleTokens::Layout::kLeftPanelMaximumWidth);
         const int rightWidth = std::clamp(
             settings.value("ui/rightPanelWidth",
                            StyleTokens::Layout::kRightPanelWidth).toInt(),
             StyleTokens::Layout::kRightPanelMinimumWidth,
             StyleTokens::Layout::kRightPanelMaximumWidth);
-        m_contentSplitter->setSizes({leftWidth, 840, rightWidth});
+        m_contentSplitter->setSizes({960, rightWidth});
+        m_contentSplitter->setStretchFactor(0, 1);
+        m_contentSplitter->setStretchFactor(1, 0);
         connect(m_contentSplitter, &QSplitter::splitterMoved,
                 this, [this](int, int) {
                     const QList<int> sizes = m_contentSplitter->sizes();
-                    if (sizes.size() != 3) return;
+                    if (sizes.size() != 2) return;
                     QSettings settings("StarProcessor", "App");
-                    settings.setValue("ui/leftPanelWidth", sizes[0]);
-                    settings.setValue("ui/rightPanelWidth", sizes[2]);
+                    settings.setValue("ui/rightPanelWidth", sizes[1]);
                 });
-        mainLayout->addWidget(m_contentSplitter, 1);
+        workspaceLayout->addWidget(m_contentSplitter, 1);
+        mainLayout->addWidget(workspace, 1);
     }
 
     QString sceneName() const {
@@ -362,6 +381,14 @@ private:
             m_paramsPanel->applySceneProfile(scene, resetParameters);
         }
         m_projectPanel->setScene(scene);
+        m_toolbar->setScene(scene);
+        m_workflowRail->setScene(scene);
+        for (WorkflowStage stage : {
+                 WorkflowStage::Alignment, WorkflowStage::Stacking,
+                 WorkflowStage::Adjustment, WorkflowStage::Output}) {
+            m_workflowRail->setStageComplete(stage, false);
+            m_workflowRail->setStageWarning(stage, false);
+        }
         QSettings("StarProcessor", "App").setValue(
             "ui/processingScene", static_cast<int>(scene));
         updateProjectReadiness();
@@ -394,11 +421,24 @@ private:
                                m_paramsPanel->masterDarkFlatPath()),
             m_paramsPanel->deepSkyCalibrationInputsComplete());
         m_toolbar->enableProcess(count >= required && calibrationReady);
+        m_workflowRail->setStageComplete(
+            WorkflowStage::Assets, count >= required);
+        m_workflowRail->setStageComplete(
+            WorkflowStage::Calibration,
+            count >= required && calibrationReady);
+        m_workflowRail->setStageWarning(
+            WorkflowStage::Assets, count > 0 && count < required);
+        m_workflowRail->setStageWarning(
+            WorkflowStage::Calibration, count >= required && !calibrationReady);
         m_toolbar->setProjectSummary(
             count > 0
                 ? QString::fromUtf8("%1 · %2 张素材").arg(sceneName()).arg(count)
                 : QString::fromUtf8("%1 · 等待素材").arg(sceneName()));
         m_paramsPanel->updateRefFrameList(m_projectPanel->includedFilePaths());
+        m_paramsPanel->setAssetSummary(
+            m_projectPanel->totalFileCount(), count,
+            QFileInfo(m_projectPanel->referenceFramePath()).fileName(),
+            count >= required);
 
         if (count >= required && calibrationReady) {
             if ((m_scene == ProcessingScene::Nightscape ||
@@ -566,7 +606,56 @@ private:
     }
 
     void setWorkflowStage(int stage, const QString& status, bool complete = false) {
-        Q_UNUSED(stage)
+        const int normalizedStage = std::clamp(stage, 0, 3);
+        WorkflowStage visibleStage = WorkflowStage::Adjustment;
+        const bool sequence = m_scene == ProcessingScene::StarTrail ||
+            m_scene == ProcessingScene::Timelapse;
+        if (m_scene == ProcessingScene::SingleFrame) {
+            visibleStage = normalizedStage >= 3
+                ? WorkflowStage::Output : WorkflowStage::Adjustment;
+        } else if (sequence) {
+            visibleStage = normalizedStage >= 3
+                ? WorkflowStage::Output : WorkflowStage::Stacking;
+        } else {
+            switch (normalizedStage) {
+            case 0:
+                visibleStage = WorkflowStage::Calibration;
+                break;
+            case 1:
+                visibleStage = WorkflowStage::Alignment;
+                break;
+            case 2:
+                visibleStage = WorkflowStage::Stacking;
+                break;
+            default:
+                visibleStage = WorkflowStage::Adjustment;
+                break;
+            }
+        }
+
+        const bool activeFormalTask =
+            m_worker && m_worker->isRunning();
+        if ((activeFormalTask || complete) && normalizedStage >= 1) {
+            m_workflowRail->setStageComplete(
+                WorkflowStage::Calibration, true);
+        }
+        if ((activeFormalTask || complete) && normalizedStage >= 2) {
+            m_workflowRail->setStageComplete(
+                WorkflowStage::Alignment, true);
+        }
+        if ((activeFormalTask || complete) && normalizedStage >= 3) {
+            m_workflowRail->setStageComplete(
+                WorkflowStage::Stacking, true);
+        }
+        if (complete) {
+            m_workflowRail->setStageComplete(
+                WorkflowStage::Adjustment, true);
+            m_workflowRail->setStageComplete(
+                WorkflowStage::Output, true);
+        }
+        if (activeFormalTask) {
+            m_workflowRail->setCurrentStage(visibleStage, true);
+        }
         statusBar()->showMessage(status, complete ? 5000 : 0);
     }
 
@@ -602,10 +691,12 @@ private:
         connect(m_toolbar, &Toolbar::shortcutsClicked,
                 this, &MainWindow::showShortcutsDialog);
         connect(m_toolbar, &Toolbar::aboutClicked, this, &MainWindow::onAboutClicked);
-        connect(m_projectPanel, &ProjectPanel::sceneChanged,
+        connect(m_toolbar, &Toolbar::sceneChanged,
                 this, [this](ProcessingScene scene) {
                     activateScene(scene, true);
                 });
+        connect(m_workflowRail, &WorkflowRail::stageChanged,
+                m_paramsPanel, &ParamsPanel::showWorkflowStage);
         connect(m_projectPanel, &ProjectPanel::calibrationSettingsRequested,
                 m_paramsPanel, &ParamsPanel::showCalibrationSettings);
         connect(m_projectPanel, &ProjectPanel::undoAvailabilityChanged,
@@ -746,6 +837,10 @@ private:
             m_paramsPanel->clearModifiedCameraGrayPoint();
             markCachedResultStale(
                 QString::fromUtf8("素材已修改 · 这是上次处理的成片"));
+            m_workflowRail->setStageComplete(WorkflowStage::Alignment, false);
+            m_workflowRail->setStageComplete(WorkflowStage::Stacking, false);
+            m_workflowRail->setStageComplete(WorkflowStage::Adjustment, false);
+            m_workflowRail->setStageComplete(WorkflowStage::Output, false);
             updateProjectReadiness();
         });
 
@@ -975,6 +1070,16 @@ private:
         }
         const bool current =
             currentProcessingSignature() == m_lastProcessedSignature;
+        const bool upstreamCurrent =
+            currentUpstreamSignature() == m_lastProcessedUpstreamSignature;
+        if (!upstreamCurrent) {
+            m_workflowRail->setStageComplete(WorkflowStage::Alignment, false);
+            m_workflowRail->setStageComplete(WorkflowStage::Stacking, false);
+            m_workflowRail->setStageComplete(WorkflowStage::Adjustment, false);
+        } else if (!current) {
+            m_workflowRail->setStageComplete(WorkflowStage::Adjustment, false);
+        }
+        m_workflowRail->setStageComplete(WorkflowStage::Output, current);
         m_toolbar->enableExport(
             current && !m_previewPanel->isShowingHistoryResult());
         if (current) {
@@ -1378,10 +1483,11 @@ private slots:
     void onAboutClicked() {
         QMessageBox::about(
             this,
-            "关于 StarProcessor",
-            "StarProcessor\n"
+            QString::fromUtf8("关于星炼"),
+            QString::fromUtf8("星炼\n"
             "版本 " STARPROCESSOR_VERSION "\n"
-            "MIT License"
+            "星空影像工作台\n"
+            "MIT License")
         );
     }
 
@@ -1598,7 +1704,10 @@ private slots:
         // 创建后台线程。进度与取消都留在主窗口，不再弹出第二个窗口。
         auto* worker = new ProcessingWorker(files, refFrame, params, this);
         m_worker = worker;
-        connect(worker, &ProcessingWorker::progress, m_inlineProgress, &QProgressBar::setValue);
+        connect(worker, &ProcessingWorker::progress,
+                m_inlineProgress, &QProgressBar::setValue);
+        connect(worker, &ProcessingWorker::progress,
+                m_toolbar, &Toolbar::setProgress);
         connect(worker, &ProcessingWorker::stageMessage, this, [this](const QString& msg) {
             int stage = 1;
             if (m_scene == ProcessingScene::StarTrail) {
@@ -1698,6 +1807,14 @@ private slots:
                     m_runningUpstreamSignature;
 
                 showBestAvailableResult();
+                m_workflowRail->setStageComplete(
+                    WorkflowStage::Alignment, true);
+                m_workflowRail->setStageComplete(
+                    WorkflowStage::Stacking, true);
+                m_workflowRail->setStageComplete(
+                    WorkflowStage::Adjustment, true);
+                m_workflowRail->setStageComplete(
+                    WorkflowStage::Output, true);
                 m_lastValidResultPreview = m_previewPanel->currentImage();
                 m_lastValidResultPreviewKey =
                     QStringLiteral("last-valid:") + m_lastProcessedSignature;
@@ -1881,7 +1998,7 @@ private slots:
         }
 
         QString outPath = m_paramsPanel->outputPath();
-        if (outPath.isEmpty()) outPath = QDir::homePath() + "/StarProcessor/Output";
+        if (outPath.isEmpty()) outPath = QDir::homePath() + "/星炼/Output";
         QDir().mkpath(outPath);
 
         ImageExporter::Format fmt = ImageExporter::Tiff16;
@@ -1959,7 +2076,8 @@ private slots:
         auto* outDirRow = new QHBoxLayout();
         auto* outDirLabel = new QLabel("输出目录:", dialog);
         QSettings settings("StarProcessor", "App");
-        QString defaultOutDir = settings.value("outputPath", QDir::homePath() + "/StarProcessor/Output").toString();
+        QString defaultOutDir = settings.value(
+            "outputPath", QDir::homePath() + "/星炼/Output").toString();
         auto* outDirEdit = new QLineEdit(defaultOutDir, dialog);
         outDirEdit->setReadOnly(true);
         auto* outDirBtn = new QPushButton(dialog);
@@ -2075,6 +2193,7 @@ private slots:
 
 private:
     Toolbar* m_toolbar = nullptr;
+    WorkflowRail* m_workflowRail = nullptr;
     QSplitter* m_contentSplitter = nullptr;
     ProjectPanel* m_projectPanel = nullptr;
     PreviewPanel* m_previewPanel = nullptr;
@@ -2150,7 +2269,10 @@ int main(int argc, char* argv[]) {
     );
 
     QApplication app(argc, argv);
+    // Keep the technical application identity for settings/update migration;
+    // all user-facing surfaces use the new product name.
     app.setApplicationName("StarProcessor");
+    app.setApplicationDisplayName(QString::fromUtf8("星炼"));
     app.setApplicationVersion(STARPROCESSOR_VERSION);
     app.setOrganizationName("StarProcessor");
     app.setWindowIcon(UiAssets::appIcon());
@@ -2188,6 +2310,18 @@ int main(int argc, char* argv[]) {
             window.selectStartupScene(ProcessingScene::Timelapse);
         } else if (argument == "--inspector=output") {
             window.selectStartupInspectorOutput();
+        } else if (argument == "--workflow=assets") {
+            window.selectStartupWorkflowStage(WorkflowStage::Assets);
+        } else if (argument == "--workflow=calibration") {
+            window.selectStartupWorkflowStage(WorkflowStage::Calibration);
+        } else if (argument == "--workflow=align") {
+            window.selectStartupWorkflowStage(WorkflowStage::Alignment);
+        } else if (argument == "--workflow=stack") {
+            window.selectStartupWorkflowStage(WorkflowStage::Stacking);
+        } else if (argument == "--workflow=adjust") {
+            window.selectStartupWorkflowStage(WorkflowStage::Adjustment);
+        } else if (argument == "--workflow=output") {
+            window.selectStartupWorkflowStage(WorkflowStage::Output);
         } else if (argument.startsWith("--history=")) {
             window.loadStartupHistory(
                 argument.mid(QStringLiteral("--history=").size()));

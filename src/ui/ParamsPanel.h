@@ -6,6 +6,7 @@
 #include "core/PresetManager.h"
 #include "core/SkyGroundMask.h"
 #include "ui/ProcessingScene.h"
+#include "ui/WorkflowRail.h"
 
 class QScrollArea;
 class QVBoxLayout;
@@ -19,6 +20,7 @@ class QTimer;
 class QLineEdit;
 class QTabWidget;
 class QListWidget;
+class QPropertyAnimation;
 
 class ParamsPanel : public QWidget {
     Q_OBJECT
@@ -56,6 +58,8 @@ public:
     void recommendStackMethod(int frameCount);
     void saveCurrentSettings();
     void setOutputPath(const QString& path);
+    void setAssetSummary(int total, int available,
+                         const QString& reference, bool ready);
 
     bool skyGroundSeparationEnabled() const;
     SkyGroundMask::Mode skyGroundMode() const;
@@ -89,6 +93,7 @@ public:
                            bool resetParameters = true);
     void showCalibrationSettings();
     void showOutputSettings();
+    void showWorkflowStage(WorkflowStage stage);
     void setProcessingReport(const QString& report);
     void refreshRecentResults();
 
@@ -146,9 +151,23 @@ private:
 
     // 预设
     QWidget* m_presetBar = nullptr;
+    QWidget* m_footerBar = nullptr;
     QComboBox* m_presetCombo = nullptr;
     QLabel* m_titleLabel = nullptr;
+    QLabel* m_stageKicker = nullptr;
     QTabWidget* m_tabs = nullptr;
+    WorkflowStage m_activeWorkflowStage = WorkflowStage::Adjustment;
+    ProcessingScene m_scene = ProcessingScene::Nightscape;
+    QPropertyAnimation* m_stageAnimation = nullptr;
+    QWidget* m_animatedPage = nullptr;
+
+    // Read-only stage summaries make the six-stage rail meaningful without
+    // duplicating the project model inside the inspector.
+    QGroupBox* m_assetsGroup = nullptr;
+    QGroupBox* m_lightCalibrationGroup = nullptr;
+    QLabel* m_assetCountValue = nullptr;
+    QLabel* m_assetThresholdValue = nullptr;
+    QLabel* m_assetReferenceValue = nullptr;
 
     // 对齐组
     QGroupBox* m_alignGroup = nullptr;

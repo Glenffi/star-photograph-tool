@@ -127,6 +127,10 @@ ViewStateStore::ViewState ViewStateStore::sanitized(const ViewState& state)
         result.comparisonMode = ComparisonMode::After;
         break;
     }
+    if (!std::isfinite(result.splitPosition)) {
+        result.splitPosition = 0.5;
+    }
+    result.splitPosition = std::clamp(result.splitPosition, 0.05, 0.95);
 
     return result;
 }

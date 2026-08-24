@@ -229,7 +229,7 @@ void UpdateManager::offerUpdate(const UpdateManifest& manifest) {
     dialog.setWindowTitle(QStringLiteral("发现新版本"));
     dialog.setIcon(QMessageBox::Information);
     dialog.setTextFormat(Qt::PlainText);
-    dialog.setText(QStringLiteral("StarProcessor %1 已发布")
+    dialog.setText(QString::fromUtf8("星炼 %1 已发布")
                        .arg(manifest.version));
     dialog.setInformativeText(
         QStringLiteral("安装包大小：%1\n\n%2")
@@ -295,7 +295,7 @@ void UpdateManager::startDownload(const UpdatePackage& package,
         QCryptographicHash::Sha256);
 
     m_progressDialog = new QProgressDialog(
-        QStringLiteral("正在下载 StarProcessor %1...").arg(version),
+        QString::fromUtf8("正在下载星炼 %1...").arg(version),
         QStringLiteral("取消"), 0, 1000, m_parentWindow);
     m_progressDialog->setWindowTitle(QStringLiteral("下载更新"));
     m_progressDialog->setMinimumDuration(0);
@@ -326,7 +326,7 @@ void UpdateManager::startDownload(const UpdatePackage& package,
                     : 0;
                 m_progressDialog->setValue(progress);
                 m_progressDialog->setLabelText(
-                    QStringLiteral("正在下载 StarProcessor %1... %2 / %3")
+                    QString::fromUtf8("正在下载星炼 %1... %2 / %3")
                         .arg(m_downloadVersion,
                              humanReadableSize(received),
                              humanReadableSize(denominator)));
@@ -436,7 +436,7 @@ void UpdateManager::handleDownloadFinished() {
     emit statusMessage(QStringLiteral("更新包已下载并通过校验"), 5000);
     const auto choice = QMessageBox::question(
         m_parentWindow, QStringLiteral("更新已就绪"),
-        QStringLiteral("StarProcessor %1 已下载并通过 SHA-256 校验。\n\n"
+        QString::fromUtf8("星炼 %1 已下载并通过 SHA-256 校验。\n\n"
                        "是否现在打开安装包？\n%2")
             .arg(completedVersion, completedPath),
         QMessageBox::Open | QMessageBox::Cancel, QMessageBox::Open);

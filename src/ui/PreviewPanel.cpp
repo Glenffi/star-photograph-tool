@@ -32,7 +32,6 @@
 namespace {
 
 constexpr int kPreviewMargin = StyleTokens::Spacing::kCanvasPadding * 2;
-constexpr int kSplitGutter = 12;
 
 QColor tokenColor(const char* value) {
     return QColor(QString::fromLatin1(value));
@@ -331,21 +330,16 @@ void PreviewPanel::setupEmptyState() {
     emptyLayout->setAlignment(Qt::AlignCenter);
 
     m_emptyIcon = new QLabel(m_emptyState);
-    m_emptyIcon->setFixedSize(72, 72);
-    m_emptyIcon->setPixmap(UiAssets::icon(
-        UiAssets::Glyph::Nightscape,
-        tokenColor(StyleTokens::Colors::kLineStrong), 64).pixmap(64, 64));
-    m_emptyIcon->setAlignment(Qt::AlignCenter);
-    emptyLayout->addWidget(m_emptyIcon);
+    m_emptyIcon->hide();
 
-    m_emptyText = new QLabel(QString::fromUtf8("今晚的星空还在等你"), m_emptyState);
+    m_emptyText = new QLabel(QString::fromUtf8("拖入一组 RAW 开始"), m_emptyState);
     m_emptyText->setProperty(StyleTokens::Properties::kTextRole,
                              StyleTokens::Properties::kDisplay);
     m_emptyText->setAlignment(Qt::AlignCenter);
     emptyLayout->addWidget(m_emptyText);
 
     m_emptyFormat = new QLabel(
-        QString::fromUtf8("拖入一组 RAW，或选择文件"),
+        QString::fromUtf8("选择文件，或直接拖入画布"),
         m_emptyState
     );
     m_emptyFormat->setProperty(StyleTokens::Properties::kTextRole,
@@ -493,6 +487,7 @@ void PreviewPanel::saveCurrentViewState() {
     state.verticalScroll = m_scrollArea->verticalScrollBar()->value();
     state.comparisonMode = static_cast<ViewStateStore::ComparisonMode>(
         std::clamp(m_viewMode, 0, 2));
+    state.splitPosition = m_splitPosition;
     state.maskOverlayVisible = m_maskOverlayVisible;
     m_viewStateStore.save(m_currentContentKey, state);
 }
@@ -537,6 +532,7 @@ void PreviewPanel::restoreViewState(const ViewStateStore::ViewState& state) {
         ? std::clamp(static_cast<int>(state.comparisonMode), 0, 2)
         : 1;
     m_beforeAfterMode = m_viewMode == 2;
+    m_splitPosition = state.splitPosition;
     updateComparisonButtons();
     emit beforeAfterModeChanged(m_beforeAfterMode);
     setMaskOverlayVisible(state.maskOverlayVisible && hasMaskData());
@@ -944,8 +940,8 @@ void PreviewPanel::clearImage() {
 
     m_imageLabel->setPixmap(QPixmap());
     m_emptyState->setVisible(true);
-    m_emptyText->setText(QString::fromUtf8("今晚的星空还在等你"));
-    m_emptyFormat->setText(QString::fromUtf8("拖入一组 RAW，或选择文件"));
+    m_emptyText->setText(QString::fromUtf8("拖入一组 RAW 开始"));
+    m_emptyFormat->setText(QString::fromUtf8("选择文件，或直接拖入画布"));
     m_emptyImportBtn->setVisible(true);
     m_scrollArea->setVisible(false);
     m_topBar->setVisible(false);
@@ -1048,9 +1044,6 @@ double PreviewPanel::fitZoomForViewport() const {
 
     int viewW = m_scrollArea->viewport()->width() - kPreviewMargin;
     const int viewH = m_scrollArea->viewport()->height() - kPreviewMargin;
-    if (m_viewMode == 2 && hasComparison()) {
-        viewW = (viewW - kSplitGutter) / 2;
-    }
     if (viewW <= 0 || viewH <= 0) return 0.0;
 
     const double scaleW = static_cast<double>(viewW) / image.width();
@@ -1131,33 +1124,63 @@ void PreviewPanel::applyZoom() {
 
     QPixmap pixmap;
     if (m_viewMode == 2 && hasComparison()) {
-        const QPixmap before = QPixmap::fromImage(m_beforeImage).scaled(
-            w, h, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
-        const QPixmap after = QPixmap::fromImage(m_afterImage).scaled(
-            w, h, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
-        const int afterX = w + kSplitGutter;
-        pixmap = QPixmap(w * 2 + kSplitGutter, h);
-        pixmap.fill(QColor("#090D0F"));
-        QPainter comparisonPainter(&pixmap);
-        comparisonPainter.drawPixmap(0, 0, before);
-        comparisonPainter.drawPixmap(afterX, 0, after);
-        comparisonPainter.setPen(QPen(QColor("#344548"), 1));
-        comparisonPainter.drawLine(w + kSplitGutter / 2, 0,
-                                   w + kSplitGutter / 2, h);
+        const QSize renderSize(w, h);
+        if (m_scaledComparisonSize != renderSize ||
+            m_scaledBeforeCache.isNull() || m_scaledAfterCache.isNull()) {
+            m_scaledBeforeCache = QPixmap::fromImage(m_beforeImage).scaled(
+                renderSize, Qt::IgnoreAspectRatio,
+                Qt::SmoothTransformation);
+            m_scaledAfterCache = QPixmap::fromImage(m_afterImage).scaled(
+                renderSize, Qt::IgnoreAspectRatio,
+                Qt::SmoothTransformation);
+            m_splitComposite = QPixmap(renderSize);
+            m_scaledComparisonSize = renderSize;
+        }
+        const int splitX = std::clamp(
+            qRound(m_splitPosition * w), 1, std::max(1, w - 1));
+        // Release QLabel's implicit share before painting so repeated divider
+        // drags reuse the same composite allocation instead of detaching a new
+        // full-size pixmap on every mouse move.
+        m_imageLabel->clear();
+        QPainter comparisonPainter(&m_splitComposite);
+        comparisonPainter.drawPixmap(0, 0, m_scaledAfterCache);
+        comparisonPainter.setClipRect(QRect(0, 0, splitX, h));
+        comparisonPainter.drawPixmap(0, 0, m_scaledBeforeCache);
+        comparisonPainter.setClipping(false);
+        comparisonPainter.setPen(QPen(
+            StyleTokens::Colors::fromHex(
+                StyleTokens::Colors::kAccentStrong), 1));
+        comparisonPainter.drawLine(splitX, 0, splitX, h);
+        if (w > 120 && h > 80) {
+            comparisonPainter.setPen(QPen(QColor(15, 17, 18, 210), 5));
+            comparisonPainter.drawEllipse(
+                QPointF(splitX, h / 2.0), 9.0, 15.0);
+            comparisonPainter.setPen(QPen(
+                StyleTokens::Colors::fromHex(
+                    StyleTokens::Colors::kAccentStrong), 1.5));
+            comparisonPainter.setBrush(QColor(28, 32, 33, 235));
+            comparisonPainter.drawEllipse(
+                QPointF(splitX, h / 2.0), 9.0, 15.0);
+            comparisonPainter.drawLine(splitX - 3, h / 2 - 5,
+                                       splitX - 3, h / 2 + 5);
+            comparisonPainter.drawLine(splitX + 3, h / 2 - 5,
+                                       splitX + 3, h / 2 + 5);
+        }
         if (w > 180 && h > 48) {
             comparisonPainter.setPen(Qt::NoPen);
             comparisonPainter.setBrush(QColor(12, 14, 16, 190));
             comparisonPainter.drawRoundedRect(QRect(8, 8, 52, 22), 4, 4);
             comparisonPainter.drawRoundedRect(
-                QRect(afterX + w - 60, 8, 52, 22), 4, 4);
+                QRect(w - 60, 8, 52, 22), 4, 4);
             comparisonPainter.setPen(QColor("#F5FAF8"));
             comparisonPainter.drawText(QRect(8, 8, 52, 22), Qt::AlignCenter,
                                        QString::fromUtf8("处理前"));
             comparisonPainter.drawText(
-                QRect(afterX + w - 60, 8, 52, 22), Qt::AlignCenter,
+                QRect(w - 60, 8, 52, 22), Qt::AlignCenter,
                                        QString::fromUtf8("处理后"));
         }
         comparisonPainter.end();
+        pixmap = m_splitComposite;
     } else {
         pixmap = QPixmap::fromImage(image);
         if (w != image.width() || h != image.height()) {
@@ -1172,9 +1195,6 @@ void PreviewPanel::applyZoom() {
         const QImage scaledMask = m_maskOverlay.scaled(
             w, h, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
         painter.drawImage(0, 0, scaledMask);
-        if (m_viewMode == 2 && hasComparison()) {
-            painter.drawImage(w + kSplitGutter, 0, scaledMask);
-        }
         painter.end();
     }
     if (m_maskOverlayVisible && !m_groundHintOverlay.isNull()) {
@@ -1182,9 +1202,6 @@ void PreviewPanel::applyZoom() {
         const QImage scaledHints = m_groundHintOverlay.scaled(
             w, h, Qt::IgnoreAspectRatio, Qt::FastTransformation);
         painter.drawImage(0, 0, scaledHints);
-        if (m_viewMode == 2 && hasComparison()) {
-            painter.drawImage(w + kSplitGutter, 0, scaledHints);
-        }
     }
 
     if (m_selectedPointX >= 0.0 && m_selectedPointY >= 0.0) {
@@ -1194,7 +1211,8 @@ void PreviewPanel::applyZoom() {
             painter.setBrush(Qt::NoBrush);
             painter.setPen(QPen(QColor(9, 13, 15, 210), 4.0));
             painter.drawEllipse(center, 8.0, 8.0);
-            painter.setPen(QPen(QColor("#4ED7AE"), 2.0));
+            painter.setPen(QPen(StyleTokens::Colors::fromHex(
+                                    StyleTokens::Colors::kOk), 2.0));
             painter.drawEllipse(center, 8.0, 8.0);
             painter.drawLine(center + QPointF(-12.0, 0.0),
                              center + QPointF(-5.0, 0.0));
@@ -1206,10 +1224,6 @@ void PreviewPanel::applyZoom() {
                              center + QPointF(0.0, 12.0));
         };
         drawMarker(QPointF(m_selectedPointX * w, m_selectedPointY * h));
-        if (m_viewMode == 2 && hasComparison()) {
-            drawMarker(QPointF(w + kSplitGutter + m_selectedPointX * w,
-                               m_selectedPointY * h));
-        }
     }
 
     m_imageLabel->setPixmap(pixmap);
@@ -1229,14 +1243,13 @@ bool PreviewPanel::imageSampleAt(const QPoint& labelPosition,
     const int paneHeight = std::max(1, qRound(displayed.height() * m_zoom));
     if (labelPosition.y() < 0 || labelPosition.y() >= paneHeight) return false;
 
-    int localX = labelPosition.x();
+    const int localX = labelPosition.x();
     image = &displayed;
     if (m_viewMode == 2 && hasComparison()) {
-        if (localX >= 0 && localX < paneWidth) {
+        if (localX < 0 || localX >= paneWidth) return false;
+        if (localX < qRound(m_splitPosition * paneWidth)) {
             image = &m_beforeImage;
         } else {
-            localX -= paneWidth + kSplitGutter;
-            if (localX < 0 || localX >= paneWidth) return false;
             image = &m_afterImage;
         }
     } else if (localX < 0 || localX >= paneWidth) {
@@ -1257,7 +1270,8 @@ double PreviewPanel::maximumSafeZoom() const {
     // A scaled QPixmap may require several temporary copies. Bound it to about
     // 32 megapixels so zoom cannot allocate multiple gigabytes on a large frame.
     constexpr double maxRenderedPixels = 32.0 * 1024.0 * 1024.0;
-    const double frameCount = (m_viewMode == 2 && hasComparison()) ? 2.0 : 1.0;
+    const double frameCount =
+        (m_viewMode == 2 && hasComparison()) ? 3.0 : 1.0;
     const double pixels = static_cast<double>(image.width()) * image.height()
         * frameCount;
     return std::clamp(std::sqrt(maxRenderedPixels / std::max(1.0, pixels)), 1.0, 8.0);
@@ -1380,6 +1394,16 @@ bool PreviewPanel::eventFilter(QObject* watched, QEvent* event) {
             return true;
         }
         if (mouse->button() == Qt::LeftButton) {
+            if (m_viewMode == 2 && hasComparison() &&
+                !m_maskEditingActive && !m_pointSelectionActive) {
+                const int dividerX = qRound(m_splitPosition *
+                                             m_imageLabel->width());
+                if (std::abs(mouse->position().x() - dividerX) <= 14.0) {
+                    m_splitDragging = true;
+                    m_imageLabel->setCursor(Qt::SplitHCursor);
+                    return true;
+                }
+            }
             if (m_maskEditingActive && !m_maskRefinementActive) {
                 QPoint maskPoint;
                 if (maskPositionAt(mouse->position().toPoint(), maskPoint)) {
@@ -1420,6 +1444,18 @@ bool PreviewPanel::eventFilter(QObject* watched, QEvent* event) {
 
     if (event->type() == QEvent::MouseMove) {
         auto* mouse = static_cast<QMouseEvent*>(event);
+        if (m_splitDragging && m_viewMode == 2 && hasComparison()) {
+            const double nextPosition = std::clamp(
+                mouse->position().x() /
+                    std::max(1.0, static_cast<double>(m_imageLabel->width())),
+                0.05, 0.95);
+            if (std::abs(nextPosition - m_splitPosition) < 0.0015) {
+                return true;
+            }
+            m_splitPosition = nextPosition;
+            applyZoom();
+            return true;
+        }
         if (m_maskPainting && m_maskEditingActive) {
             QPoint maskPoint;
             if (maskPositionAt(mouse->position().toPoint(), maskPoint) &&
@@ -1462,6 +1498,11 @@ bool PreviewPanel::eventFilter(QObject* watched, QEvent* event) {
     if (event->type() == QEvent::MouseButtonRelease) {
         auto* mouse = static_cast<QMouseEvent*>(event);
         if (mouse->button() == Qt::LeftButton) {
+            if (m_splitDragging) {
+                m_splitDragging = false;
+                updateImageCursor();
+                return true;
+            }
             if (m_maskPainting) {
                 m_maskPainting = false;
                 if (!m_activeGroundHintStroke.points.empty()) {
@@ -1562,11 +1603,14 @@ void PreviewPanel::setComparisonImages(const QImage& before, const QImage& after
         resetComparison();
         return;
     }
+    const bool replacingExistingComparison = hasComparison();
     m_beforeImage = before;
     m_afterImage = after;
+    invalidateComparisonRenderCache();
     m_currentImage = after;
     m_viewMode = 1;
     m_beforeAfterMode = false;
+    if (!replacingExistingComparison) m_splitPosition = 0.5;
     updateComparisonButtons();
     if (m_compareControl) m_compareControl->setVisible(true);
     emit comparisonAvailabilityChanged(true);
@@ -1617,10 +1661,19 @@ void PreviewPanel::resetComparison() {
     m_afterImage = QImage();
     m_viewMode = 1;
     m_beforeAfterMode = false;
+    m_splitPosition = 0.5;
+    invalidateComparisonRenderCache();
     updateComparisonButtons();
     if (m_compareControl) m_compareControl->setVisible(false);
     emit comparisonAvailabilityChanged(false);
     emit beforeAfterModeChanged(false);
+}
+
+void PreviewPanel::invalidateComparisonRenderCache() {
+    m_scaledBeforeCache = QPixmap();
+    m_scaledAfterCache = QPixmap();
+    m_splitComposite = QPixmap();
+    m_scaledComparisonSize = QSize();
 }
 
 QImage PreviewPanel::currentImage() const {
@@ -1718,6 +1771,10 @@ bool PreviewPanel::maskPositionAt(const QPoint& labelPosition,
 
 void PreviewPanel::rebuildMaskOverlay() {
     if (!hasMaskData()) return;
+    const QColor skyColor = StyleTokens::Colors::fromHex(
+        StyleTokens::Colors::kMaskSky);
+    const QColor groundColor = StyleTokens::Colors::fromHex(
+        StyleTokens::Colors::kMaskGround);
     m_maskOverlay = QImage(m_editedMaskWidth, m_editedMaskHeight,
                            QImage::Format_ARGB32_Premultiplied);
     for (int y = 0; y < m_editedMaskHeight; ++y) {
@@ -1725,9 +1782,14 @@ void PreviewPanel::rebuildMaskOverlay() {
         for (int x = 0; x < m_editedMaskWidth; ++x) {
             const float sky = m_editedMask[
                 static_cast<size_t>(y) * m_editedMaskWidth + x] / 255.0f;
-            const int green = static_cast<int>(255 + sky * (136 - 255));
-            const int blue = static_cast<int>(136 + sky * (255 - 136));
-            row[x] = qPremultiply(qRgba(68, green, blue, 77));
+            const auto mix = [sky](int ground, int skyValue) {
+                return qRound(ground + sky * (skyValue - ground));
+            };
+            row[x] = qPremultiply(qRgba(
+                mix(groundColor.red(), skyColor.red()),
+                mix(groundColor.green(), skyColor.green()),
+                mix(groundColor.blue(), skyColor.blue()),
+                mix(groundColor.alpha(), skyColor.alpha())));
         }
     }
 }

@@ -53,18 +53,45 @@ int main(int argc, char** argv) {
     check(imageLabel != nullptr, "Preview image label should be discoverable");
     const QPixmap splitPixmap = imageLabel->pixmap();
     check(!splitPixmap.isNull(), "Split preview should render a pixmap");
-    check(splitPixmap.width() > splitPixmap.height() * 3,
-          "Split preview should place two complete wide images side by side");
+    check(std::abs(
+              static_cast<double>(splitPixmap.width()) /
+                  splitPixmap.height() - 2.0) < 0.02,
+          "Split preview should preserve one shared image coordinate space");
 
     const QImage splitImage = splitPixmap.toImage();
     const QColor left = splitImage.pixelColor(
-        splitImage.width() / 8, splitImage.height() / 2);
+        splitImage.width() / 4, splitImage.height() / 2);
     const QColor right = splitImage.pixelColor(
-        splitImage.width() * 7 / 8, splitImage.height() / 2);
+        splitImage.width() * 3 / 4, splitImage.height() / 2);
     check(left.red() > 180 && left.green() < 70,
           "Left pane should retain the complete before image");
     check(right.green() > 150 && right.red() < 70,
           "Right pane should retain the complete after image");
+
+    const QPoint splitStart(splitPixmap.width() / 2,
+                            splitPixmap.height() / 2);
+    const QPoint splitEnd(splitPixmap.width() / 4,
+                          splitPixmap.height() / 2);
+    QMouseEvent splitPress(
+        QEvent::MouseButtonPress, QPointF(splitStart), QPointF(splitStart),
+        imageLabel->mapToGlobal(splitStart), Qt::LeftButton,
+        Qt::LeftButton, Qt::NoModifier);
+    QApplication::sendEvent(imageLabel, &splitPress);
+    QMouseEvent splitMove(
+        QEvent::MouseMove, QPointF(splitEnd), QPointF(splitEnd),
+        imageLabel->mapToGlobal(splitEnd), Qt::NoButton,
+        Qt::LeftButton, Qt::NoModifier);
+    QApplication::sendEvent(imageLabel, &splitMove);
+    QMouseEvent splitRelease(
+        QEvent::MouseButtonRelease, QPointF(splitEnd), QPointF(splitEnd),
+        imageLabel->mapToGlobal(splitEnd), Qt::LeftButton,
+        Qt::NoButton, Qt::NoModifier);
+    QApplication::sendEvent(imageLabel, &splitRelease);
+    const QImage draggedSplit = imageLabel->pixmap().toImage();
+    const QColor afterDivider = draggedSplit.pixelColor(
+        draggedSplit.width() * 3 / 8, draggedSplit.height() / 2);
+    check(afterDivider.green() > 150 && afterDivider.red() < 70,
+          "Dragging the divider should update the shared-coordinate split");
 
     double selectedX = -1.0;
     double selectedY = -1.0;
@@ -77,15 +104,14 @@ int main(int argc, char** argv) {
     panel.setBeforeAfterMode(true);
     processLayout();
     const QPixmap selectionPixmap = imageLabel->pixmap();
-    const int paneWidth = (selectionPixmap.width() - 12) / 2;
-    const QPoint localPoint(paneWidth + 12 + paneWidth / 4,
+    const QPoint localPoint(selectionPixmap.width() * 3 / 4,
                             selectionPixmap.height() / 2);
     const QPointF globalPoint = imageLabel->mapToGlobal(localPoint);
     QMouseEvent click(QEvent::MouseButtonPress, QPointF(localPoint),
                       QPointF(localPoint), globalPoint, Qt::LeftButton,
                       Qt::LeftButton, Qt::NoModifier);
     QApplication::sendEvent(imageLabel, &click);
-    check(std::abs(selectedX - 0.25) < 0.01 &&
+    check(std::abs(selectedX - 0.75) < 0.01 &&
               std::abs(selectedY - 0.5) < 0.01,
           "Manual gray-point selection should use pane-local split coordinates");
 
@@ -111,8 +137,8 @@ int main(int argc, char** argv) {
           "Quick-preview refresh should preserve the user's 100% zoom");
 
     const QPixmap refreshedPixmap = imageLabel->pixmap();
-    check(refreshedPixmap.width() >= width * 2,
-          "Quick-preview refresh should preserve split comparison mode");
+    check(refreshedPixmap.width() == width,
+          "Quick-preview refresh should preserve shared-coordinate split mode");
 
     panel.loadImage(before, QStringLiteral("source:first"));
     processLayout();
