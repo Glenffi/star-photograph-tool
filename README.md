@@ -220,6 +220,17 @@ SHA-256 校验文件。脚本会运行 Release 构建、CTest、`macdeployqt`、
 打包脚本还会检测所有随包动态库的真实系统要求并写入应用信息；若 Homebrew
 依赖高于源码的 macOS 14 目标，最终 DMG 会以依赖的较高版本为准。
 
+需要像普通应用一样安装到本机“应用程序”目录时，可运行：
+
+```bash
+./scripts/install-local-macos.sh
+```
+
+该脚本复用同一套 Release 构建、测试、依赖封装和签名检查，随后安装为
+`/Applications/星炼.app`、刷新 Launch Services 并启动应用。若已安装旧的
+`StarProcessor.app`，脚本会先关闭并移除旧副本，避免同一 Bundle ID 被系统
+注册两次。它是本机开发安装流程，不代替 Developer ID 签名与 Apple 公证。
+
 Windows x64 客户端由 `.github/workflows/windows-package.yml` 在
 Windows Server 2022 上使用 MSVC 原生构建。推送与 CMake 版本一致的
 `v*` 标签后，Windows 与 macOS 工作流会分别运行测试、封装依赖并把 ZIP/DMG
