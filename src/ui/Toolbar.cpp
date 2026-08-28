@@ -5,6 +5,7 @@
 
 #include <QAction>
 #include <QComboBox>
+#include <QCoreApplication>
 #include <QFont>
 #include <QGraphicsDropShadowEffect>
 #include <QHBoxLayout>
@@ -77,7 +78,8 @@ void Toolbar::setupUI() {
     auto* brandName = new QLabel(QStringLiteral("Nebulens"), brand);
     brandName->setObjectName(QStringLiteral("brandName"));
     brandLayout->addWidget(brandName);
-    auto* brandTag = new QLabel(QStringLiteral("ASTRO IMAGING STUDIO"), brand);
+    auto* brandTag = new QLabel(
+        QCoreApplication::translate("Nebulens", "星空影像工作台"), brand);
     brandTag->setObjectName(QStringLiteral("brandTag"));
     brandLayout->addWidget(brandTag);
     layout->addWidget(brand);
@@ -91,23 +93,25 @@ void Toolbar::setupUI() {
     auto* modeLayout = new QVBoxLayout(modeBlock);
     modeLayout->setContentsMargins(0, 7, 0, 6);
     modeLayout->setSpacing(2);
-    auto* modeLabel = new QLabel(QStringLiteral("MODE / 处理场景"), modeBlock);
+    auto* modeLabel = new QLabel(
+        QCoreApplication::translate("Nebulens", "模式 / 处理场景"),
+        modeBlock);
     modeLabel->setObjectName(QStringLiteral("toolbarKicker"));
     modeLayout->addWidget(modeLabel);
     m_sceneCombo = new QComboBox(modeBlock);
     m_sceneCombo->setObjectName(QStringLiteral("toolbarSceneCombo"));
     m_sceneCombo->setFixedWidth(154);
-    m_sceneCombo->addItem(QString::fromUtf8("单张精修"),
+    m_sceneCombo->addItem(QCoreApplication::translate("Nebulens", "单张精修"),
                           static_cast<int>(ProcessingScene::SingleFrame));
-    m_sceneCombo->addItem(QString::fromUtf8("银河星景"),
+    m_sceneCombo->addItem(QCoreApplication::translate("Nebulens", "银河星景"),
                           static_cast<int>(ProcessingScene::Nightscape));
-    m_sceneCombo->addItem(QString::fromUtf8("深空天体"),
+    m_sceneCombo->addItem(QCoreApplication::translate("Nebulens", "深空天体"),
                           static_cast<int>(ProcessingScene::DeepSky));
-    m_sceneCombo->addItem(QString::fromUtf8("天地分离"),
+    m_sceneCombo->addItem(QCoreApplication::translate("Nebulens", "天地分离"),
                           static_cast<int>(ProcessingScene::SkyGround));
-    m_sceneCombo->addItem(QString::fromUtf8("星轨合成"),
+    m_sceneCombo->addItem(QCoreApplication::translate("Nebulens", "星轨合成"),
                           static_cast<int>(ProcessingScene::StarTrail));
-    m_sceneCombo->addItem(QString::fromUtf8("延时序列"),
+    m_sceneCombo->addItem(QCoreApplication::translate("Nebulens", "延时序列"),
                           static_cast<int>(ProcessingScene::Timelapse));
     connect(m_sceneCombo, &QComboBox::currentIndexChanged,
             this, [this](int index) {
@@ -118,7 +122,7 @@ void Toolbar::setupUI() {
     modeLayout->addWidget(m_sceneCombo);
     layout->addWidget(modeBlock);
 
-    m_projectSummary = new QLabel(QString::fromUtf8("银河星景 · 等待素材"), this);
+    m_projectSummary = new QLabel(QCoreApplication::translate("Nebulens", "银河星景 · 等待素材"), this);
     m_projectSummary->setObjectName(QStringLiteral("toolbarProjectSummary"));
     m_projectSummary->setSizePolicy(QSizePolicy::Ignored,
                                     QSizePolicy::Preferred);
@@ -157,7 +161,7 @@ void Toolbar::setupUI() {
     m_startProcessBtn->setGraphicsEffect(m_processGlow);
 
     m_overflowBtn = createIconButton(QIcon(), tr("更多"));
-    m_overflowBtn->setText(QString::fromUtf8("⋯"));
+    m_overflowBtn->setText(QCoreApplication::translate("Nebulens", "⋯"));
     QFont overflowFont = m_overflowBtn->font();
     overflowFont.setPixelSize(StyleTokens::Controls::kIconSize);
     overflowFont.setWeight(QFont::DemiBold);

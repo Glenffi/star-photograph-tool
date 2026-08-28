@@ -19,6 +19,7 @@
 #include "core/TemporalPhotometricSmoother.h"
 #include "core/TimelapseEngine.h"
 
+#include <QCoreApplication>
 #include <QDateTime>
 #include <QDebug>
 #include <QDir>
@@ -401,7 +402,7 @@ bool ProcessingWorker::buildDeepSkyCalibration(
     RawCalibrationEngine::MasterFrames& masters) {
     const size_t pixelCount = referenceLight.data.size();
     if (pixelCount == 0) {
-        m_errorString = "参考 Light 的 Bayer 数据为空";
+        m_errorString = QCoreApplication::translate("Nebulens", "参考 Light 的 Bayer 数据为空");
         return false;
     }
     const int totalCalibrationFrames = std::max(
@@ -470,13 +471,13 @@ bool ProcessingWorker::buildDeepSkyCalibration(
     std::vector<QString> pendingMasterNames;
     if (m_params.saveGeneratedMasters) {
         if (!QDir().mkpath(outputRoot)) {
-            m_errorString = "无法创建 Master 输出目录";
+            m_errorString = QCoreApplication::translate("Nebulens", "无法创建 Master 输出目录");
             return false;
         }
         pendingMasters = std::make_unique<QTemporaryDir>(
             QDir(outputRoot).filePath(".starprocessor-masters-XXXXXX"));
         if (!pendingMasters->isValid()) {
-            m_errorString = "无法创建 Master 临时目录";
+            m_errorString = QCoreApplication::translate("Nebulens", "无法创建 Master 临时目录");
             return false;
         }
     }
@@ -487,7 +488,7 @@ bool ProcessingWorker::buildDeepSkyCalibration(
         QString error;
         if (!MasterFrameIO::save(
                 pendingMasters->filePath(fileName), master, error)) {
-            m_errorString = QString("保存 Master %1 失败: %2")
+            m_errorString = QCoreApplication::translate("Nebulens", "保存 Master %1 失败: %2")
                                 .arg(roleName, error);
             return false;
         }
@@ -498,14 +499,14 @@ bool ProcessingWorker::buildDeepSkyCalibration(
     auto loadCompatible = [&](const QString& path, const QString& kind,
                               RawImageLoader::CfaImageData& frame) {
         if (!loader.loadRawCfa(path, frame)) {
-            m_errorString = QString("无法解码%1: %2")
+            m_errorString = QCoreApplication::translate("Nebulens", "无法解码%1: %2")
                 .arg(kind, QFileInfo(path).fileName());
             return false;
         }
         std::string reason;
         if (!RawCalibrationEngine::compatible(
                 referenceLight, frame, reason)) {
-            m_errorString = QString("%1与 Light 不匹配: %2（%3）")
+            m_errorString = QCoreApplication::translate("Nebulens", "%1与 Light 不匹配: %2（%3）")
                 .arg(kind, QFileInfo(path).fileName(),
                      QString::fromStdString(reason));
             return false;
@@ -518,12 +519,12 @@ bool ProcessingWorker::buildDeepSkyCalibration(
                           RawCalibrationEngine::MasterFrame& master) {
         QString error;
         if (!MasterFrameIO::load(path, master, error)) {
-            m_errorString = QString("无法读取 %1: %2")
+            m_errorString = QCoreApplication::translate("Nebulens", "无法读取 %1: %2")
                                 .arg(QFileInfo(path).fileName(), error);
             return false;
         }
         if (master.role != expectedRole) {
-            m_errorString = QString("Master 类型不匹配: %1")
+            m_errorString = QCoreApplication::translate("Nebulens", "Master 类型不匹配: %1")
                                 .arg(QFileInfo(path).fileName());
             return false;
         }
@@ -534,7 +535,7 @@ bool ProcessingWorker::buildDeepSkyCalibration(
         std::string reason;
         if (!RawCalibrationEngine::installMasterFrame(
                 referenceLight, master, masters, reason)) {
-            m_errorString = QString("Master 与 Light 不兼容: %1")
+            m_errorString = QCoreApplication::translate("Nebulens", "Master 与 Light 不兼容: %1")
                                 .arg(QString::fromStdString(reason));
             return false;
         }
@@ -542,13 +543,13 @@ bool ProcessingWorker::buildDeepSkyCalibration(
     };
 
     if (!m_params.masterBiasPath.isEmpty()) {
-        emit stageMessage("加载 Master Bias...");
+        emit stageMessage(QCoreApplication::translate("Nebulens", "加载 Master Bias..."));
         RawCalibrationEngine::MasterFrame master;
         if (!loadMaster(m_params.masterBiasPath,
                         RawCalibrationEngine::MasterRole::Bias, master) ||
             !installMaster(master)) return false;
     } else if (!m_params.biasFramePaths.isEmpty()) {
-        emit stageMessage("生成 Master Bias...");
+        emit stageMessage(QCoreApplication::translate("Nebulens", "生成 Master Bias..."));
         RawCalibrationEngine::MeanAccumulator biasAccumulator(pixelCount);
         RawImageLoader::CfaImageData descriptor;
         for (const QString& path : m_params.biasFramePaths) {
@@ -557,7 +558,7 @@ bool ProcessingWorker::buildDeepSkyCalibration(
             if (!loadCompatible(path, "Bias", frame) ||
                 !biasAccumulator.add(frame.data)) {
                 if (m_errorString.isEmpty()) {
-                    m_errorString = "Master Bias 累加失败";
+                    m_errorString = QCoreApplication::translate("Nebulens", "Master Bias 累加失败");
                 }
                 return false;
             }
@@ -565,8 +566,7 @@ bool ProcessingWorker::buildDeepSkyCalibration(
                 0.1, referenceLight.exposureTime * 0.01);
             if (frame.exposureTime <= 0.0 ||
                 frame.exposureTime > maximumBiasExposure) {
-                m_errorString = QString(
-                    "Bias 必须使用相机最短曝光: %1（当前 %2 s）")
+                m_errorString = QCoreApplication::translate("Nebulens", "Bias 必须使用相机最短曝光: %1（当前 %2 s）")
                     .arg(QFileInfo(path).fileName())
                     .arg(frame.exposureTime, 0, 'g', 6);
                 return false;
@@ -576,7 +576,7 @@ bool ProcessingWorker::buildDeepSkyCalibration(
         }
         std::vector<float> generated;
         if (!biasAccumulator.finish(generated)) {
-            m_errorString = "Master Bias 生成失败";
+            m_errorString = QCoreApplication::translate("Nebulens", "Master Bias 生成失败");
             return false;
         }
         RawCalibrationEngine::MasterFrame master = makeMaster(
@@ -587,13 +587,13 @@ bool ProcessingWorker::buildDeepSkyCalibration(
     }
 
     if (!m_params.masterDarkPath.isEmpty()) {
-        emit stageMessage("加载 Master Dark...");
+        emit stageMessage(QCoreApplication::translate("Nebulens", "加载 Master Dark..."));
         RawCalibrationEngine::MasterFrame master;
         if (!loadMaster(m_params.masterDarkPath,
                         RawCalibrationEngine::MasterRole::Dark, master) ||
             !installMaster(master)) return false;
     } else {
-        emit stageMessage("生成 Master Dark...");
+        emit stageMessage(QCoreApplication::translate("Nebulens", "生成 Master Dark..."));
         RawCalibrationEngine::MeanAccumulator darkAccumulator(pixelCount);
         RawImageLoader::CfaImageData descriptor;
         for (const QString& path : m_params.darkFramePaths) {
@@ -602,15 +602,14 @@ bool ProcessingWorker::buildDeepSkyCalibration(
             if (!loadCompatible(path, "Dark", frame)) return false;
             if (!DeepSkyCalibrationPreflight::exposureMatches(
                     frame.exposureTime, referenceLight.exposureTime)) {
-                m_errorString = QString(
-                    "Dark 曝光必须与 Light 匹配: %1（Dark %2 s，Light %3 s）")
+                m_errorString = QCoreApplication::translate("Nebulens", "Dark 曝光必须与 Light 匹配: %1（Dark %2 s，Light %3 s）")
                     .arg(QFileInfo(path).fileName())
                     .arg(frame.exposureTime, 0, 'g', 6)
                     .arg(referenceLight.exposureTime, 0, 'g', 6);
                 return false;
             }
             if (!darkAccumulator.add(frame.data)) {
-                m_errorString = "Master Dark 累加失败";
+                m_errorString = QCoreApplication::translate("Nebulens", "Master Dark 累加失败");
                 return false;
             }
             if (descriptor.width == 0) descriptor = descriptorFrom(frame);
@@ -618,7 +617,7 @@ bool ProcessingWorker::buildDeepSkyCalibration(
         }
         std::vector<float> generated;
         if (!darkAccumulator.finish(generated)) {
-            m_errorString = "Master Dark 生成失败";
+            m_errorString = QCoreApplication::translate("Nebulens", "Master Dark 生成失败");
             return false;
         }
         RawCalibrationEngine::MasterFrame master = makeMaster(
@@ -630,7 +629,7 @@ bool ProcessingWorker::buildDeepSkyCalibration(
     }
 
     if (!m_params.masterFlatPath.isEmpty()) {
-        emit stageMessage("加载 Master Flat...");
+        emit stageMessage(QCoreApplication::translate("Nebulens", "加载 Master Flat..."));
         RawCalibrationEngine::MasterFrame master;
         if (!loadMaster(m_params.masterFlatPath,
                         RawCalibrationEngine::MasterRole::Flat, master) ||
@@ -638,20 +637,19 @@ bool ProcessingWorker::buildDeepSkyCalibration(
     } else {
         RawCalibrationEngine::MasterFrame darkFlatMaster;
         if (!m_params.masterDarkFlatPath.isEmpty()) {
-            emit stageMessage("加载 Master Dark Flat...");
+            emit stageMessage(QCoreApplication::translate("Nebulens", "加载 Master Dark Flat..."));
             if (!loadMaster(m_params.masterDarkFlatPath,
                             RawCalibrationEngine::MasterRole::DarkFlat,
                             darkFlatMaster)) return false;
             std::string reason;
             if (!RawCalibrationEngine::validateMasterFrame(
                     referenceLight, darkFlatMaster, reason)) {
-                m_errorString = QString(
-                    "Master Dark Flat 与 Light 不兼容: %1")
+                m_errorString = QCoreApplication::translate("Nebulens", "Master Dark Flat 与 Light 不兼容: %1")
                                     .arg(QString::fromStdString(reason));
                 return false;
             }
         } else if (!m_params.darkFlatFramePaths.isEmpty()) {
-            emit stageMessage("生成 Master Dark Flat...");
+            emit stageMessage(QCoreApplication::translate("Nebulens", "生成 Master Dark Flat..."));
             RawCalibrationEngine::MeanAccumulator darkFlatAccumulator(
                 pixelCount);
             RawImageLoader::CfaImageData descriptor;
@@ -661,7 +659,7 @@ bool ProcessingWorker::buildDeepSkyCalibration(
                 if (!loadCompatible(path, "Dark Flat", frame) ||
                     !darkFlatAccumulator.add(frame.data)) {
                     if (m_errorString.isEmpty()) {
-                        m_errorString = "Master Dark Flat 累加失败";
+                        m_errorString = QCoreApplication::translate("Nebulens", "Master Dark Flat 累加失败");
                     }
                     return false;
                 }
@@ -670,7 +668,7 @@ bool ProcessingWorker::buildDeepSkyCalibration(
             }
             std::vector<float> generated;
             if (!darkFlatAccumulator.finish(generated)) {
-                m_errorString = "Master Dark Flat 生成失败";
+                m_errorString = QCoreApplication::translate("Nebulens", "Master Dark Flat 生成失败");
                 return false;
             }
             darkFlatMaster = makeMaster(
@@ -680,7 +678,7 @@ bool ProcessingWorker::buildDeepSkyCalibration(
                 !saveGenerated(darkFlatMaster, "dark_flat")) return false;
         }
 
-        emit stageMessage("校准并生成 Master Flat...");
+        emit stageMessage(QCoreApplication::translate("Nebulens", "校准并生成 Master Flat..."));
         RawCalibrationEngine::MeanAccumulator flatAccumulator(pixelCount);
         RawImageLoader::CfaImageData descriptor;
         for (const QString& path : m_params.flatFramePaths) {
@@ -695,8 +693,7 @@ bool ProcessingWorker::buildDeepSkyCalibration(
                       frame, masters.bias, normalized);
             if (!normalizedOk ||
                 !flatAccumulator.add(normalized)) {
-                m_errorString = QString(
-                    "Flat 曝光不足、接近饱和或无法归一化: %1")
+                m_errorString = QCoreApplication::translate("Nebulens", "Flat 曝光不足、接近饱和或无法归一化: %1")
                     .arg(QFileInfo(path).fileName());
                 return false;
             }
@@ -707,7 +704,7 @@ bool ProcessingWorker::buildDeepSkyCalibration(
         if (!flatAccumulator.finish(generated) ||
             !RawCalibrationEngine::finalizeMasterFlat(
                 generated, referenceLight.width, referenceLight.height)) {
-            m_errorString = "Master Flat 累加失败";
+            m_errorString = QCoreApplication::translate("Nebulens", "Master Flat 累加失败");
             return false;
         }
         RawCalibrationEngine::MasterFrame master = makeMaster(
@@ -718,7 +715,7 @@ bool ProcessingWorker::buildDeepSkyCalibration(
     }
 
     if (!masters.complete()) {
-        m_errorString = "深空 Master 组合不完整或彼此不兼容";
+        m_errorString = QCoreApplication::translate("Nebulens", "深空 Master 组合不完整或彼此不兼容");
         return false;
     }
 
@@ -728,7 +725,7 @@ bool ProcessingWorker::buildDeepSkyCalibration(
     if (pendingMasters && !pendingMasterNames.empty()) {
         const QString mastersRoot = QDir(outputRoot).filePath("Masters");
         if (!QDir().mkpath(mastersRoot)) {
-            m_errorString = "无法创建 Masters 文件夹";
+            m_errorString = QCoreApplication::translate("Nebulens", "无法创建 Masters 文件夹");
             return false;
         }
         const QString destination = QDir(mastersRoot).filePath(
@@ -736,7 +733,7 @@ bool ProcessingWorker::buildDeepSkyCalibration(
         const QString stagingPath = pendingMasters->path();
         if (QFileInfo::exists(destination) ||
             !QDir().rename(stagingPath, destination)) {
-            m_errorString = "无法提交生成的 Master 文件集";
+            m_errorString = QCoreApplication::translate("Nebulens", "无法提交生成的 Master 文件集");
             return false;
         }
         pendingMasters->setAutoRemove(false);
@@ -754,13 +751,13 @@ bool ProcessingWorker::loadCalibratedRaw(
     RawImageLoader::ImageData& image) {
     RawImageLoader::CfaImageData light;
     if (!loader.loadRawCfa(path, light)) {
-        m_errorString = QString("无法读取 Light Bayer 数据: %1")
+        m_errorString = QCoreApplication::translate("Nebulens", "无法读取 Light Bayer 数据: %1")
             .arg(QFileInfo(path).fileName());
         return false;
     }
     if (!DeepSkyCalibrationPreflight::exposureMatches(
             light.exposureTime, masters.lightExposureTime)) {
-        m_errorString = QString("Light 曝光与 Master Dark 不匹配: %1")
+        m_errorString = QCoreApplication::translate("Nebulens", "Light 曝光与 Master Dark 不匹配: %1")
             .arg(QFileInfo(path).fileName());
         return false;
     }
@@ -769,7 +766,7 @@ bool ProcessingWorker::loadCalibratedRaw(
     if (!RawCalibrationEngine::calibrateLight(
             light, masters, calibrated, &stats) ||
         !loader.processCalibratedCfa(path, calibrated, image)) {
-        m_errorString = QString("Light 校准或去马赛克失败: %1")
+        m_errorString = QCoreApplication::translate("Nebulens", "Light 校准或去马赛克失败: %1")
             .arg(QFileInfo(path).fileName());
         return false;
     }
@@ -835,7 +832,7 @@ void ProcessingWorker::run() {
     emit progress(0);
 
     if (m_files.isEmpty()) {
-        m_errorString = "没有可处理的图像";
+        m_errorString = QCoreApplication::translate("Nebulens", "没有可处理的图像");
         return;
     }
 
@@ -845,7 +842,7 @@ void ProcessingWorker::run() {
         static_cast<int>(m_params.starTrailMode) +
         static_cast<int>(m_params.deepSkyMode);
     if (dedicatedModeCount > 1) {
-        m_errorString = "单张、延时、星轨和深空校准模式不能同时启用";
+        m_errorString = QCoreApplication::translate("Nebulens", "单张、延时、星轨和深空校准模式不能同时启用");
         return;
     }
 
@@ -864,10 +861,10 @@ void ProcessingWorker::run() {
         return;
     }
 
-    emit stageMessage("检查图像与内存预算...");
+    emit stageMessage(QCoreApplication::translate("Nebulens", "检查图像与内存预算..."));
     RawImageLoader loader;
     if (m_params.deepSkyMode) {
-        emit stageMessage("预检 Light 与校准来源...");
+        emit stageMessage(QCoreApplication::translate("Nebulens", "预检 Light 与校准来源..."));
         DeepSkyCalibrationPreflight::Inputs inputs;
         inputs.lightPaths = m_files;
         inputs.darkPaths = m_params.darkFramePaths;
@@ -895,8 +892,8 @@ void ProcessingWorker::run() {
         }
         emit stageMessage(
             m_calibrationPreflightWarnings.isEmpty()
-                ? QString::fromUtf8("校准素材预检通过")
-                : QString::fromUtf8("校准素材预检通过 · %1 项建议")
+                ? QCoreApplication::translate("Nebulens", "校准素材预检通过")
+                : QCoreApplication::translate("Nebulens", "校准素材预检通过 · %1 项建议")
                       .arg(m_calibrationPreflightWarnings.size()));
     }
     std::vector<RawImageLoader::Metadata> metadata;
@@ -906,7 +903,7 @@ void ProcessingWorker::run() {
         if (stopIfCancelled()) return;
         RawImageLoader::Metadata item;
         if (!loader.loadMetadata(m_files[i], item)) {
-            m_errorString = QString("无法读取元数据: %1")
+            m_errorString = QCoreApplication::translate("Nebulens", "无法读取元数据: %1")
                                 .arg(QFileInfo(m_files[i]).fileName());
             return;
         }
@@ -923,8 +920,7 @@ void ProcessingWorker::run() {
             if (item.cameraModel != first.cameraModel || item.iso != first.iso ||
                 !DeepSkyCalibrationPreflight::exposureMatches(
                     item.exposureTime, first.exposureTime)) {
-                m_errorString = QString(
-                    "深空 Light 必须来自同一相机、ISO 和曝光时间: %1")
+                m_errorString = QCoreApplication::translate("Nebulens", "深空 Light 必须来自同一相机、ISO 和曝光时间: %1")
                     .arg(QFileInfo(m_files[i]).fileName());
                 return;
             }
@@ -938,7 +934,7 @@ void ProcessingWorker::run() {
         : explicitReferenceIndex;
     std::vector<bool> qualityRejected(static_cast<size_t>(m_files.size()), false);
     if (automaticReference || m_params.autoRejectLowQualityFrames) {
-        emit stageMessage("快速评估帧质量...");
+        emit stageMessage(QCoreApplication::translate("Nebulens", "快速评估帧质量..."));
         m_frameQualityMetrics.resize(static_cast<size_t>(m_files.size()));
         for (int i = 0; i < m_files.size(); ++i) {
             if (stopIfCancelled()) return;
@@ -984,13 +980,12 @@ void ProcessingWorker::run() {
         const QString selectedSource = QFileInfo(
             m_selectedReferenceFrame).absoluteFilePath();
         if (maskSource.isEmpty() || maskSource != selectedSource) {
-            m_errorString =
-                "修补后的天地蒙版不属于最终参考帧，请重新检测并修补";
+            m_errorString = QCoreApplication::translate("Nebulens", "修补后的天地蒙版不属于最终参考帧，请重新检测并修补");
             return;
         }
     }
     if (automaticReference) {
-        emit stageMessage(QString("自动参考帧：%1")
+        emit stageMessage(QCoreApplication::translate("Nebulens", "自动参考帧：%1")
                               .arg(QFileInfo(m_selectedReferenceFrame).fileName()));
     }
 
@@ -998,7 +993,7 @@ void ProcessingWorker::run() {
     const int metadataHeight = metadata[referenceIndex].height;
     for (size_t i = 0; i < metadata.size(); ++i) {
         if (metadata[i].width != metadataWidth || metadata[i].height != metadataHeight) {
-            m_errorString = QString("图像尺寸不匹配: %1")
+            m_errorString = QCoreApplication::translate("Nebulens", "图像尺寸不匹配: %1")
                                 .arg(QFileInfo(m_files[static_cast<int>(i)]).fileName());
             return;
         }
@@ -1028,7 +1023,7 @@ void ProcessingWorker::run() {
         ProcessingMemoryEstimator::calculateEffectiveBudgetBytes(
             memoryInfo.safeBudgetBytes, m_params.memoryBudgetBytes);
     if (estimatedBytes == 0 || estimatedBytes > budgetBytes) {
-        m_errorString = QString("预计需要约 %1 内存，当前安全预算为 %2"
+        m_errorString = QCoreApplication::translate("Nebulens", "预计需要约 %1 内存，当前安全预算为 %2"
                                 "（系统当前可用约 %3）。"
                                 "请减少帧数，或关闭天地分离、去雾、降噪、缩星等高内存功能。")
                             .arg(formatMemoryBytes(estimatedBytes))
@@ -1051,7 +1046,7 @@ void ProcessingWorker::run() {
         static_cast<uint64_t>(availableScratchBytes) <
             scratchBytes + scratchHeadroom) {
         constexpr double kGiB = 1024.0 * 1024.0 * 1024.0;
-        m_errorString = QString("临时磁盘空间不足：处理缓存约需 %1 GB。")
+        m_errorString = QCoreApplication::translate("Nebulens", "临时磁盘空间不足：处理缓存约需 %1 GB。")
                             .arg(scratchBytes / kGiB, 0, 'f', 1);
         return;
     }
@@ -1059,11 +1054,11 @@ void ProcessingWorker::run() {
     RawCalibrationEngine::MasterFrames calibrationMasters;
     RawImageLoader::CfaImageData calibrationReference;
     if (m_params.deepSkyMode) {
-        emit stageMessage("读取参考 Light 的 Bayer 数据...");
+        emit stageMessage(QCoreApplication::translate("Nebulens", "读取参考 Light 的 Bayer 数据..."));
         if (!loader.loadRawCfa(
                 m_files[static_cast<int>(referenceIndex)],
                 calibrationReference)) {
-            m_errorString = "参考 Light 不是当前支持的 2×2 Bayer RAW";
+            m_errorString = QCoreApplication::translate("Nebulens", "参考 Light 不是当前支持的 2×2 Bayer RAW");
             return;
         }
         if (!buildDeepSkyCalibration(
@@ -1076,11 +1071,11 @@ void ProcessingWorker::run() {
     DiskFrameStore originalCache("starprocessor-original");
     if (!alignedCache.isValid() ||
         (m_params.skyGroundSepEnabled && !originalCache.isValid())) {
-        m_errorString = "无法创建处理临时目录";
+        m_errorString = QCoreApplication::translate("Nebulens", "无法创建处理临时目录");
         return;
     }
 
-    emit stageMessage("加载参考帧...");
+    emit stageMessage(QCoreApplication::translate("Nebulens", "加载参考帧..."));
     RawImageLoader::ImageData referenceImage;
     bool referenceLoaded = false;
     if (m_params.deepSkyMode) {
@@ -1105,7 +1100,7 @@ void ProcessingWorker::run() {
             m_files[static_cast<int>(referenceIndex)], referenceImage);
     }
     if (!referenceLoaded) {
-        m_errorString = QString("无法加载参考帧: %1")
+        m_errorString = QCoreApplication::translate("Nebulens", "无法加载参考帧: %1")
                             .arg(QFileInfo(m_files[static_cast<int>(referenceIndex)]).fileName());
         return;
     }
@@ -1127,8 +1122,7 @@ void ProcessingWorker::run() {
                 actualMemoryInfo.safeBudgetBytes, m_params.memoryBudgetBytes);
         if (actualEstimatedBytes == 0 ||
             actualEstimatedBytes > actualBudgetBytes) {
-            m_errorString = QString(
-                "RAW 实际解码尺寸需要约 %1 内存，当前安全预算为 %2。")
+            m_errorString = QCoreApplication::translate("Nebulens", "RAW 实际解码尺寸需要约 %1 内存，当前安全预算为 %2。")
                 .arg(formatMemoryBytes(actualEstimatedBytes))
                 .arg(formatMemoryBytes(actualBudgetBytes));
             return;
@@ -1138,23 +1132,23 @@ void ProcessingWorker::run() {
     std::vector<uint16_t> referenceLuminance;
     if (!ImageBufferUtils::extractLuminance(referenceImage.data, width, height,
                                             referenceLuminance)) {
-        m_errorString = "参考帧 RGB 数据无效";
+        m_errorString = QCoreApplication::translate("Nebulens", "参考帧 RGB 数据无效");
         return;
     }
 
     ChromaticAberrationModel chromaticModel;
     if (m_params.autoLensChromaticAberration) {
-        emit stageMessage("检测镜头径向色差...");
+        emit stageMessage(QCoreApplication::translate("Nebulens", "检测镜头径向色差..."));
         if (!ChromaticAberrationCorrector::estimate(
                 referenceImage.data, width, height, chromaticModel,
                 &m_chromaticAberrationStats)) {
-            m_errorString = "镜头径向色差检测失败";
+            m_errorString = QCoreApplication::translate("Nebulens", "镜头径向色差检测失败");
             return;
         }
         if (chromaticModel.active()) {
             if (!ChromaticAberrationCorrector::correctInPlace(
                     referenceImage.data, width, height, chromaticModel)) {
-                m_errorString = "参考帧镜头径向色差校正失败";
+                m_errorString = QCoreApplication::translate("Nebulens", "参考帧镜头径向色差校正失败");
                 return;
             }
             m_chromaticAberrationStats.applied = true;
@@ -1162,17 +1156,16 @@ void ProcessingWorker::run() {
                 ? QString("%1 px").arg(
                       m_chromaticAberrationStats.red.edgeShiftPixels,
                       0, 'f', 2)
-                : QString::fromUtf8("未校正");
+                : QCoreApplication::translate("Nebulens", "未校正");
             const QString blueSummary = chromaticModel.correctBlue
                 ? QString("%1 px").arg(
                       m_chromaticAberrationStats.blue.edgeShiftPixels,
                       0, 'f', 2)
-                : QString::fromUtf8("未校正");
-            emit stageMessage(QString(
-                "已自动校正镜头径向色差：红 %1，蓝 %2")
+                : QCoreApplication::translate("Nebulens", "未校正");
+            emit stageMessage(QCoreApplication::translate("Nebulens", "已自动校正镜头径向色差：红 %1，蓝 %2")
                 .arg(redSummary, blueSummary));
         } else {
-            emit stageMessage("未发现可靠的镜头径向色差，保持原图");
+            emit stageMessage(QCoreApplication::translate("Nebulens", "未发现可靠的镜头径向色差，保持原图"));
         }
     }
 
@@ -1186,7 +1179,7 @@ void ProcessingWorker::run() {
         if (!ImageBufferUtils::extractChannel(
                 referenceImage.data, width, height, 1,
                 referenceAlignmentPlane)) {
-            m_errorString = "参考帧绿色通道数据无效";
+            m_errorString = QCoreApplication::translate("Nebulens", "参考帧绿色通道数据无效");
             return;
         }
         referenceDetectionPlane = &referenceAlignmentPlane;
@@ -1195,7 +1188,7 @@ void ProcessingWorker::run() {
     PhotometricReferenceProfile photometricReference;
     bool photometricReferenceReady = false;
     if (m_params.photometricNormalizationEnabled) {
-        emit stageMessage("建立帧间光度参考...");
+        emit stageMessage(QCoreApplication::translate("Nebulens", "建立帧间光度参考..."));
         photometricReferenceReady =
             PhotometricNormalizer::buildReferenceProfile(
                 referenceImage.data, width, height, photometricReference);
@@ -1204,7 +1197,7 @@ void ProcessingWorker::run() {
         }
     }
 
-    emit stageMessage("参考帧星点检测...");
+    emit stageMessage(QCoreApplication::translate("Nebulens", "参考帧星点检测..."));
     StarDetector detector;
     DetectionOptions evaluationDetectionOptions;
     evaluationDetectionOptions.spatiallyBalanced = true;
@@ -1213,7 +1206,7 @@ void ProcessingWorker::run() {
     std::vector<StarPoint> referenceDetectedStars;
     if (!detector.detect(*referenceDetectionPlane, width, height,
                          referenceDetectedStars, evaluationDetectionOptions)) {
-        m_errorString = "参考帧星点检测失败";
+        m_errorString = QCoreApplication::translate("Nebulens", "参考帧星点检测失败");
         return;
     }
     const size_t referenceFitCount =
@@ -1238,7 +1231,7 @@ void ProcessingWorker::run() {
     std::vector<uint8_t> stackSkyValidityMask;
     std::vector<uint8_t> stackSkyEligibilityMask;
     if (m_params.skyGroundSepEnabled) {
-        emit stageMessage("生成天地蒙版...");
+        emit stageMessage(QCoreApplication::translate("Nebulens", "生成天地蒙版..."));
         bool maskReady = false;
         const bool editedMaskProvided =
             !m_params.editedSkyGroundMask.empty();
@@ -1290,7 +1283,7 @@ void ProcessingWorker::run() {
             const QImage borrowedMask(mask.data(), width, height, width,
                                       QImage::Format_Grayscale8);
             if (!borrowedMask.copy().save(m_params.skyGroundMaskOutputPath)) {
-                m_errorString = "无法保存天地蒙版诊断图";
+                m_errorString = QCoreApplication::translate("Nebulens", "无法保存天地蒙版诊断图");
                 return;
             }
         }
@@ -1303,7 +1296,7 @@ void ProcessingWorker::run() {
     if ((m_params.skyGroundSepEnabled &&
          !originalCache.append(referenceImage.data)) ||
         !alignedCache.append(referenceImage.data)) {
-        m_errorString = "无法写入参考帧临时缓存（请检查磁盘空间）";
+        m_errorString = QCoreApplication::translate("Nebulens", "无法写入参考帧临时缓存（请检查磁盘空间）");
         return;
     }
     referenceImage.data.clear();
@@ -1313,7 +1306,7 @@ void ProcessingWorker::run() {
     referenceAlignmentPlane.clear();
     referenceAlignmentPlane.shrink_to_fit();
 
-    emit stageMessage("逐帧加载与对齐...");
+    emit stageMessage(QCoreApplication::translate("Nebulens", "逐帧加载与对齐..."));
     ImageAligner aligner;
     std::vector<AlignmentTransform> acceptedTransforms;
     acceptedTransforms.reserve(static_cast<size_t>(m_files.size() - 1));
@@ -1335,13 +1328,13 @@ void ProcessingWorker::run() {
             SkippedFrameInfo skipped;
             skipped.filePath = m_files[i];
             skipped.stage = "raw-load";
-            skipped.reason = "RAW 解码失败";
+            skipped.reason = QCoreApplication::translate("Nebulens", "RAW 解码失败");
             m_skippedFrames.push_back(std::move(skipped));
             qWarning() << "RAW 加载失败，跳过:" << m_files[i];
             continue;
         }
         if (sourceImage.width != width || sourceImage.height != height) {
-            m_errorString = QString("图像尺寸不匹配: %1")
+            m_errorString = QCoreApplication::translate("Nebulens", "图像尺寸不匹配: %1")
                                 .arg(QFileInfo(m_files[i]).fileName());
             return;
         }
@@ -1353,7 +1346,7 @@ void ProcessingWorker::run() {
             : ImageBufferUtils::extractLuminance(
                   sourceImage.data, width, height, sourceLuminance);
         if (!sourcePlaneReady) {
-            m_errorString = QString("RGB 数据无效: %1")
+            m_errorString = QCoreApplication::translate("Nebulens", "RGB 数据无效: %1")
                                 .arg(QFileInfo(m_files[i]).fileName());
             return;
         }
@@ -1363,7 +1356,7 @@ void ProcessingWorker::run() {
             SkippedFrameInfo skipped;
             skipped.filePath = m_files[i];
             skipped.stage = "star-detection";
-            skipped.reason = "未检测到可用于对齐的星点";
+            skipped.reason = QCoreApplication::translate("Nebulens", "未检测到可用于对齐的星点");
             m_skippedFrames.push_back(std::move(skipped));
             qWarning() << "星点检测失败，跳过:" << m_files[i];
             continue;
@@ -1430,19 +1423,19 @@ void ProcessingWorker::run() {
                     QString::fromStdString(reason));
             }
             if (!skipped.affineEvaluated && !skipped.homographyEvaluated) {
-                skipped.reason = "星点匹配未形成可拟合模型";
+                skipped.reason = QCoreApplication::translate("Nebulens", "星点匹配未形成可拟合模型");
             } else {
                 QStringList failedModels;
                 if (skipped.affineEvaluated) {
                     failedModels.append(QString("Affine: %1")
                         .arg(skipped.affineFailureReasons.isEmpty()
-                            ? QStringLiteral("未通过质量门限")
+                            ? QCoreApplication::translate("Nebulens", "未通过质量门限")
                             : skipped.affineFailureReasons.join(", ")));
                 }
                 if (skipped.homographyEvaluated) {
                     failedModels.append(QString("Homography: %1")
                         .arg(skipped.homographyFailureReasons.isEmpty()
-                            ? QStringLiteral("未通过质量门限")
+                            ? QCoreApplication::translate("Nebulens", "未通过质量门限")
                             : skipped.homographyFailureReasons.join(", ")));
                 }
                 skipped.reason = failedModels.join("; ");
@@ -1466,7 +1459,7 @@ void ProcessingWorker::run() {
             SkippedFrameInfo skipped;
             skipped.filePath = m_files[i];
             skipped.stage = "resampling";
-            skipped.reason = "变换重采样失败";
+            skipped.reason = QCoreApplication::translate("Nebulens", "变换重采样失败");
             m_skippedFrames.push_back(std::move(skipped));
             qWarning() << "变换应用失败，跳过:" << m_files[i];
             continue;
@@ -1476,7 +1469,7 @@ void ProcessingWorker::run() {
             !ChromaticAberrationCorrector::apply(
                 sourceImage.data, width, height, chromaticModel,
                 correctedOriginal)) {
-            m_errorString = "原位地景镜头径向色差校正失败";
+            m_errorString = QCoreApplication::translate("Nebulens", "原位地景镜头径向色差校正失败");
             return;
         }
         std::vector<uint16_t>& originalForStack = correctedOriginal.empty()
@@ -1493,7 +1486,7 @@ void ProcessingWorker::run() {
                     PhotometricNormalizer::applyInPlace(
                         originalForStack, width, height, model);
                 if (!alignedNormalized || !originalNormalized) {
-                    m_errorString = "帧间光度匹配应用失败";
+                    m_errorString = QCoreApplication::translate("Nebulens", "帧间光度匹配应用失败");
                     return;
                 }
                 ++m_photometricNormalizedFrameCount;
@@ -1522,7 +1515,7 @@ void ProcessingWorker::run() {
         }
         if (m_params.skyGroundSepEnabled) {
             if (!originalCache.append(originalForStack)) {
-                m_errorString = "无法写入原位地景临时缓存（请检查磁盘空间）";
+                m_errorString = QCoreApplication::translate("Nebulens", "无法写入原位地景临时缓存（请检查磁盘空间）");
                 return;
             }
             std::vector<uint8_t> alignedSourceMask;
@@ -1532,12 +1525,12 @@ void ProcessingWorker::run() {
                 !ImageBufferUtils::excludeShiftedGroundInPlace(
                     alignedFrame, alignedSourceMask, stackSkyEligibilityMask,
                     width, height)) {
-                m_errorString = "无法约束天空对齐中的地景样本";
+                m_errorString = QCoreApplication::translate("Nebulens", "无法约束天空对齐中的地景样本");
                 return;
             }
         }
         if (!alignedCache.append(alignedFrame)) {
-            m_errorString = "无法写入对齐临时缓存（请检查磁盘空间）";
+            m_errorString = QCoreApplication::translate("Nebulens", "无法写入对齐临时缓存（请检查磁盘空间）");
             return;
         }
         // Only report frames that were successfully resampled and persisted.
@@ -1565,20 +1558,20 @@ void ProcessingWorker::run() {
     }
 
     if (alignedCache.frameCount() < 2) {
-        m_errorString = "对齐后可用帧数不足（<2），无法堆栈";
+        m_errorString = QCoreApplication::translate("Nebulens", "对齐后可用帧数不足（<2），无法堆栈");
         return;
     }
     emit progress(55);
     if (stopIfCancelled()) return;
 
-    emit stageMessage("堆栈中...");
+    emit stageMessage(QCoreApplication::translate("Nebulens", "堆栈中..."));
     StackingEngine stacker;
     const StackingEngine::Method method = stackMethodFromName(m_params.stackMethod);
     const StackingEngine::GroundMethod groundMethod =
         groundMethodFromName(m_params.groundStackMethod);
     std::vector<uint16_t> resultRgb;
     if (m_params.skyGroundSepEnabled) {
-        emit stageMessage("天地分离堆栈...");
+        emit stageMessage(QCoreApplication::translate("Nebulens", "天地分离堆栈..."));
     }
     QElapsedTimer stackingTimer;
     stackingTimer.start();
@@ -1640,23 +1633,23 @@ void ProcessingWorker::run() {
         acceptedTransforms, width, height, commonBounds,
         chromaticModel.active() ? &chromaticModel : nullptr);
     if (chromaticModel.active() && !commonBoundsReady) {
-        m_errorString = "无法计算镜头色差校正后的共同有效区域";
+        m_errorString = QCoreApplication::translate("Nebulens", "无法计算镜头色差校正后的共同有效区域");
         return;
     }
     if (commonBounds.width > 0 && commonBounds.height > 0 &&
         (commonBounds.x != 0 || commonBounds.y != 0 ||
          commonBounds.width != width || commonBounds.height != height)) {
-        emit stageMessage("裁切共同有效区域...");
+        emit stageMessage(QCoreApplication::translate("Nebulens", "裁切共同有效区域..."));
         std::vector<uint16_t> cropped;
         if (!cropRgb(resultRgb, width, height, commonBounds, cropped)) {
-            m_errorString = "有效区域裁切失败";
+            m_errorString = QCoreApplication::translate("Nebulens", "有效区域裁切失败");
             return;
         }
         resultRgb = std::move(cropped);
         if (!mask.empty()) {
             std::vector<uint8_t> croppedMask;
             if (!cropMask(mask, width, height, commonBounds, croppedMask)) {
-                m_errorString = "天地蒙版裁切失败";
+                m_errorString = QCoreApplication::translate("Nebulens", "天地蒙版裁切失败");
                 return;
             }
             mask = std::move(croppedMask);
@@ -1674,16 +1667,16 @@ void ProcessingWorker::run() {
 
 void ProcessingWorker::runStarTrail() {
     if (m_files.size() < 3) {
-        m_errorString = "星轨合成至少需要 3 张固定机位 RAW";
+        m_errorString = QCoreApplication::translate("Nebulens", "星轨合成至少需要 3 张固定机位 RAW");
         return;
     }
     if ((m_params.starReduceEnabled && m_params.starReduceStrength > 0) ||
         (m_params.starDefringeEnabled && m_params.starDefringeStrength > 0)) {
-        m_errorString = "星轨合成不能同时启用缩星或星点去紫边";
+        m_errorString = QCoreApplication::translate("Nebulens", "星轨合成不能同时启用缩星或星点去紫边");
         return;
     }
 
-    emit stageMessage("检查星轨序列与内存预算...");
+    emit stageMessage(QCoreApplication::translate("Nebulens", "检查星轨序列与内存预算..."));
     RawImageLoader loader;
     std::vector<RawImageLoader::Metadata> metadata;
     metadata.reserve(static_cast<size_t>(m_files.size()));
@@ -1691,14 +1684,14 @@ void ProcessingWorker::runStarTrail() {
         if (stopIfCancelled()) return;
         RawImageLoader::Metadata item;
         if (!loader.loadMetadata(m_files[index], item)) {
-            m_errorString = QString("无法读取元数据: %1")
+            m_errorString = QCoreApplication::translate("Nebulens", "无法读取元数据: %1")
                                 .arg(QFileInfo(m_files[index]).fileName());
             return;
         }
         if (!metadata.empty() &&
             (item.width != metadata.front().width ||
              item.height != metadata.front().height)) {
-            m_errorString = QString("星轨序列尺寸不一致: %1")
+            m_errorString = QCoreApplication::translate("Nebulens", "星轨序列尺寸不一致: %1")
                                 .arg(QFileInfo(m_files[index]).fileName());
             return;
         }
@@ -1759,8 +1752,7 @@ void ProcessingWorker::runStarTrail() {
         ProcessingMemoryEstimator::calculateEffectiveBudgetBytes(
             memoryInfo.safeBudgetBytes, m_params.memoryBudgetBytes);
     if (estimatedBytes == 0 || estimatedBytes > budgetBytes) {
-        m_errorString = QString(
-            "星轨合成预计需要约 %1 内存，当前安全预算为 %2"
+        m_errorString = QCoreApplication::translate("Nebulens", "星轨合成预计需要约 %1 内存，当前安全预算为 %2"
             "（系统当前可用约 %3）。请关闭去雾或降噪后重试。")
                             .arg(formatMemoryBytes(estimatedBytes))
                             .arg(formatMemoryBytes(budgetBytes))
@@ -1778,7 +1770,7 @@ void ProcessingWorker::runStarTrail() {
         : StarTrailEngine::TailDirection::Forward;
     StarTrailEngine trailEngine;
     if (!trailEngine.initialize(width, height, trailOptions)) {
-        m_errorString = QString::fromUtf8("无法初始化星轨合成器：%1")
+        m_errorString = QCoreApplication::translate("Nebulens", "无法初始化星轨合成器：%1")
             .arg(QString::fromLatin1(
                 StarTrailEngine::errorMessage(trailEngine.lastError())));
         return;
@@ -1788,7 +1780,7 @@ void ProcessingWorker::runStarTrail() {
     bool groundMaskReady = false;
     std::vector<uint8_t> skyMask;
     if (protectGround) {
-        emit stageMessage("检测固定地景蒙版...");
+        emit stageMessage(QCoreApplication::translate("Nebulens", "检测固定地景蒙版..."));
         const int maskFrameIndex = m_files.size() / 2;
         QImage preview;
         if (loadMaskPreview(m_files[maskFrameIndex], preview) &&
@@ -1801,8 +1793,8 @@ void ProcessingWorker::runStarTrail() {
 
     emit stageMessage(
         trailOptions.mode == StarTrailEngine::Mode::Lighten
-            ? QString::fromUtf8("逐帧累积连续星轨...")
-            : QString::fromUtf8("逐帧累积彗星星轨..."));
+            ? QCoreApplication::translate("Nebulens", "逐帧累积连续星轨...")
+            : QCoreApplication::translate("Nebulens", "逐帧累积彗星星轨..."));
     std::vector<uint16_t> groundAverage;
     PhotometricReferenceProfile photometricReference;
     bool photometricReferenceReady = false;
@@ -1813,7 +1805,7 @@ void ProcessingWorker::runStarTrail() {
         if (!loader.loadRaw(m_files[index], image) ||
             image.width != width || image.height != height ||
             image.channels != 3) {
-            m_errorString = QString("无法解码星轨 RAW: %1")
+            m_errorString = QCoreApplication::translate("Nebulens", "无法解码星轨 RAW: %1")
                                 .arg(QFileInfo(m_files[index]).fileName());
             return;
         }
@@ -1829,12 +1821,12 @@ void ProcessingWorker::runStarTrail() {
                 groundMaskReady = true;
             } else {
                 qWarning() << "星轨地平线检测失败，本次按纯天空序列合成";
-                emit stageMessage("未检测到可靠地景，按纯天空星轨处理");
+                emit stageMessage(QCoreApplication::translate("Nebulens", "未检测到可靠地景，按纯天空星轨处理"));
                 try {
                     skyMask.assign(
                         static_cast<size_t>(width) * height, uint8_t{255});
                 } catch (const std::bad_alloc&) {
-                    m_errorString = "无法分配星轨全天空蒙版";
+                    m_errorString = QCoreApplication::translate("Nebulens", "无法分配星轨全天空蒙版");
                     return;
                 }
                 m_skyGroundMaskSource = "star-trail-all-sky-fallback";
@@ -1878,7 +1870,7 @@ void ProcessingWorker::runStarTrail() {
         }
 
         if (!trailEngine.addFrame(image.data)) {
-            m_errorString = QString::fromUtf8("星轨累积失败：%1")
+            m_errorString = QCoreApplication::translate("Nebulens", "星轨累积失败：%1")
                 .arg(QString::fromLatin1(
                     StarTrailEngine::errorMessage(trailEngine.lastError())));
             return;
@@ -1889,7 +1881,7 @@ void ProcessingWorker::runStarTrail() {
                 try {
                     groundAverage = image.data;
                 } catch (const std::bad_alloc&) {
-                    m_errorString = "无法分配地景降噪缓冲";
+                    m_errorString = QCoreApplication::translate("Nebulens", "无法分配地景降噪缓冲");
                     return;
                 }
             } else {
@@ -1914,7 +1906,7 @@ void ProcessingWorker::runStarTrail() {
 
     std::vector<uint16_t> resultRgb;
     if (!trailEngine.render(resultRgb)) {
-        m_errorString = QString::fromUtf8("星轨结果生成失败：%1")
+        m_errorString = QCoreApplication::translate("Nebulens", "星轨结果生成失败：%1")
             .arg(QString::fromLatin1(
                 StarTrailEngine::errorMessage(trailEngine.lastError())));
         return;
@@ -1928,10 +1920,10 @@ void ProcessingWorker::runStarTrail() {
             : static_cast<double>(skySum) /
                 (255.0 * static_cast<double>(skyMask.size()));
         if (groundMaskReady) {
-            emit stageMessage("融合降噪地景...");
+            emit stageMessage(QCoreApplication::translate("Nebulens", "融合降噪地景..."));
             if (!ImageBufferUtils::blendSkyGroundInPlace(
                     resultRgb, groundAverage, skyMask, width, height)) {
-                m_errorString = "星轨天空与地景融合失败";
+                m_errorString = QCoreApplication::translate("Nebulens", "星轨天空与地景融合失败");
                 return;
             }
         }
@@ -1940,7 +1932,7 @@ void ProcessingWorker::runStarTrail() {
                 skyMask.data(), width, height, width,
                 QImage::Format_Grayscale8);
             if (!borrowedMask.copy().save(m_params.skyGroundMaskOutputPath)) {
-                m_errorString = "无法保存星轨地景蒙版诊断图";
+                m_errorString = QCoreApplication::translate("Nebulens", "无法保存星轨地景蒙版诊断图");
                 return;
             }
         }
@@ -1957,14 +1949,14 @@ void ProcessingWorker::runStarTrail() {
 
 void ProcessingWorker::runTimelapse() {
     if (m_files.size() < 3) {
-        m_errorString = "延时序列降噪至少需要 3 张 RAW";
+        m_errorString = QCoreApplication::translate("Nebulens", "延时序列降噪至少需要 3 张 RAW");
         return;
     }
     const int windowSize = m_params.timelapseWindowSize == 3 ? 3 : 5;
     const int temporalStrength = std::clamp(m_params.timelapseStrength, 0, 100);
     bool protectGround = m_params.timelapseProtectGround;
 
-    emit stageMessage("预分析延时序列...");
+    emit stageMessage(QCoreApplication::translate("Nebulens", "预分析延时序列..."));
     RawImageLoader loader;
     std::vector<RawImageLoader::Metadata> metadata;
     metadata.reserve(static_cast<size_t>(m_files.size()));
@@ -1972,14 +1964,14 @@ void ProcessingWorker::runTimelapse() {
         if (stopIfCancelled()) return;
         RawImageLoader::Metadata item;
         if (!loader.loadMetadata(m_files[index], item)) {
-            m_errorString = QString("无法读取元数据: %1")
+            m_errorString = QCoreApplication::translate("Nebulens", "无法读取元数据: %1")
                                 .arg(QFileInfo(m_files[index]).fileName());
             return;
         }
         if (!metadata.empty() &&
             (item.width != metadata.front().width ||
              item.height != metadata.front().height)) {
-            m_errorString = QString("延时序列尺寸不一致: %1")
+            m_errorString = QCoreApplication::translate("Nebulens", "延时序列尺寸不一致: %1")
                                 .arg(QFileInfo(m_files[index]).fileName());
             return;
         }
@@ -1994,7 +1986,7 @@ void ProcessingWorker::runTimelapse() {
         static_cast<size_t>(metadataWidth) >
             std::numeric_limits<size_t>::max() /
                 static_cast<size_t>(metadataHeight) / 3) {
-        m_errorString = "延时序列图像尺寸无效";
+        m_errorString = QCoreApplication::translate("Nebulens", "延时序列图像尺寸无效");
         return;
     }
     const uint64_t estimatedBytes =
@@ -2007,7 +1999,7 @@ void ProcessingWorker::runTimelapse() {
         ProcessingMemoryEstimator::calculateEffectiveBudgetBytes(
             memoryInfo.safeBudgetBytes, m_params.memoryBudgetBytes);
     if (estimatedBytes == 0 || estimatedBytes > budgetBytes) {
-        m_errorString = QString("延时 %1 帧窗口预计需要约 %2 内存，当前安全预算为 %3。"
+        m_errorString = QCoreApplication::translate("Nebulens", "延时 %1 帧窗口预计需要约 %2 内存，当前安全预算为 %3。"
                                 "请改用 3 帧窗口或关闭固定地景保护。")
                             .arg(windowSize)
                             .arg(formatMemoryBytes(estimatedBytes))
@@ -2026,18 +2018,18 @@ void ProcessingWorker::runTimelapse() {
         scratchBytes > std::numeric_limits<uint64_t>::max() - scratchHeadroom ||
         static_cast<uint64_t>(temporaryStorage.bytesAvailable()) <
             scratchBytes + scratchHeadroom) {
-        m_errorString = QString("临时磁盘空间不足：延时 RAW 缓存约需 %1。")
+        m_errorString = QCoreApplication::translate("Nebulens", "临时磁盘空间不足：延时 RAW 缓存约需 %1。")
                             .arg(formatMemoryBytes(scratchBytes));
         return;
     }
 
     DiskFrameStore decodedCache("starprocessor-timelapse");
     if (!decodedCache.isValid()) {
-        m_errorString = "无法创建延时处理临时目录";
+        m_errorString = QCoreApplication::translate("Nebulens", "无法创建延时处理临时目录");
         return;
     }
 
-    emit stageMessage("预解码 RAW 并检测星点...");
+    emit stageMessage(QCoreApplication::translate("Nebulens", "预解码 RAW 并检测星点..."));
     StarDetector detector;
     DetectionOptions detectionOptions;
     detectionOptions.spatiallyBalanced = true;
@@ -2054,7 +2046,7 @@ void ProcessingWorker::runTimelapse() {
         if (stopIfCancelled()) return;
         RawImageLoader::ImageData image;
         if (!loader.loadRaw(m_files[index], image)) {
-            m_errorString = QString("无法解码 RAW: %1")
+            m_errorString = QCoreApplication::translate("Nebulens", "无法解码 RAW: %1")
                                 .arg(QFileInfo(m_files[index]).fileName());
             return;
         }
@@ -2065,12 +2057,12 @@ void ProcessingWorker::runTimelapse() {
                 static_cast<size_t>(width) >
                     std::numeric_limits<size_t>::max() /
                         static_cast<size_t>(height) / 3) {
-                m_errorString = "延时 RAW 实际解码尺寸无效";
+                m_errorString = QCoreApplication::translate("Nebulens", "延时 RAW 实际解码尺寸无效");
                 return;
             }
             rgbValueCount = static_cast<size_t>(width) * height * 3;
         } else if (image.width != width || image.height != height) {
-            m_errorString = QString("RAW 实际解码尺寸不一致: %1")
+            m_errorString = QCoreApplication::translate("Nebulens", "RAW 实际解码尺寸不一致: %1")
                                 .arg(QFileInfo(m_files[index]).fileName());
             return;
         }
@@ -2083,7 +2075,7 @@ void ProcessingWorker::runTimelapse() {
                             detectionOptions);
         }
         if (!decodedCache.append(image.data)) {
-            m_errorString = "延时 RAW 临时缓存写入失败";
+            m_errorString = QCoreApplication::translate("Nebulens", "延时 RAW 临时缓存写入失败");
             return;
         }
         emit progress(5 + static_cast<int>(
@@ -2101,7 +2093,7 @@ void ProcessingWorker::runTimelapse() {
     ImageAligner aligner;
     int alignedPairCount = 0;
     const int radius = windowSize / 2;
-    emit stageMessage("预分析邻近帧对齐...");
+    emit stageMessage(QCoreApplication::translate("Nebulens", "预分析邻近帧对齐..."));
     for (int targetIndex = 0; targetIndex < m_files.size(); ++targetIndex) {
         if (stopIfCancelled()) return;
         const int start = std::max(0, targetIndex - radius);
@@ -2148,7 +2140,7 @@ void ProcessingWorker::runTimelapse() {
             (targetIndex + 1) * 3.0 / m_files.size()));
     }
     if (alignedPairCount == 0 && !protectGround) {
-        m_errorString = "延时序列的邻近帧均无法完成星点对齐";
+        m_errorString = QCoreApplication::translate("Nebulens", "延时序列的邻近帧均无法完成星点对齐");
         return;
     }
 
@@ -2194,7 +2186,7 @@ void ProcessingWorker::runTimelapse() {
                     QImage::Format_Grayscale8);
                 if (!borrowedMask.copy().save(
                         m_params.skyGroundMaskOutputPath)) {
-                    m_errorString = "无法保存延时天地蒙版诊断图";
+                    m_errorString = QCoreApplication::translate("Nebulens", "无法保存延时天地蒙版诊断图");
                     return;
                 }
             }
@@ -2204,7 +2196,7 @@ void ProcessingWorker::runTimelapse() {
     std::vector<TemporalPhotometricSmoother::Sample> sequencePhotometry(
         static_cast<size_t>(m_files.size()));
     if (m_params.photometricNormalizationEnabled) {
-        emit stageMessage("分析跨帧亮度与色偏曲线...");
+        emit stageMessage(QCoreApplication::translate("Nebulens", "分析跨帧亮度与色偏曲线..."));
         const int anchorIndex = m_files.size() / 2;
         std::vector<uint16_t> anchorRgb;
         PhotometricReferenceProfile anchorProfile;
@@ -2248,7 +2240,7 @@ void ProcessingWorker::runTimelapse() {
         "_timelapse");
     if (stopIfCancelled()) return;
     if (!QDir().mkpath(outputDirectory)) {
-        m_errorString = "无法创建延时序列输出目录";
+        m_errorString = QCoreApplication::translate("Nebulens", "无法创建延时序列输出目录");
         return;
     }
     m_outputFile = outputDirectory;
@@ -2267,7 +2259,7 @@ void ProcessingWorker::runTimelapse() {
     flickerOptions.windowSize = 5;
     flickerOptions.strength = 65.0;
 
-    emit stageMessage("逐帧滑动窗口降噪...");
+    emit stageMessage(QCoreApplication::translate("Nebulens", "逐帧滑动窗口降噪..."));
     int writtenFrames = 0;
     enum class NormalizationState {
         NotAttempted,
@@ -2286,7 +2278,7 @@ void ProcessingWorker::runTimelapse() {
         std::vector<uint16_t> targetRgb;
         if (!decodedCache.readFrame(
                 targetIndex, rgbValueCount, targetRgb)) {
-            m_errorString = "延时目标帧缓存读取失败";
+            m_errorString = QCoreApplication::translate("Nebulens", "延时目标帧缓存读取失败");
             return;
         }
         PhotometricReferenceProfile targetProfile;
@@ -2357,7 +2349,7 @@ void ProcessingWorker::runTimelapse() {
             std::vector<uint16_t> sourceRgb;
             if (!decodedCache.readFrame(
                     sourceIndex, rgbValueCount, sourceRgb)) {
-                m_errorString = "延时邻近帧缓存读取失败";
+                m_errorString = QCoreApplication::translate("Nebulens", "延时邻近帧缓存读取失败");
                 return;
             }
             const double distance = sourceIndex - targetIndex;
@@ -2420,7 +2412,7 @@ void ProcessingWorker::runTimelapse() {
             skyViews, width, height, skyTargetIndex, temporalOptions);
         if (stopIfCancelled()) return;
         if (!skyResult) {
-            m_errorString = QString("延时天空降噪失败: %1")
+            m_errorString = QCoreApplication::translate("Nebulens", "延时天空降噪失败: %1")
                 .arg(TimelapseEngine::errorMessage(skyResult.error));
             return;
         }
@@ -2435,7 +2427,7 @@ void ProcessingWorker::runTimelapse() {
             if (stopIfCancelled()) return;
             if (!groundResult || !ImageBufferUtils::blendSkyGroundInPlace(
                     resultRgb, groundResult.rgb, skyMask, width, height)) {
-                m_errorString = "延时天地分离融合失败";
+                m_errorString = QCoreApplication::translate("Nebulens", "延时天地分离融合失败");
                 return;
             }
             m_timelapseMotionProtectedPixelEvaluations +=
@@ -2486,7 +2478,7 @@ void ProcessingWorker::runTimelapse() {
             .arg(targetIndex + 1, 4, 10, QLatin1Char('0'))
             .arg(baseName, extension);
         const QString outputPath = QDir(outputDirectory).filePath(outputName);
-        emit stageMessage(QString("输出第 %1/%2 张...")
+        emit stageMessage(QCoreApplication::translate("Nebulens", "输出第 %1/%2 张...")
                               .arg(targetIndex + 1).arg(m_files.size()));
         if (stopIfCancelled()) return;
         if (!ImageExporter::exportRgb16(
@@ -2494,7 +2486,7 @@ void ProcessingWorker::runTimelapse() {
                 png ? ImageExporter::Png8 : ImageExporter::Tiff16,
                 [this]() { return stopIfCancelled(); })) {
             if (m_wasCancelled) return;
-            m_errorString = QString("延时序列导出失败: %1").arg(outputName);
+            m_errorString = QCoreApplication::translate("Nebulens", "延时序列导出失败: %1").arg(outputName);
             return;
         }
         ++writtenFrames;
@@ -2511,7 +2503,7 @@ void ProcessingWorker::runTimelapse() {
     }
     if (stopIfCancelled()) return;
     emit progress(100);
-    emit stageMessage(QString("延时序列处理完成：已输出 %1 张").arg(writtenFrames));
+    emit stageMessage(QCoreApplication::translate("Nebulens", "延时序列处理完成：已输出 %1 张").arg(writtenFrames));
 }
 
 void ProcessingWorker::runSingleFrame() {
@@ -2520,9 +2512,9 @@ void ProcessingWorker::runSingleFrame() {
     RawImageLoader loader;
     RawImageLoader::Metadata metadata;
 
-    emit stageMessage("检查单张 RAW 与内存预算...");
+    emit stageMessage(QCoreApplication::translate("Nebulens", "检查单张 RAW 与内存预算..."));
     if (!loader.loadMetadata(sourcePath, metadata)) {
-        m_errorString = QString("无法读取元数据: %1")
+        m_errorString = QCoreApplication::translate("Nebulens", "无法读取元数据: %1")
                             .arg(QFileInfo(sourcePath).fileName());
         return;
     }
@@ -2548,7 +2540,7 @@ void ProcessingWorker::runSingleFrame() {
             ProcessingMemoryEstimator::calculateEffectiveBudgetBytes(
                 memoryInfo.safeBudgetBytes, m_params.memoryBudgetBytes);
         if (estimated != 0 && estimated <= budget) return true;
-        m_errorString = QString("单张处理预计需要约 %1 内存，当前安全预算为 %2。"
+        m_errorString = QCoreApplication::translate("Nebulens", "单张处理预计需要约 %1 内存，当前安全预算为 %2。"
                                 "请关闭去雾、降噪或缩星后重试。")
                             .arg(formatMemoryBytes(estimated))
                             .arg(formatMemoryBytes(budget));
@@ -2558,10 +2550,10 @@ void ProcessingWorker::runSingleFrame() {
     if (!fitsMemoryBudget(metadata.width, metadata.height)) return;
     if (stopIfCancelled()) return;
 
-    emit stageMessage("解码单张 RAW...");
+    emit stageMessage(QCoreApplication::translate("Nebulens", "解码单张 RAW..."));
     RawImageLoader::ImageData image;
     if (!loader.loadRaw(sourcePath, image)) {
-        m_errorString = QString("无法解码 RAW: %1")
+        m_errorString = QCoreApplication::translate("Nebulens", "无法解码 RAW: %1")
                             .arg(QFileInfo(sourcePath).fileName());
         return;
     }
@@ -2579,18 +2571,18 @@ void ProcessingWorker::runSingleFrame() {
 
     std::vector<uint16_t> resultRgb = std::move(image.data);
     if (m_params.autoLensChromaticAberration) {
-        emit stageMessage("检测镜头径向色差...");
+        emit stageMessage(QCoreApplication::translate("Nebulens", "检测镜头径向色差..."));
         ChromaticAberrationModel chromaticModel;
         if (!ChromaticAberrationCorrector::estimate(
                 resultRgb, m_width, m_height, chromaticModel,
                 &m_chromaticAberrationStats)) {
-            m_errorString = "镜头径向色差检测失败";
+            m_errorString = QCoreApplication::translate("Nebulens", "镜头径向色差检测失败");
             return;
         }
         if (chromaticModel.active()) {
             if (!ChromaticAberrationCorrector::correctInPlace(
                     resultRgb, m_width, m_height, chromaticModel)) {
-                m_errorString = "镜头径向色差校正失败";
+                m_errorString = QCoreApplication::translate("Nebulens", "镜头径向色差校正失败");
                 return;
             }
             m_chromaticAberrationStats.applied = true;
@@ -2598,14 +2590,13 @@ void ProcessingWorker::runSingleFrame() {
                 ? QString("%1 px").arg(
                       m_chromaticAberrationStats.red.edgeShiftPixels,
                       0, 'f', 2)
-                : QString::fromUtf8("未校正");
+                : QCoreApplication::translate("Nebulens", "未校正");
             const QString blueSummary = chromaticModel.correctBlue
                 ? QString("%1 px").arg(
                       m_chromaticAberrationStats.blue.edgeShiftPixels,
                       0, 'f', 2)
-                : QString::fromUtf8("未校正");
-            emit stageMessage(QString(
-                "已自动校正镜头径向色差：红 %1，蓝 %2")
+                : QCoreApplication::translate("Nebulens", "未校正");
+            emit stageMessage(QCoreApplication::translate("Nebulens", "已自动校正镜头径向色差：红 %1，蓝 %2")
                 .arg(redSummary, blueSummary));
             ImageAligner aligner;
             AlignmentTransform identity;
@@ -2613,13 +2604,13 @@ void ProcessingWorker::runSingleFrame() {
             if (!aligner.commonValidBounds(
                     {identity}, m_width, m_height, validBounds,
                     &chromaticModel)) {
-                m_errorString = "无法计算镜头色差校正后的有效区域";
+                m_errorString = QCoreApplication::translate("Nebulens", "无法计算镜头色差校正后的有效区域");
                 return;
             }
             std::vector<uint16_t> cropped;
             if (!cropRgb(resultRgb, m_width, m_height,
                          validBounds, cropped)) {
-                m_errorString = "镜头色差校正边界裁切失败";
+                m_errorString = QCoreApplication::translate("Nebulens", "镜头色差校正边界裁切失败");
                 return;
             }
             resultRgb = std::move(cropped);
@@ -2628,7 +2619,7 @@ void ProcessingWorker::runSingleFrame() {
             m_width = validBounds.width;
             m_height = validBounds.height;
         } else {
-            emit stageMessage("未发现可靠的镜头径向色差，保持原图");
+            emit stageMessage(QCoreApplication::translate("Nebulens", "未发现可靠的镜头径向色差，保持原图"));
         }
     }
     std::vector<uint8_t> noMask;
@@ -2714,35 +2705,35 @@ bool ProcessingWorker::finishResult(std::vector<uint16_t>& resultRgb,
         [this](FinishingStage stage) {
             switch (stage) {
             case FinishingStage::ModifiedCameraColor:
-                emit stageMessage("改机色彩还原...");
+                emit stageMessage(QCoreApplication::translate("Nebulens", "改机色彩还原..."));
                 emit progress(82);
                 break;
             case FinishingStage::NoiseReduction:
-                emit stageMessage("多尺度降噪...");
+                emit stageMessage(QCoreApplication::translate("Nebulens", "多尺度降噪..."));
                 emit progress(85);
                 break;
             case FinishingStage::Dehaze:
             case FinishingStage::Stretch:
-                emit stageMessage("自动优化...");
+                emit stageMessage(QCoreApplication::translate("Nebulens", "自动优化..."));
                 emit progress(90);
                 break;
             case FinishingStage::BasicAdjustments:
-                emit stageMessage("基础调色...");
+                emit stageMessage(QCoreApplication::translate("Nebulens", "基础调色..."));
                 emit progress(92);
                 break;
             case FinishingStage::GroundDetail:
-                emit stageMessage("恢复地景细节...");
+                emit stageMessage(QCoreApplication::translate("Nebulens", "恢复地景细节..."));
                 break;
             case FinishingStage::Sharpening:
-                emit stageMessage("亮度锐化...");
+                emit stageMessage(QCoreApplication::translate("Nebulens", "亮度锐化..."));
                 emit progress(94);
                 break;
             case FinishingStage::StarDefringe:
-                emit stageMessage("星点去紫边...");
+                emit stageMessage(QCoreApplication::translate("Nebulens", "星点去紫边..."));
                 emit progress(95);
                 break;
             case FinishingStage::StarReduction:
-                emit stageMessage("缩星处理...");
+                emit stageMessage(QCoreApplication::translate("Nebulens", "缩星处理..."));
                 emit progress(95);
                 break;
             }
@@ -2750,7 +2741,7 @@ bool ProcessingWorker::finishResult(std::vector<uint16_t>& resultRgb,
         [this]() { return stopIfCancelled(); });
     if (!finished) {
         if (finishingResult.cancelled || m_wasCancelled) return false;
-        m_errorString = QString::fromUtf8("收尾处理失败：%1")
+        m_errorString = QCoreApplication::translate("Nebulens", "收尾处理失败：%1")
             .arg(QString::fromStdString(finishingResult.error));
         return false;
     }
@@ -2759,30 +2750,26 @@ bool ProcessingWorker::finishResult(std::vector<uint16_t>& resultRgb,
     m_starReductionStats = finishingResult.starReductionStats;
     if (m_params.modifiedCameraColorEnabled &&
         m_params.modifiedCameraColor.strength > 0) {
-        emit stageMessage(QString(
-            "改机色彩已还原：%1 · %2% · RGB 增益 %3 / %4 / %5")
+        emit stageMessage(QCoreApplication::translate("Nebulens", "改机色彩已还原：%1 · %2% · RGB 增益 %3 / %4 / %5")
             .arg(m_modifiedCameraColorStats.usedManualPoint
-                     ? QString::fromUtf8("手动灰点")
-                     : QString::fromUtf8("自动灰点"))
+                     ? QCoreApplication::translate("Nebulens", "手动灰点")
+                     : QCoreApplication::translate("Nebulens", "自动灰点"))
             .arg(m_params.modifiedCameraColor.strength)
             .arg(m_modifiedCameraColorStats.gains[0], 0, 'f', 3)
             .arg(m_modifiedCameraColorStats.gains[1], 0, 'f', 3)
             .arg(m_modifiedCameraColorStats.gains[2], 0, 'f', 3));
     }
     if (m_params.starDefringeEnabled && m_params.starDefringeStrength > 0) {
-        emit stageMessage(QString(
-            "星点去紫边完成：修正 %1 个星缘像素，星点尺寸保持不变")
+        emit stageMessage(QCoreApplication::translate("Nebulens", "星点去紫边完成：修正 %1 个星缘像素，星点尺寸保持不变")
             .arg(m_starDefringeStats.defringedPixels));
     }
     if (m_params.starReduceEnabled && m_params.starReduceStrength > 0) {
         if (m_params.starDefringeEnabled && m_params.starDefringeStrength > 0) {
-            emit stageMessage(QString(
-                "缩星完成：处理 %1 颗星，其中 %2 颗弱小星被清除或显著缩小")
+            emit stageMessage(QCoreApplication::translate("Nebulens", "缩星完成：处理 %1 颗星，其中 %2 颗弱小星被清除或显著缩小")
                 .arg(m_starReductionStats.processedStars)
                 .arg(m_starReductionStats.stronglySuppressedStars));
         } else {
-            emit stageMessage(QString(
-                "缩星完成：处理 %1 颗星，其中 %2 颗弱小星被清除或显著缩小，%3 个星缘像素去色边")
+            emit stageMessage(QCoreApplication::translate("Nebulens", "缩星完成：处理 %1 颗星，其中 %2 颗弱小星被清除或显著缩小，%3 个星缘像素去色边")
                 .arg(m_starReductionStats.processedStars)
                 .arg(m_starReductionStats.stronglySuppressedStars)
                 .arg(m_starReductionStats.defringedPixels));
@@ -2792,7 +2779,7 @@ bool ProcessingWorker::finishResult(std::vector<uint16_t>& resultRgb,
     m_stackedData = std::move(resultRgb);
     if (stopIfCancelled()) return false;
 
-    emit stageMessage("导出结果...");
+    emit stageMessage(QCoreApplication::translate("Nebulens", "导出结果..."));
     QString outputPath = m_params.outputPath;
     if (outputPath.isEmpty()) outputPath = QDir::homePath() + "/Nebulens/Output";
     QDir().mkpath(outputPath);
@@ -2810,10 +2797,10 @@ bool ProcessingWorker::finishResult(std::vector<uint16_t>& resultRgb,
                                     [this]() { return stopIfCancelled(); })) {
         m_outputFile.clear();
         if (m_wasCancelled) return false;
-        m_errorString = "导出失败";
+        m_errorString = QCoreApplication::translate("Nebulens", "导出失败");
         return false;
     }
     emit progress(100);
-    emit stageMessage("处理完成");
+    emit stageMessage(QCoreApplication::translate("Nebulens", "处理完成"));
     return true;
 }

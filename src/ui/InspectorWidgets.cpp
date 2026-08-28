@@ -3,6 +3,7 @@
 #include "StyleTokens.h"
 
 #include <QApplication>
+#include <QCoreApplication>
 #include <QEvent>
 #include <QFontMetrics>
 #include <QFrame>
@@ -167,7 +168,7 @@ InspectorSection::InspectorSection(const QString& title, QWidget* parent)
         QString::fromLatin1(StyleTokens::Properties::kTitle));
     m_titleLabel->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
 
-    m_resetButton = new QPushButton(QString::fromUtf8("重置"), header);
+    m_resetButton = new QPushButton(QCoreApplication::translate("Nebulens", "重置"), header);
     m_resetButton->setObjectName(QStringLiteral("inspectorSectionReset"));
     m_resetButton->setProperty(
         StyleTokens::Properties::kVariant,
@@ -199,7 +200,7 @@ InspectorSection::InspectorSection(const QString& title, QWidget* parent)
         QString::fromLatin1(StyleTokens::Properties::kSeparator));
     divider->setFrameShape(QFrame::HLine);
     divider->setFrameShadow(QFrame::Plain);
-    divider->setAccessibleName(QString::fromUtf8("分区分隔线"));
+    divider->setAccessibleName(QCoreApplication::translate("Nebulens", "分区分隔线"));
     rootLayout->addWidget(divider);
 
     connect(m_resetButton, &QPushButton::clicked,
@@ -246,7 +247,7 @@ void InspectorSection::updateAccessibleNames() {
     setAccessibleName(sectionTitle);
     m_titleLabel->setAccessibleName(sectionTitle);
     m_resetButton->setAccessibleName(
-        QString::fromUtf8("%1：%2").arg(m_resetButton->text(), sectionTitle));
+        QCoreApplication::translate("Nebulens", "%1：%2").arg(m_resetButton->text(), sectionTitle));
 }
 
 ValueSlider::ValueSlider(int minimum, int maximum, int value, QWidget* parent)
@@ -291,7 +292,7 @@ ValueSlider::ValueSlider(int minimum, int maximum, int value, QWidget* parent)
     connect(m_slider, &QSlider::sliderReleased,
             this, &ValueSlider::sliderReleased);
 
-    setAccessibleName(QString::fromUtf8("参数值"));
+    setAccessibleName(QCoreApplication::translate("Nebulens", "参数值"));
     setValue(value);
     updateValueLabel(m_slider->value());
 }
@@ -365,8 +366,8 @@ void ValueSlider::setAccessibleName(const QString& name) {
     QWidget::setAccessibleName(name);
     m_slider->setAccessibleName(name);
     m_slider->setAccessibleDescription(
-        QString::fromUtf8("按住 Shift 可用十分之一灵敏度微调"));
-    m_valueLabel->setAccessibleName(QString::fromUtf8("%1当前值").arg(name));
+        QCoreApplication::translate("Nebulens", "按住 Shift 可用十分之一灵敏度微调"));
+    m_valueLabel->setAccessibleName(QCoreApplication::translate("Nebulens", "%1当前值").arg(name));
 }
 
 QSlider* ValueSlider::slider() const { return m_slider; }
@@ -383,7 +384,7 @@ void ValueSlider::updateValueLabel(int value) {
     }
     m_valueLabel->setText(text);
     m_slider->setAccessibleDescription(
-        QString::fromUtf8("当前值 %1。按住 Shift 可用十分之一灵敏度微调").arg(text));
+        QCoreApplication::translate("Nebulens", "当前值 %1。按住 Shift 可用十分之一灵敏度微调").arg(text));
 }
 
 CompactToggle::CompactToggle(const QString& text, QWidget* parent)
@@ -401,7 +402,7 @@ CompactToggle::CompactToggle(const QString& text, QWidget* parent)
     setTristate(false);
     setMinimumHeight(StyleTokens::Controls::kCompactHeight);
     if (!text.isEmpty()) setAccessibleName(text);
-    setAccessibleDescription(QString::fromUtf8("按空格键切换"));
+    setAccessibleDescription(QCoreApplication::translate("Nebulens", "按空格键切换"));
 
     m_trackOffColor = StyleTokens::Colors::fromHex(
         StyleTokens::Colors::kBackgroundOverlay);

@@ -3,6 +3,7 @@
 #include "StyleTokens.h"
 
 #include <QAbstractButton>
+#include <QCoreApplication>
 #include <QEnterEvent>
 #include <QFont>
 #include <QLabel>
@@ -17,17 +18,16 @@ namespace {
 
 struct StageText {
     const char* number;
-    const char* chinese;
-    const char* english;
+    const char* source;
 };
 
 constexpr std::array<StageText, 6> kStageText{{
-    {"01", "素材", "ASSETS"},
-    {"02", "校准", "CALIBRATE"},
-    {"03", "对齐", "ALIGN"},
-    {"04", "合成", "STACK"},
-    {"05", "调整", "ADJUST"},
-    {"06", "输出", "OUTPUT"}
+    {"01", QT_TRANSLATE_NOOP("Nebulens", "素材")},
+    {"02", QT_TRANSLATE_NOOP("Nebulens", "校准")},
+    {"03", QT_TRANSLATE_NOOP("Nebulens", "对齐")},
+    {"04", QT_TRANSLATE_NOOP("Nebulens", "合成")},
+    {"05", QT_TRANSLATE_NOOP("Nebulens", "调整")},
+    {"06", QT_TRANSLATE_NOOP("Nebulens", "输出")}
 }};
 
 int stageIndex(WorkflowStage stage) {
@@ -45,8 +45,10 @@ public:
         setFocusPolicy(Qt::StrongFocus);
         setFixedSize(76, 57);
         const StageText& text = kStageText[stageIndex(stage)];
-        setAccessibleName(QString::fromUtf8(text.chinese));
-        setToolTip(QString::fromUtf8(text.chinese));
+        const QString label = QCoreApplication::translate(
+            "Nebulens", text.source);
+        setAccessibleName(label);
+        setToolTip(label);
     }
 
     WorkflowStage stage() const { return m_stage; }
@@ -134,26 +136,16 @@ protected:
         painter.drawText(QRect(8, 0, 20, height()), Qt::AlignVCenter,
                          QString::fromLatin1(text.number));
 
+        const QString localizedLabel = QCoreApplication::translate(
+            "Nebulens", text.source);
         QFont labelFont = font();
-        labelFont.setPixelSize(11);
+        labelFont.setPixelSize(localizedLabel.size() > 6 ? 8 : 11);
         labelFont.setWeight(QFont::DemiBold);
         painter.setFont(labelFont);
         painter.setPen(primary);
-        painter.drawText(QRect(29, 11, 42, 18),
+        painter.drawText(QRect(27, 18, 46, 20),
                          Qt::AlignLeft | Qt::AlignVCenter,
-                         QString::fromUtf8(text.chinese));
-
-        QFont englishFont = numberFont;
-        englishFont.setPixelSize(6);
-        englishFont.setLetterSpacing(QFont::AbsoluteSpacing, 0.6);
-        painter.setFont(englishFont);
-        painter.setPen(isChecked()
-            ? StyleTokens::Colors::fromHex(
-                  StyleTokens::Colors::kActionPressed)
-            : faint);
-        painter.drawText(QRect(29, 30, 43, 14),
-                         Qt::AlignLeft | Qt::AlignVCenter,
-                         QString::fromLatin1(text.english));
+                         localizedLabel);
 
         QColor dot = StyleTokens::Colors::fromHex(
             StyleTokens::Colors::kTextFaint);
@@ -200,7 +192,8 @@ void WorkflowRail::setupUi() {
     layout->setContentsMargins(10, 14, 10, 10);
     layout->setSpacing(7);
 
-    auto* kicker = new QLabel(QStringLiteral("WORKFLOW"), this);
+    auto* kicker = new QLabel(
+        QCoreApplication::translate("Nebulens", "工作流"), this);
     kicker->setObjectName(QStringLiteral("workflowKicker"));
     kicker->setAlignment(Qt::AlignCenter);
     layout->addWidget(kicker);

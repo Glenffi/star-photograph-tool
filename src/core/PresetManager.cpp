@@ -1,4 +1,6 @@
 #include "PresetManager.h"
+
+#include <QCoreApplication>
 #include <QFile>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -9,7 +11,7 @@ QList<Preset> PresetManager::builtinPresets() {
 
     // 银河广角
     Preset milkyWay;
-    milkyWay.name = "银河广角";
+    milkyWay.name = QCoreApplication::translate("Nebulens", "银河广角");
     milkyWay.alignMethod = "star";
     milkyWay.stackMethod = "median";
     milkyWay.kappaValue = 2.5;
@@ -27,7 +29,7 @@ QList<Preset> PresetManager::builtinPresets() {
 
     // 深空天体
     Preset deepSky;
-    deepSky.name = "深空天体";
+    deepSky.name = QCoreApplication::translate("Nebulens", "深空天体");
     deepSky.alignMethod = "star";
     deepSky.stackMethod = "winsorized";
     deepSky.kappaValue = 2.5;

@@ -1,5 +1,6 @@
 #include "VerifiedDownloadFinalizer.h"
 
+#include <QCoreApplication>
 #include <QCryptographicHash>
 #include <QDir>
 #include <QFile>
@@ -26,12 +27,12 @@ bool verifyFile(const QString& path, qint64 expectedSize,
                 const QByteArray& expectedSha256Hex, QString& error) {
     QFile file(path);
     if (!file.open(QIODevice::ReadOnly)) {
-        error = QStringLiteral("无法读取已下载的安装包：%1")
+        error = QCoreApplication::translate("Nebulens", "无法读取已下载的安装包：%1")
                     .arg(file.errorString());
         return false;
     }
     if (file.size() != expectedSize) {
-        error = QStringLiteral("安装包大小不匹配（实际 %1，预期 %2）")
+        error = QCoreApplication::translate("Nebulens", "安装包大小不匹配（实际 %1，预期 %2）")
                     .arg(file.size())
                     .arg(expectedSize);
         return false;
@@ -41,14 +42,14 @@ bool verifyFile(const QString& path, qint64 expectedSize,
     while (!file.atEnd()) {
         const QByteArray block = file.read(1024 * 1024);
         if (block.isEmpty() && file.error() != QFileDevice::NoError) {
-            error = QStringLiteral("读取安装包失败：%1")
+            error = QCoreApplication::translate("Nebulens", "读取安装包失败：%1")
                         .arg(file.errorString());
             return false;
         }
         hash.addData(block);
     }
     if (hash.result().toHex().toLower() != expectedSha256Hex.toLower()) {
-        error = QStringLiteral("安装包 SHA-256 校验失败");
+        error = QCoreApplication::translate("Nebulens", "安装包 SHA-256 校验失败");
         return false;
     }
     return true;
@@ -83,7 +84,7 @@ bool VerifiedDownloadFinalizer::commit(
         fileName == QStringLiteral(".") || fileName == QStringLiteral("..") ||
         fileName.contains('/') || fileName.contains('\\') ||
         expectedSize <= 0 || !validSha256(expectedSha256Hex)) {
-        error = QStringLiteral("安装包落盘参数无效");
+        error = QCoreApplication::translate("Nebulens", "安装包落盘参数无效");
         return false;
     }
     if (!verifyFile(temporaryPath, expectedSize, expectedSha256Hex, error)) {
@@ -133,20 +134,19 @@ bool VerifiedDownloadFinalizer::commit(
                 return true;
             }
             QFile::remove(candidate);
-            error = QStringLiteral("复制后的安装包校验失败：%1")
+            error = QCoreApplication::translate("Nebulens", "复制后的安装包校验失败：%1")
                         .arg(copiedFileError);
             return false;
         }
         lastCopyError = source.errorString();
         if (QFileInfo::exists(candidate)) continue;
 
-        error = QStringLiteral(
-                    "无法保存安装包到下载目录。\n"
+        error = QCoreApplication::translate("Nebulens", "无法保存安装包到下载目录。\n"
                     "目标：%1\n移动失败：%2\n复制失败：%3")
                     .arg(candidate, lastRenameError, lastCopyError);
         return false;
     }
 
-    error = QStringLiteral("下载目录中同名安装包过多");
+    error = QCoreApplication::translate("Nebulens", "下载目录中同名安装包过多");
     return false;
 }

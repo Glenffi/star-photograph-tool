@@ -1,5 +1,6 @@
 #include "UpdateManifest.h"
 
+#include <QCoreApplication>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonParseError>
@@ -113,26 +114,26 @@ bool UpdateManifestParser::parse(const QByteArray& json,
     QJsonParseError parseError;
     const QJsonDocument document = QJsonDocument::fromJson(json, &parseError);
     if (parseError.error != QJsonParseError::NoError || !document.isObject()) {
-        error = QStringLiteral("更新清单不是有效的 JSON 对象");
+        error = QCoreApplication::translate("Nebulens", "更新清单不是有效的 JSON 对象");
         return false;
     }
 
     const QJsonObject root = document.object();
     if (root.value(QStringLiteral("schemaVersion")).toInt(-1) != 1) {
-        error = QStringLiteral("不支持的更新清单版本");
+        error = QCoreApplication::translate("Nebulens", "不支持的更新清单版本");
         return false;
     }
 
     const QString version = root.value(QStringLiteral("version")).toString();
     if (!parseSemanticVersion(version).valid) {
-        error = QStringLiteral("更新版本号无效");
+        error = QCoreApplication::translate("Nebulens", "更新版本号无效");
         return false;
     }
 
     const QDateTime publishedAt = QDateTime::fromString(
         root.value(QStringLiteral("publishedAt")).toString(), Qt::ISODate);
     if (!publishedAt.isValid()) {
-        error = QStringLiteral("更新发布时间无效");
+        error = QCoreApplication::translate("Nebulens", "更新发布时间无效");
         return false;
     }
 
@@ -140,7 +141,7 @@ bool UpdateManifestParser::parse(const QByteArray& json,
         root.value(QStringLiteral("platforms")).toObject();
     const QJsonObject package = platforms.value(platform).toObject();
     if (package.isEmpty()) {
-        error = QStringLiteral("当前平台没有可用安装包");
+        error = QCoreApplication::translate("Nebulens", "当前平台没有可用安装包");
         return false;
     }
 
@@ -165,24 +166,24 @@ bool UpdateManifestParser::parse(const QByteArray& json,
     if (fileName.isEmpty() || !safeFileName.match(fileName).hasMatch() ||
         fileName != QFileInfo(fileName).fileName() ||
         fileName != expectedFileName) {
-        error = QStringLiteral("安装包文件名无效");
+        error = QCoreApplication::translate("Nebulens", "安装包文件名无效");
         return false;
     }
     if (!url.isValid() || url.scheme() != QStringLiteral("https") ||
         url.host().isEmpty() || !url.userInfo().isEmpty() ||
         !url.query().isEmpty() || !url.fragment().isEmpty() ||
         url.fileName() != fileName) {
-        error = QStringLiteral("安装包下载地址无效");
+        error = QCoreApplication::translate("Nebulens", "安装包下载地址无效");
         return false;
     }
     if (!validSha256(sha256)) {
-        error = QStringLiteral("安装包 SHA-256 无效");
+        error = QCoreApplication::translate("Nebulens", "安装包 SHA-256 无效");
         return false;
     }
     if (!std::isfinite(sizeValue) || sizeValue < 1.0 ||
         std::floor(sizeValue) != sizeValue ||
         sizeValue > static_cast<double>(kMaximumPackageBytes)) {
-        error = QStringLiteral("安装包大小无效");
+        error = QCoreApplication::translate("Nebulens", "安装包大小无效");
         return false;
     }
 

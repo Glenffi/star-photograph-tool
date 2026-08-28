@@ -150,6 +150,15 @@ jobs:
             throw "windeployqt failed with exit code $LASTEXITCODE"
           }
 
+          $qtRoot = Split-Path (Split-Path $windeployqt -Parent) -Parent
+          $qtBaseChinese = Join-Path $qtRoot "translations\qtbase_zh_CN.qm"
+          if (-not (Test-Path $qtBaseChinese)) {
+            throw "Qt Simplified Chinese translation was not found: $qtBaseChinese"
+          }
+          $translationRoot = Join-Path $packageRoot "translations"
+          New-Item -ItemType Directory -Force -Path $translationRoot | Out-Null
+          Copy-Item $qtBaseChinese $translationRoot
+
           $runtimeDlls = Get-ChildItem -Path $vcpkgBin -Filter *.dll -File
           if ($runtimeDlls.Count -eq 0) {
             throw "No vcpkg runtime DLLs were found in $vcpkgBin"

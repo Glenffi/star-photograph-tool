@@ -1,5 +1,7 @@
 #include "QuickPreviewWorker.h"
 
+#include <QCoreApplication>
+
 #include <utility>
 
 namespace {
@@ -7,25 +9,25 @@ namespace {
 QString stageText(FinishingStage stage) {
     switch (stage) {
     case FinishingStage::ModifiedCameraColor:
-        return QString::fromUtf8("快速预览：改机色彩还原");
+        return QCoreApplication::translate("Nebulens", "快速预览：改机色彩还原");
     case FinishingStage::NoiseReduction:
-        return QString::fromUtf8("快速预览：多尺度降噪");
+        return QCoreApplication::translate("Nebulens", "快速预览：多尺度降噪");
     case FinishingStage::Dehaze:
-        return QString::fromUtf8("快速预览：去雾");
+        return QCoreApplication::translate("Nebulens", "快速预览：去雾");
     case FinishingStage::Stretch:
-        return QString::fromUtf8("快速预览：曲线拉伸");
+        return QCoreApplication::translate("Nebulens", "快速预览：曲线拉伸");
     case FinishingStage::BasicAdjustments:
-        return QString::fromUtf8("快速预览：基础调色");
+        return QCoreApplication::translate("Nebulens", "快速预览：基础调色");
     case FinishingStage::GroundDetail:
-        return QString::fromUtf8("快速预览：地景细节");
+        return QCoreApplication::translate("Nebulens", "快速预览：地景细节");
     case FinishingStage::Sharpening:
-        return QString::fromUtf8("快速预览：锐化");
+        return QCoreApplication::translate("Nebulens", "快速预览：锐化");
     case FinishingStage::StarDefringe:
-        return QString::fromUtf8("快速预览：去紫边");
+        return QCoreApplication::translate("Nebulens", "快速预览：去紫边");
     case FinishingStage::StarReduction:
-        return QString::fromUtf8("快速预览：缩星");
+        return QCoreApplication::translate("Nebulens", "快速预览：缩星");
     }
-    return QString::fromUtf8("快速预览");
+    return QCoreApplication::translate("Nebulens", "快速预览");
 }
 
 } // namespace
@@ -57,7 +59,8 @@ void QuickPreviewWorker::run() {
     m_finishingResult = {};
     m_result.clear();
     if (!m_sourceRgb) {
-        m_finishingResult.error = "快速预览源缓存不存在";
+        m_finishingResult.error = QCoreApplication::translate(
+            "Nebulens", "快速预览源缓存不存在").toStdString();
         return;
     }
 

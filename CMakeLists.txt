@@ -126,6 +126,8 @@ set(CORE_SOURCES
 set(APP_SOURCES
     src/main.cpp
     resources/branding.qrc
+    resources/translations.qrc
+    src/i18n/AppLocalization.cpp
     src/core/ThumbnailGenerator.cpp
     src/ui/ProjectPanel.cpp
     src/ui/PreviewPanel.cpp
@@ -171,6 +173,7 @@ set(CORE_HEADERS
 )
 
 set(APP_HEADERS
+    src/i18n/AppLocalization.h
     src/core/ThumbnailGenerator.h
     src/ui/ProjectPanel.h
     src/ui/PreviewPanel.h
@@ -248,6 +251,31 @@ target_compile_definitions(${PROJECT_NAME} PRIVATE
     STARPROCESSOR_UPDATE_MANIFEST_URL="https://di.nexusgen.net/starprocessor/update.json")
 
 if(BUILD_TESTING)
+    add_executable(NebulensLocalizationTests
+        tests/LocalizationCatalogTests.cpp
+        src/i18n/AppLocalization.cpp
+        src/i18n/AppLocalization.h)
+    target_include_directories(NebulensLocalizationTests PRIVATE
+        ${CMAKE_SOURCE_DIR}/src)
+    target_compile_definitions(NebulensLocalizationTests PRIVATE
+        NEBULENS_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+    target_link_libraries(NebulensLocalizationTests PRIVATE Qt6::Core)
+    add_test(NAME localization_catalog COMMAND NebulensLocalizationTests)
+
+    add_executable(NebulensLocalizationDialogTests
+        tests/LocalizationDialogTests.cpp
+        src/i18n/AppLocalization.cpp
+        src/i18n/AppLocalization.h
+        resources/translations.qrc)
+    target_include_directories(NebulensLocalizationDialogTests PRIVATE
+        ${CMAKE_SOURCE_DIR}/src)
+    target_link_libraries(NebulensLocalizationDialogTests PRIVATE
+        Qt6::Widgets)
+    add_test(NAME localization_dialogs
+        COMMAND NebulensLocalizationDialogTests)
+    set_tests_properties(localization_dialogs PROPERTIES
+        ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
     add_executable(StarProcessorBasicAdjustmentTests
         tests/BasicAdjustmentEngineTests.cpp)
     target_link_libraries(StarProcessorBasicAdjustmentTests

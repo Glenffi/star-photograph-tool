@@ -33,6 +33,7 @@
 - 磁盘缓存分块堆栈、基于实时可用内存的处理前资源门禁，以及受控分辨率结果预览
 - 基于全部对齐变换的共同有效区域自动裁切，避免少帧覆盖边界进入成片
 - 面向六类拍摄任务的暗房工作台：顶部切换场景，左侧按“素材 / 校准 / 对齐 / 合成 / 调整 / 输出”导航，中央专注影像，底部管理 Light 胶片带，右侧只显示当前阶段参数
+- 简体中文 / English 完整本地化：设置中选择语言，重启后统一更新菜单、参数、处理状态、错误提示和 Qt 文件对话框；旧用户默认保持简体中文
 - 有界内存的“处理前 / 处理后 / 同坐标滑动分屏”比较；素材、正式结果与快速预览分别保存缩放、滚动、对比和蒙版状态，返回检查位置时不会重置
 - 主窗口内任务反馈：状态栏 2px 真实进度线、处理/取消主按钮、5 秒素材删除撤销、结果失效但保留可看、可复制处理报告
 - 输出目录最近 5 个 Nebulens TIFF 结果；后台使用 libtiff 读取并生成 2400px 只读预览，不把历史文件误认为当前可导出结果
@@ -106,6 +107,8 @@ Nebulens/
 │   │   └── TaskStatusBar.h/cpp        # 单行状态与真实任务进度线
 │   ├── update/
 │   │   └── UpdateManager.h/cpp        # HTTPS 检查、下载、大小与 SHA-256 校验
+│   ├── i18n/
+│   │   └── AppLocalization.h/cpp      # 中英文偏好、翻译器与安全重启
 │   └── workers/
 │       ├── ProcessingWorker.h/cpp     # 正式处理管线后台执行
 │       ├── ExportWorker.h/cpp         # 完整分辨率手动导出的可取消后台任务
@@ -113,7 +116,11 @@ Nebulens/
 │       └── MaskPreviewWorker.h/cpp    # 天地蒙版快速预览
 ├── cmake/
 │   └── Info.plist.in            # macOS Bundle 配置
+├── translations/
+│   └── nebulens_en.ts            # 可审阅的英文翻译源
 ├── tests/
+│   ├── LocalizationCatalogTests.cpp # 翻译完整性、占位符与 QM 加载
+│   ├── LocalizationDialogTests.cpp  # 中英文 Qt 文件对话框回归
 │   ├── CoreTests.cpp            # 核心算法与 TIFF ICC 回归测试
 │   ├── WorkerTests.cpp          # 任务取消与失败状态测试
 │   ├── StarTrailEngineTests.cpp # 星轨累积、渐隐方向与输入校验测试
@@ -239,6 +246,7 @@ Windows Server 2022 上使用 MSVC 原生构建。推送与 CMake 版本一致�
 上生成，构建会拒绝任何实际最低系统版本高于 14.0 的依赖。
 
 客户端打包流程见 [`docs/release-packaging.md`](docs/release-packaging.md)，更新服务器发布流程见 [`docs/update-distribution.md`](docs/update-distribution.md)。
+双语文本规范、翻译更新命令和视觉检查方法见 [`docs/localization.md`](docs/localization.md)。
 
 ## 真实 RAW 样片回归
 

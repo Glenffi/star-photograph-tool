@@ -2,6 +2,7 @@
 #include "StyleTokens.h"
 #include "UiAssets.h"
 #include "../core/ThumbnailGenerator.h"
+#include <QCoreApplication>
 #include <QComboBox>
 #include <QScrollArea>
 #include <QVBoxLayout>
@@ -101,7 +102,7 @@ public:
     explicit ReferenceDot(QWidget* parent = nullptr) : QWidget(parent) {
         setAttribute(Qt::WA_TransparentForMouseEvents);
         setFixedSize(8, 8);
-        setToolTip(QString::fromUtf8("参考帧"));
+        setToolTip(QCoreApplication::translate("Nebulens", "参考帧"));
     }
 
 protected:
@@ -119,31 +120,31 @@ protected:
 
 QString formatExposure(double exposureTime) {
     if (exposureTime <= 0.0) {
-        return QString::fromUtf8("曝光 --");
+        return QCoreApplication::translate("Nebulens", "曝光 --");
     }
 
     if (exposureTime >= 1.0) {
         const int decimals = exposureTime < 10.0 ? 1 : 0;
-        return QString::fromUtf8("%1 s").arg(exposureTime, 0, 'f', decimals);
+        return QCoreApplication::translate("Nebulens", "%1 s").arg(exposureTime, 0, 'f', decimals);
     }
 
-    return QString::fromUtf8("1/%1 s").arg(qRound(1.0 / exposureTime));
+    return QCoreApplication::translate("Nebulens", "1/%1 s").arg(qRound(1.0 / exposureTime));
 }
 
 QString formatMetadata(const FileItem& item) {
     if (item.metadataFailed) {
-        return QString::fromUtf8("RAW 读取失败");
+        return QCoreApplication::translate("Nebulens", "RAW 读取失败");
     }
     if (!item.metadataLoaded) {
-        return QString::fromUtf8("正在读取元数据...");
+        return QCoreApplication::translate("Nebulens", "正在读取元数据...");
     }
     const QString iso = item.iso > 0
-        ? QString::fromUtf8("ISO %1").arg(item.iso)
-        : QString::fromUtf8("ISO --");
+        ? QCoreApplication::translate("Nebulens", "ISO %1").arg(item.iso)
+        : QCoreApplication::translate("Nebulens", "ISO --");
     const QString focalLength = item.focalLength > 0
-        ? QString::fromUtf8("%1 mm").arg(item.focalLength)
-        : QString::fromUtf8("焦距 --");
-    return QString::fromUtf8("%1 · %2 · %3")
+        ? QCoreApplication::translate("Nebulens", "%1 mm").arg(item.focalLength)
+        : QCoreApplication::translate("Nebulens", "焦距 --");
+    return QCoreApplication::translate("Nebulens", "%1 · %2 · %3")
         .arg(iso, formatExposure(item.exposureTime), focalLength);
 }
 
@@ -235,11 +236,14 @@ void FileCard::updateStyle() {
     setProperty("excluded", m_isExcluded);
 
     if (m_isReference && m_isExcluded) {
-        m_statusLabel->setText(QStringLiteral("REF / OUT"));
+        m_statusLabel->setText(QCoreApplication::translate(
+            "Nebulens", "参考 / 排除"));
     } else if (m_isReference) {
-        m_statusLabel->setText(QStringLiteral("REF"));
+        m_statusLabel->setText(QCoreApplication::translate(
+            "Nebulens", "参考"));
     } else if (m_isExcluded) {
-        m_statusLabel->setText(QStringLiteral("OUT"));
+        m_statusLabel->setText(QCoreApplication::translate(
+            "Nebulens", "排除"));
     } else {
         m_statusLabel->setText("");
     }
@@ -247,10 +251,10 @@ void FileCard::updateStyle() {
     m_referenceDot->setVisible(false);
     m_opacityEffect->setOpacity(m_isExcluded ? 0.4 : 1.0);
 
-    QString accessible = m_fileName + QString::fromUtf8("，") +
+    QString accessible = m_fileName + QCoreApplication::translate("Nebulens", "，") +
         m_metaLabel->text();
-    if (m_isReference) accessible += QString::fromUtf8("，参考帧");
-    if (m_isExcluded) accessible += QString::fromUtf8("，已排除");
+    if (m_isReference) accessible += QCoreApplication::translate("Nebulens", "，参考帧");
+    if (m_isExcluded) accessible += QCoreApplication::translate("Nebulens", "，已排除");
     setAccessibleName(accessible);
 
     update();
@@ -415,8 +419,8 @@ void ProjectPanel::setCalibrationSummary(
     if (m_darkFlatSummary) m_darkFlatSummary->setText(darkFlat);
     if (m_calibrationReady) {
         m_calibrationReady->setText(
-            ready ? QString::fromUtf8("已就绪")
-                  : QString::fromUtf8("来源不完整"));
+            ready ? QCoreApplication::translate("Nebulens", "已就绪")
+                  : QCoreApplication::translate("Nebulens", "来源不完整"));
         m_calibrationReady->setProperty(
             StyleTokens::Properties::kStatusRole,
             QString::fromLatin1(
@@ -461,26 +465,26 @@ void ProjectPanel::setupUI() {
 
     m_contextMenu = new QMenu(this);
 
-    m_referenceAction = new QAction(QString::fromUtf8("设为参考帧"), this);
+    m_referenceAction = new QAction(QCoreApplication::translate("Nebulens", "设为参考帧"), this);
     connect(m_referenceAction, &QAction::triggered, this, &ProjectPanel::onSetReferenceFrame);
     m_contextMenu->addAction(m_referenceAction);
 
-    m_excludeAction = new QAction(QString::fromUtf8("排除 / 恢复"), this);
+    m_excludeAction = new QAction(QCoreApplication::translate("Nebulens", "排除 / 恢复"), this);
     connect(m_excludeAction, &QAction::triggered, this, &ProjectPanel::onExcludeSelected);
     m_contextMenu->addAction(m_excludeAction);
 
     m_contextMenu->addSeparator();
-    m_removeAction = new QAction(QString::fromUtf8("从列表移除"), this);
+    m_removeAction = new QAction(QCoreApplication::translate("Nebulens", "从列表移除"), this);
     connect(m_removeAction, &QAction::triggered, this, &ProjectPanel::onRemoveFromList);
     m_contextMenu->addAction(m_removeAction);
 
     m_contextMenu->addSeparator();
-    m_revealAction = new QAction(QString::fromUtf8("在文件管理器中显示"), this);
+    m_revealAction = new QAction(QCoreApplication::translate("Nebulens", "在文件管理器中显示"), this);
     connect(m_revealAction, &QAction::triggered,
             this, &ProjectPanel::onRevealInFileManager);
     m_contextMenu->addAction(m_revealAction);
 
-    m_metadataAction = new QAction(QString::fromUtf8("查看元数据"), this);
+    m_metadataAction = new QAction(QCoreApplication::translate("Nebulens", "查看元数据"), this);
     connect(m_metadataAction, &QAction::triggered,
             this, &ProjectPanel::onViewMetadata);
     m_contextMenu->addAction(m_metadataAction);
@@ -504,7 +508,8 @@ QWidget* ProjectPanel::setupHeader() {
     titleRow->setContentsMargins(0, 0, 0, 0);
     titleRow->setSpacing(StyleTokens::Spacing::kBase);
 
-    auto* titleLabel = new QLabel(QStringLiteral("LIGHT"), header);
+    auto* titleLabel = new QLabel(
+        QCoreApplication::translate("Nebulens", "亮场素材"), header);
     titleLabel->setObjectName(QStringLiteral("filmstripKicker"));
     titleRow->addWidget(titleLabel);
 
@@ -520,7 +525,7 @@ QWidget* ProjectPanel::setupHeader() {
         QSize(StyleTokens::Controls::kIconSize,
               StyleTokens::Controls::kIconSize));
     m_headerImportBtn->setCursor(Qt::PointingHandCursor);
-    m_headerImportBtn->setToolTip(QString::fromUtf8("导入 RAW 素材"));
+    m_headerImportBtn->setToolTip(QCoreApplication::translate("Nebulens", "导入 RAW 素材"));
     m_headerImportBtn->setAccessibleName(m_headerImportBtn->toolTip());
     connect(m_headerImportBtn, &QPushButton::clicked,
             this, &ProjectPanel::onImportClicked);
@@ -532,9 +537,9 @@ QWidget* ProjectPanel::setupHeader() {
     setStringProperty(m_countLabel, StyleTokens::Properties::kTextRole,
                       StyleTokens::Properties::kTitle);
     headerLayout->addWidget(m_countLabel);
-    auto* hint = new QLabel(QString::fromUtf8("点击查看 · 空格排除"), header);
+    auto* hint = new QLabel(QCoreApplication::translate("Nebulens", "点击查看 · 空格排除"), header);
     hint->setToolTip(hint->text());
-    hint->setText(QString::fromUtf8("空格排除"));
+    hint->setText(QCoreApplication::translate("Nebulens", "空格排除"));
     setStringProperty(hint, StyleTokens::Properties::kTextRole,
                       StyleTokens::Properties::kCaption);
     headerLayout->addWidget(hint);
@@ -556,23 +561,23 @@ QWidget* ProjectPanel::setupCalibrationSummary() {
     layout->setSpacing(StyleTokens::Spacing::kMicro);
 
     auto* titleRow = new QHBoxLayout();
-    auto* title = new QLabel(QString::fromUtf8("校准帧"), panel);
+    auto* title = new QLabel(QCoreApplication::translate("Nebulens", "校准帧"), panel);
     setStringProperty(title, StyleTokens::Properties::kTextRole,
                       StyleTokens::Properties::kTitle);
     titleRow->addWidget(title);
-    m_calibrationReady = new QLabel(QString::fromUtf8("来源不完整"), panel);
+    m_calibrationReady = new QLabel(QCoreApplication::translate("Nebulens", "来源不完整"), panel);
     setStringProperty(m_calibrationReady,
                       StyleTokens::Properties::kTextRole,
                       StyleTokens::Properties::kCaption);
     titleRow->addWidget(m_calibrationReady);
     titleRow->addStretch();
     m_calibrationSettingsBtn = new QPushButton(
-        QString::fromUtf8("设置"), panel);
+        QCoreApplication::translate("Nebulens", "设置"), panel);
     setStringProperty(m_calibrationSettingsBtn,
                       StyleTokens::Properties::kVariant,
                       StyleTokens::Properties::kGhost);
     m_calibrationSettingsBtn->setAccessibleName(
-        QString::fromUtf8("设置深空校准帧"));
+        QCoreApplication::translate("Nebulens", "设置深空校准帧"));
     connect(m_calibrationSettingsBtn, &QPushButton::clicked,
             this, &ProjectPanel::calibrationSettingsRequested);
     titleRow->addWidget(m_calibrationSettingsBtn);
@@ -587,7 +592,7 @@ QWidget* ProjectPanel::setupCalibrationSummary() {
         setStringProperty(nameLabel, StyleTokens::Properties::kTextRole,
                           StyleTokens::Properties::kCaption);
         row->addWidget(nameLabel);
-        valueLabel = new QLabel(QString::fromUtf8("未设置"), panel);
+        valueLabel = new QLabel(QCoreApplication::translate("Nebulens", "未设置"), panel);
         setStringProperty(valueLabel, StyleTokens::Properties::kTextRole,
                           StyleTokens::Properties::kMono);
         valueLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
@@ -616,19 +621,19 @@ void ProjectPanel::setupEmptyState() {
     m_emptyLayout->setAlignment(Qt::AlignCenter);
 
     auto* promptLabel = new QLabel(
-        QString::fromUtf8("暂无素材 · 可拖入"), m_emptyState);
+        QCoreApplication::translate("Nebulens", "暂无素材 · 可拖入"), m_emptyState);
     setStringProperty(promptLabel, StyleTokens::Properties::kTextRole,
                       StyleTokens::Properties::kSecondary);
     promptLabel->setAlignment(Qt::AlignCenter);
     promptLabel->setWordWrap(false);
     m_emptyLayout->addWidget(promptLabel);
 
-    m_emptyImportBtn = new QPushButton(QString::fromUtf8("选择文件"), m_emptyState);
+    m_emptyImportBtn = new QPushButton(QCoreApplication::translate("Nebulens", "选择文件"), m_emptyState);
     setStringProperty(m_emptyImportBtn, StyleTokens::Properties::kVariant,
                       StyleTokens::Properties::kGhost);
     m_emptyImportBtn->setCursor(Qt::PointingHandCursor);
     m_emptyImportBtn->setAccessibleName(
-        QString::fromUtf8("选择 RAW 素材文件"));
+        QCoreApplication::translate("Nebulens", "选择 RAW 素材文件"));
     connect(m_emptyImportBtn, &QPushButton::clicked, this, &ProjectPanel::onImportClicked);
     m_emptyImportBtn->hide();
 }
@@ -669,7 +674,7 @@ void ProjectPanel::setupBottomBar() {
         StyleTokens::Spacing::kPanelPadding, 0);
     setStringProperty(m_bottomLabel, StyleTokens::Properties::kTextRole,
                       StyleTokens::Properties::kStatus);
-    m_bottomLabel->setText(QString::fromUtf8("0 张 · 还需 2 张"));
+    m_bottomLabel->setText(QCoreApplication::translate("Nebulens", "0 张 · 还需 2 张"));
 }
 
 void ProjectPanel::showFileList() {
@@ -772,14 +777,14 @@ void ProjectPanel::addFileCard(const FileItem& item, int index) {
         const FileItem& item = m_fileItems[m_contextMenuIndex];
         m_referenceAction->setText(
             item.isReferenceFrame
-                ? QString::fromUtf8("当前参考帧")
-                : QString::fromUtf8("设为参考帧"));
+                ? QCoreApplication::translate("Nebulens", "当前参考帧")
+                : QCoreApplication::translate("Nebulens", "设为参考帧"));
         m_referenceAction->setEnabled(
             m_editingEnabled && !item.isReferenceFrame);
         m_excludeAction->setText(
             item.isExcluded
-                ? QString::fromUtf8("恢复此帧")
-                : QString::fromUtf8("排除此帧"));
+                ? QCoreApplication::translate("Nebulens", "恢复此帧")
+                : QCoreApplication::translate("Nebulens", "排除此帧"));
         m_excludeAction->setEnabled(
             m_editingEnabled && (!item.isReferenceFrame || item.isExcluded));
         m_removeAction->setEnabled(m_editingEnabled);
@@ -1018,16 +1023,16 @@ void ProjectPanel::updateBottomBar() {
     const int required = minimumFrameCount();
     const bool ready = available >= required;
     const QString status = ready
-        ? QString::fromUtf8("已就绪")
-        : QString::fromUtf8("还需 %1 张").arg(required - available);
+        ? QCoreApplication::translate("Nebulens", "已就绪")
+        : QCoreApplication::translate("Nebulens", "还需 %1 张").arg(required - available);
     m_bottomLabel->setText(
-        QString::fromUtf8("%1 张 · %2").arg(available).arg(status));
+        QCoreApplication::translate("Nebulens", "%1 张 · %2").arg(available).arg(status));
 
     const QString reference = referenceName.isEmpty()
-        ? QString::fromUtf8("自动")
+        ? QCoreApplication::translate("Nebulens", "自动")
         : referenceName;
     m_bottomLabel->setToolTip(
-        QString::fromUtf8("共 %1 张，排除 %2 张，参考帧：%3")
+        QCoreApplication::translate("Nebulens", "共 %1 张，排除 %2 张，参考帧：%3")
             .arg(total)
             .arg(excluded)
             .arg(reference));

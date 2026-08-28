@@ -4,6 +4,7 @@
 #include "../core/PreviewToneMapper.h"
 #include "../core/RawImageLoader.h"
 #include "../core/SkyGroundMask.h"
+#include <QCoreApplication>
 #include <QScrollArea>
 #include <QFrame>
 #include <QStackedLayout>
@@ -131,8 +132,8 @@ void PreviewPanel::setupTopBar() {
         return btn;
     };
 
-    m_resultBtn = createToolBtn(m_topBar, QString::fromUtf8("结果"),
-                                QString::fromUtf8("回到当前处理结果 (R)"));
+    m_resultBtn = createToolBtn(m_topBar, QCoreApplication::translate("Nebulens", "结果"),
+                                QCoreApplication::translate("Nebulens", "回到当前处理结果 (R)"));
     m_resultBtn->setIcon(UiAssets::icon(
         UiAssets::Glyph::Result,
         tokenColor(StyleTokens::Colors::kAccent)));
@@ -152,7 +153,7 @@ void PreviewPanel::setupTopBar() {
     layout->addWidget(m_resultStateLabel);
 
     m_fitBtn = createToolBtn(m_topBar, QString(),
-                             QString::fromUtf8("适应视图 (F)"));
+                             QCoreApplication::translate("Nebulens", "适应视图 (F)"));
     m_fitBtn->setProperty(StyleTokens::Properties::kVariant,
                           StyleTokens::Properties::kIcon);
     m_fitBtn->setIcon(UiAssets::icon(
@@ -162,11 +163,11 @@ void PreviewPanel::setupTopBar() {
     layout->addWidget(m_fitBtn);
 
     m_zoom100Btn = createToolBtn(m_topBar, "100%",
-                                 QString::fromUtf8("显示实际像素 (1)"));
+                                 QCoreApplication::translate("Nebulens", "显示实际像素 (1)"));
     connect(m_zoom100Btn, &QPushButton::clicked, this, &PreviewPanel::onZoom100);
     layout->addWidget(m_zoom100Btn);
 
-    m_zoomOutBtn = createToolBtn(m_topBar, QString(), QString::fromUtf8("缩小 (-)"));
+    m_zoomOutBtn = createToolBtn(m_topBar, QString(), QCoreApplication::translate("Nebulens", "缩小 (-)"));
     m_zoomOutBtn->setProperty(StyleTokens::Properties::kVariant,
                               StyleTokens::Properties::kIcon);
     m_zoomOutBtn->setIcon(UiAssets::icon(
@@ -175,7 +176,7 @@ void PreviewPanel::setupTopBar() {
     connect(m_zoomOutBtn, &QPushButton::clicked, this, &PreviewPanel::onZoomOut);
     layout->addWidget(m_zoomOutBtn);
 
-    m_zoomInBtn = createToolBtn(m_topBar, QString(), QString::fromUtf8("放大 (+)"));
+    m_zoomInBtn = createToolBtn(m_topBar, QString(), QCoreApplication::translate("Nebulens", "放大 (+)"));
     m_zoomInBtn->setProperty(StyleTokens::Properties::kVariant,
                              StyleTokens::Properties::kIcon);
     m_zoomInBtn->setIcon(UiAssets::icon(
@@ -201,8 +202,8 @@ void PreviewPanel::setupTopBar() {
     maskLayout->setContentsMargins(4, 2, 4, 2);
     maskLayout->setSpacing(4);
     m_maskBrushBtn = createToolBtn(m_maskEditControls,
-        QString::fromUtf8("修补地景"),
-        QString::fromUtf8("粗略涂过漏检地景，松手后自动贴合真实边缘"));
+        QCoreApplication::translate("Nebulens", "修补地景"),
+        QCoreApplication::translate("Nebulens", "粗略涂过漏检地景，松手后自动贴合真实边缘"));
     m_maskBrushBtn->setObjectName("maskGroundHintButton");
     m_maskBrushBtn->setIcon(
         UiAssets::icon(UiAssets::Glyph::Brush,
@@ -221,7 +222,7 @@ void PreviewPanel::setupTopBar() {
     m_maskBrushSize->setRange(8, 120);
     m_maskBrushSize->setValue(36);
     m_maskBrushSize->setFixedWidth(84);
-    m_maskBrushSize->setToolTip(QString::fromUtf8("粗略提示笔刷直径"));
+    m_maskBrushSize->setToolTip(QCoreApplication::translate("Nebulens", "粗略提示笔刷直径"));
     maskLayout->addWidget(m_maskBrushSize);
     m_maskBrushSizeLabel = new QLabel("36 px", m_maskEditControls);
     m_maskBrushSizeLabel->setProperty(StyleTokens::Properties::kTextRole,
@@ -236,7 +237,7 @@ void PreviewPanel::setupTopBar() {
     maskLayout->addWidget(m_maskBrushSizeLabel);
 
     m_maskUndoBtn = createToolBtn(m_maskEditControls, QString(),
-                                  QString::fromUtf8("撤销上一笔"));
+                                  QCoreApplication::translate("Nebulens", "撤销上一笔"));
     m_maskUndoBtn->setProperty(StyleTokens::Properties::kVariant,
                                StyleTokens::Properties::kIcon);
     m_maskUndoBtn->setObjectName("maskGroundHintUndo");
@@ -247,7 +248,7 @@ void PreviewPanel::setupTopBar() {
             this, &PreviewPanel::undoGroundHint);
     maskLayout->addWidget(m_maskUndoBtn);
     m_maskResetBtn = createToolBtn(m_maskEditControls, QString(),
-                                   QString::fromUtf8("恢复自动检测"));
+                                   QCoreApplication::translate("Nebulens", "恢复自动检测"));
     m_maskResetBtn->setProperty(StyleTokens::Properties::kVariant,
                                 StyleTokens::Properties::kIcon);
     m_maskResetBtn->setObjectName("maskGroundHintReset");
@@ -258,7 +259,7 @@ void PreviewPanel::setupTopBar() {
             this, &PreviewPanel::resetGroundHints);
     maskLayout->addWidget(m_maskResetBtn);
     m_maskDoneBtn = createToolBtn(m_maskEditControls, QString(),
-                                  QString::fromUtf8("完成蒙版修补"));
+                                  QCoreApplication::translate("Nebulens", "完成蒙版修补"));
     m_maskDoneBtn->setProperty(StyleTokens::Properties::kVariant,
                                StyleTokens::Properties::kIcon);
     m_maskDoneBtn->setObjectName("maskGroundHintDone");
@@ -280,9 +281,9 @@ void PreviewPanel::setupTopBar() {
     compareLayout->setSpacing(0);
     m_viewModeGroup = new QButtonGroup(this);
     m_viewModeGroup->setExclusive(true);
-    m_beforeBtn = new QPushButton(QString::fromUtf8("处理前"), m_compareControl);
-    m_afterBtn = new QPushButton(QString::fromUtf8("处理后"), m_compareControl);
-    m_splitBtn = new QPushButton(QString::fromUtf8("分屏"), m_compareControl);
+    m_beforeBtn = new QPushButton(QCoreApplication::translate("Nebulens", "处理前"), m_compareControl);
+    m_afterBtn = new QPushButton(QCoreApplication::translate("Nebulens", "处理后"), m_compareControl);
+    m_splitBtn = new QPushButton(QCoreApplication::translate("Nebulens", "分屏"), m_compareControl);
     for (QPushButton* button : {m_beforeBtn, m_afterBtn, m_splitBtn}) {
         button->setCheckable(true);
         button->setCursor(Qt::PointingHandCursor);
@@ -299,8 +300,8 @@ void PreviewPanel::setupTopBar() {
     m_compareControl->setVisible(false);
     layout->addWidget(m_compareControl);
 
-    m_maskOverlayBtn = createToolBtn(m_topBar, QString::fromUtf8("蒙版"),
-                                     QString::fromUtf8("显示或隐藏蒙版叠加 (M)"));
+    m_maskOverlayBtn = createToolBtn(m_topBar, QCoreApplication::translate("Nebulens", "蒙版"),
+                                     QCoreApplication::translate("Nebulens", "显示或隐藏蒙版叠加 (M)"));
     m_maskOverlayBtn->setCheckable(true);
     m_maskOverlayBtn->setVisible(false);
     connect(m_maskOverlayBtn, &QPushButton::clicked,
@@ -308,7 +309,7 @@ void PreviewPanel::setupTopBar() {
     layout->addWidget(m_maskOverlayBtn);
 
     m_infoBtn = createToolBtn(m_topBar, QString(),
-                              QString::fromUtf8("灰点吸管 (G)"));
+                              QCoreApplication::translate("Nebulens", "灰点吸管 (G)"));
     m_infoBtn->setProperty(StyleTokens::Properties::kVariant,
                            StyleTokens::Properties::kIcon);
     m_infoBtn->setIcon(UiAssets::icon(
@@ -332,14 +333,14 @@ void PreviewPanel::setupEmptyState() {
     m_emptyIcon = new QLabel(m_emptyState);
     m_emptyIcon->hide();
 
-    m_emptyText = new QLabel(QString::fromUtf8("拖入一组 RAW 开始"), m_emptyState);
+    m_emptyText = new QLabel(QCoreApplication::translate("Nebulens", "拖入一组 RAW 开始"), m_emptyState);
     m_emptyText->setProperty(StyleTokens::Properties::kTextRole,
                              StyleTokens::Properties::kDisplay);
     m_emptyText->setAlignment(Qt::AlignCenter);
     emptyLayout->addWidget(m_emptyText);
 
     m_emptyFormat = new QLabel(
-        QString::fromUtf8("选择文件，或直接拖入画布"),
+        QCoreApplication::translate("Nebulens", "选择文件，或直接拖入画布"),
         m_emptyState
     );
     m_emptyFormat->setProperty(StyleTokens::Properties::kTextRole,
@@ -347,7 +348,7 @@ void PreviewPanel::setupEmptyState() {
     m_emptyFormat->setAlignment(Qt::AlignCenter);
     emptyLayout->addWidget(m_emptyFormat);
 
-    m_emptyImportBtn = new QPushButton(QString::fromUtf8("选择文件"), m_emptyState);
+    m_emptyImportBtn = new QPushButton(QCoreApplication::translate("Nebulens", "选择文件"), m_emptyState);
     m_emptyImportBtn->setProperty(StyleTokens::Properties::kVariant,
                                   StyleTokens::Properties::kPrimary);
     m_emptyImportBtn->setIcon(
@@ -406,14 +407,14 @@ void PreviewPanel::setupBottomBar() {
     m_bottomInfo = new QLabel(this);
     m_bottomInfo->setProperty(StyleTokens::Properties::kTextRole,
                               StyleTokens::Properties::kCaption);
-    m_bottomInfo->setText(QString::fromUtf8("缩放: 100% | 就绪"));
+    m_bottomInfo->setText(QCoreApplication::translate("Nebulens", "缩放: 100% | 就绪"));
     layout->addWidget(m_bottomInfo);
 
     m_mouseInfo = new QLabel(this);
     layout->addStretch();
     m_mouseInfo->setProperty(StyleTokens::Properties::kTextRole,
                              StyleTokens::Properties::kMono);
-    m_mouseInfo->setText(QString::fromUtf8("鼠标: — | RGB: —"));
+    m_mouseInfo->setText(QCoreApplication::translate("Nebulens", "鼠标: — | RGB: —"));
     layout->addWidget(m_mouseInfo);
 }
 
@@ -677,10 +678,10 @@ void PreviewPanel::loadImage(const QString& filePath) {
     m_emptyState->setVisible(true);
     m_topBar->setVisible(false);
     m_bottomBar->setVisible(false);
-    m_emptyText->setText(QString::fromUtf8("正在生成 RAW 预览..."));
+    m_emptyText->setText(QCoreApplication::translate("Nebulens", "正在生成 RAW 预览..."));
     m_emptyFormat->setText(info.fileName());
     m_emptyImportBtn->setVisible(false);
-    m_bottomInfo->setText(QString::fromUtf8("正在加载 %1").arg(info.fileName()));
+    m_bottomInfo->setText(QCoreApplication::translate("Nebulens", "正在加载 %1").arg(info.fileName()));
 
     QPointer<PreviewPanel> safePanel(this);
     m_previewPool.start([safePanel, filePath, generation]() {
@@ -718,11 +719,11 @@ void PreviewPanel::loadImage(const QString& filePath) {
                 safePanel->m_emptyImportBtn->setVisible(true);
                 if (image.isNull()) {
                     safePanel->m_emptyText->setText(
-                        QString::fromUtf8("无法生成这张照片的预览"));
+                        QCoreApplication::translate("Nebulens", "无法生成这张照片的预览"));
                     safePanel->m_emptyFormat->setText(
-                        QString::fromUtf8("可选择其他素材，正式处理不会使用浏览预览"));
+                        QCoreApplication::translate("Nebulens", "可选择其他素材，正式处理不会使用浏览预览"));
                     safePanel->m_bottomInfo->setText(
-                        QString::fromUtf8("预览加载失败 | %1")
+                        QCoreApplication::translate("Nebulens", "预览加载失败 | %1")
                             .arg(QFileInfo(filePath).fileName()));
                     emit safePanel->sourcePreviewFailed(filePath);
                     return;
@@ -804,7 +805,7 @@ void PreviewPanel::load16BitImage(const std::vector<uint16_t>& data, int w,
     m_showingResult = true;
     resetComparison();
     m_currentFilePath.clear();
-    m_imageFileName = QString::fromUtf8("堆栈结果");
+    m_imageFileName = QCoreApplication::translate("Nebulens", "堆栈结果");
     m_imageIso = 0;
     m_imageExposure = 0.0;
     m_imageFocalLength = 0;
@@ -840,7 +841,7 @@ void PreviewPanel::loadRgb16BitImage(const std::vector<uint16_t>& rgb, int w,
     m_showingResult = true;
     resetComparison();
     m_currentFilePath.clear();
-    m_imageFileName = QString::fromUtf8("堆栈结果");
+    m_imageFileName = QCoreApplication::translate("Nebulens", "堆栈结果");
     m_imageIso = 0;
     m_imageExposure = 0.0;
     m_imageFocalLength = 0;
@@ -888,7 +889,7 @@ void PreviewPanel::loadRgb16BitComparison(
     m_currentImage = after;
     m_showingResult = true;
     m_currentFilePath.clear();
-    m_imageFileName = QString::fromUtf8("处理结果");
+    m_imageFileName = QCoreApplication::translate("Nebulens", "处理结果");
     m_imageIso = 0;
     m_imageExposure = 0.0;
     m_imageFocalLength = 0;
@@ -940,15 +941,15 @@ void PreviewPanel::clearImage() {
 
     m_imageLabel->setPixmap(QPixmap());
     m_emptyState->setVisible(true);
-    m_emptyText->setText(QString::fromUtf8("拖入一组 RAW 开始"));
-    m_emptyFormat->setText(QString::fromUtf8("选择文件，或直接拖入画布"));
+    m_emptyText->setText(QCoreApplication::translate("Nebulens", "拖入一组 RAW 开始"));
+    m_emptyFormat->setText(QCoreApplication::translate("Nebulens", "选择文件，或直接拖入画布"));
     m_emptyImportBtn->setVisible(true);
     m_scrollArea->setVisible(false);
     m_topBar->setVisible(false);
     m_maskEditControls->setVisible(false);
     m_bottomBar->setVisible(false);
-    m_bottomInfo->setText(QString::fromUtf8("缩放: 100% | 就绪"));
-    m_mouseInfo->setText(QString::fromUtf8("鼠标: — | RGB: —"));
+    m_bottomInfo->setText(QCoreApplication::translate("Nebulens", "缩放: 100% | 就绪"));
+    m_mouseInfo->setText(QCoreApplication::translate("Nebulens", "鼠标: — | RGB: —"));
 }
 
 void PreviewPanel::setZoom(double zoom) {
@@ -966,7 +967,7 @@ void PreviewPanel::setInfo(const QString& info) {
 void PreviewPanel::setResultLabel(const QString& label) {
     if (!m_showingResult) return;
     m_imageFileName = label.isEmpty()
-        ? QString::fromUtf8("处理结果") : label;
+        ? QCoreApplication::translate("Nebulens", "处理结果") : label;
     if (m_resultStateLabel) {
         m_resultStateLabel->setText(label);
         m_resultStateLabel->setVisible(!label.isEmpty());
@@ -998,7 +999,7 @@ void PreviewPanel::setPointSelectionActive(bool active) {
     }
     updateImageCursor();
     if (m_pointSelectionActive && m_mouseInfo) {
-        m_mouseInfo->setText(QString::fromUtf8("点击应为灰色的天空区域"));
+        m_mouseInfo->setText(QCoreApplication::translate("Nebulens", "点击应为灰色的天空区域"));
     }
 }
 
@@ -1174,10 +1175,10 @@ void PreviewPanel::applyZoom() {
                 QRect(w - 60, 8, 52, 22), 4, 4);
             comparisonPainter.setPen(QColor("#F5FAF8"));
             comparisonPainter.drawText(QRect(8, 8, 52, 22), Qt::AlignCenter,
-                                       QString::fromUtf8("处理前"));
+                                       QCoreApplication::translate("Nebulens", "处理前"));
             comparisonPainter.drawText(
                 QRect(w - 60, 8, 52, 22), Qt::AlignCenter,
-                                       QString::fromUtf8("处理后"));
+                                       QCoreApplication::translate("Nebulens", "处理后"));
         }
         comparisonPainter.end();
         pixmap = m_splitComposite;
@@ -1286,25 +1287,25 @@ const QImage& PreviewPanel::displayedImage() const {
 void PreviewPanel::updateZoomDisplay() {
     QString info;
     if (!m_currentImage.isNull()) {
-        info = QString::fromUtf8("缩放: %1% | %2×%3")
+        info = QCoreApplication::translate("Nebulens", "缩放: %1% | %2×%3")
             .arg(qRound(m_zoom * 100))
             .arg(m_currentImage.width())
             .arg(m_currentImage.height());
 
         if (m_imageIso > 0) {
-            info += QString::fromUtf8(" | ISO %1").arg(m_imageIso);
+            info += QCoreApplication::translate("Nebulens", " | ISO %1").arg(m_imageIso);
         }
         if (m_imageExposure > 0) {
-            info += QString::fromUtf8(" | %1").arg(formatExposureTime(m_imageExposure));
+            info += QCoreApplication::translate("Nebulens", " | %1").arg(formatExposureTime(m_imageExposure));
         }
         if (m_imageFocalLength > 0) {
-            info += QString::fromUtf8(" | %1mm").arg(m_imageFocalLength);
+            info += QCoreApplication::translate("Nebulens", " | %1mm").arg(m_imageFocalLength);
         }
         if (!m_imageFileName.isEmpty()) {
-            info += QString::fromUtf8(" | %1").arg(m_imageFileName);
+            info += QCoreApplication::translate("Nebulens", " | %1").arg(m_imageFileName);
         }
     } else {
-        info = QString::fromUtf8("缩放: %1% | 就绪").arg(qRound(m_zoom * 100));
+        info = QCoreApplication::translate("Nebulens", "缩放: %1% | 就绪").arg(qRound(m_zoom * 100));
     }
     m_bottomInfo->setText(info);
     if (m_zoomLabel) {
@@ -1315,8 +1316,8 @@ void PreviewPanel::updateZoomDisplay() {
         const bool atLimit = m_zoom >= maximumSafeZoom() - 0.0001;
         m_zoomInBtn->setEnabled(!m_currentImage.isNull() && !atLimit);
         m_zoomInBtn->setToolTip(atLimit
-            ? QString::fromUtf8("已达安全缩放上限")
-            : QString::fromUtf8("放大 (+)"));
+            ? QCoreApplication::translate("Nebulens", "已达安全缩放上限")
+            : QCoreApplication::translate("Nebulens", "放大 (+)"));
     }
 }
 
@@ -1390,7 +1391,7 @@ bool PreviewPanel::eventFilter(QObject* watched, QEvent* event) {
         if (m_pointSelectionActive &&
             mouse->button() == Qt::RightButton) {
             setPointSelectionActive(false);
-            m_mouseInfo->setText(QString::fromUtf8("手动灰点采样已取消"));
+            m_mouseInfo->setText(QCoreApplication::translate("Nebulens", "手动灰点采样已取消"));
             return true;
         }
         if (mouse->button() == Qt::LeftButton) {
@@ -1486,11 +1487,11 @@ bool PreviewPanel::eventFilter(QObject* watched, QEvent* event) {
             const QRgb pixel = sampled->pixel(x, y);
             emit mousePixelInfo(x, y, qRed(pixel), qGreen(pixel), qBlue(pixel));
             m_mouseInfo->setText(
-                QString::fromUtf8("鼠标: %1,%2 | RGB: (%3, %4, %5)")
+                QCoreApplication::translate("Nebulens", "鼠标: %1,%2 | RGB: (%3, %4, %5)")
                     .arg(x).arg(y)
                     .arg(qRed(pixel)).arg(qGreen(pixel)).arg(qBlue(pixel)));
         } else {
-            m_mouseInfo->setText(QString::fromUtf8("鼠标: — | RGB: —"));
+            m_mouseInfo->setText(QCoreApplication::translate("Nebulens", "鼠标: — | RGB: —"));
         }
         return true;
     }
@@ -1519,7 +1520,7 @@ bool PreviewPanel::eventFilter(QObject* watched, QEvent* event) {
     }
 
     if (event->type() == QEvent::Leave) {
-        m_mouseInfo->setText(QString::fromUtf8("鼠标: — | RGB: —"));
+        m_mouseInfo->setText(QCoreApplication::translate("Nebulens", "鼠标: — | RGB: —"));
     }
     return QWidget::eventFilter(watched, event);
 }
@@ -1851,8 +1852,8 @@ void PreviewPanel::setMaskRefinementBusy(bool busy) {
     }
     if (m_mouseInfo) {
         m_mouseInfo->setText(busy
-            ? QString::fromUtf8("正在根据笔迹贴合地景边缘...")
-            : QString::fromUtf8("橙色=地景提示 | 蓝色=天空 | 绿色=地景"));
+            ? QCoreApplication::translate("Nebulens", "正在根据笔迹贴合地景边缘...")
+            : QCoreApplication::translate("Nebulens", "橙色=地景提示 | 蓝色=天空 | 绿色=地景"));
     }
 }
 

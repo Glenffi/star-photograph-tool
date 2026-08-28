@@ -1,0 +1,5 @@
+<RCC>
+    <qresource prefix="/i18n">
+        <file alias="nebulens_en.qm">i18n/nebulens_en.qm</file>
+    </qresource>
+</RCC>

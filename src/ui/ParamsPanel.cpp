@@ -4,6 +4,7 @@
 #include "StyleTokens.h"
 #include "UiAssets.h"
 #include "core/PresetManager.h"
+#include <QCoreApplication>
 #include <QScrollArea>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -26,6 +27,7 @@
 #include <QMessageBox>
 #include <QPropertyAnimation>
 #include <QInputDialog>
+#include <QLocale>
 #include <QSet>
 #include <QTabWidget>
 #include <QTabBar>
@@ -40,6 +42,10 @@
 #include <cmath>
 
 namespace {
+int formLabelWidth() {
+    return QLocale().language() == QLocale::English ? 112 : 88;
+}
+
 void setRole(QWidget* widget, const char* role) {
     if (!widget) return;
 
@@ -92,7 +98,7 @@ QString defaultOutputPath() {
 }
 
 QString legacyXingLianOutputPath() {
-    return QDir::homePath() + QString::fromUtf8("/星炼/Output");
+    return QDir::homePath() + QCoreApplication::translate("Nebulens", "/星炼/Output");
 }
 
 QString legacyTechnicalOutputPath() {
@@ -134,10 +140,11 @@ void ParamsPanel::setupUI() {
         StyleTokens::Spacing::kPanelPadding, 12,
         StyleTokens::Spacing::kPanelPadding, 10);
     titleLayout->setSpacing(3);
-    m_stageKicker = new QLabel(QStringLiteral("05 / ADJUST"), titleBar);
+    m_stageKicker = new QLabel(
+        QCoreApplication::translate("Nebulens", "05 / 调整"), titleBar);
     m_stageKicker->setObjectName(QStringLiteral("inspectorKicker"));
     titleLayout->addWidget(m_stageKicker);
-    m_titleLabel = new QLabel(QString::fromUtf8("成片调整"), titleBar);
+    m_titleLabel = new QLabel(QCoreApplication::translate("Nebulens", "成片调整"), titleBar);
     setRole(m_titleLabel, "panelTitle");
     m_titleLabel->setObjectName(QStringLiteral("inspectorTitle"));
     titleLayout->addWidget(m_titleLabel);
@@ -152,12 +159,12 @@ void ParamsPanel::setupUI() {
                                   StyleTokens::Spacing::kPanelPadding,
                                   StyleTokens::Spacing::kBase);
     presetRow->setSpacing(StyleTokens::Spacing::kControlGap);
-    auto* presetLabel = new QLabel(QString::fromUtf8("预设"), m_presetBar);
+    auto* presetLabel = new QLabel(QCoreApplication::translate("Nebulens", "预设"), m_presetBar);
     presetLabel->setFixedWidth(44);
     setRole(presetLabel, "muted");
     presetRow->addWidget(presetLabel);
     m_presetCombo = new QComboBox(m_presetBar);
-    m_presetCombo->addItem(QString::fromUtf8("自定义"));
+    m_presetCombo->addItem(QCoreApplication::translate("Nebulens", "自定义"));
     for (const Preset& preset : PresetManager::builtinPresets()) {
         m_presetCombo->addItem(preset.name);
     }
@@ -200,16 +207,16 @@ void ParamsPanel::setupUI() {
         return contentLayout;
     };
 
-    QVBoxLayout* stackPageLayout = createPage(QString::fromUtf8("堆栈"));
-    QVBoxLayout* adjustPageLayout = createPage(QString::fromUtf8("调整"));
-    QVBoxLayout* outputPageLayout = createPage(QString::fromUtf8("输出"));
+    QVBoxLayout* stackPageLayout = createPage(QCoreApplication::translate("Nebulens", "堆栈"));
+    QVBoxLayout* adjustPageLayout = createPage(QCoreApplication::translate("Nebulens", "调整"));
+    QVBoxLayout* outputPageLayout = createPage(QCoreApplication::translate("Nebulens", "输出"));
     layout->addWidget(m_tabs, 1);
 
     m_assetsGroup = createCollapsibleGroup(
-        QString::fromUtf8("素材与序列"), true);
+        QCoreApplication::translate("Nebulens", "素材与序列"), true);
     auto* assetsLayout = new QVBoxLayout(m_assetsGroup);
     auto* assetsSummary = new QLabel(
-        QString::fromUtf8(
+        QCoreApplication::translate("Nebulens",
             "底部胶片带管理 Light 素材。点击缩略图查看源文件，"
             "空格排除或恢复，右键可设为参考帧。"),
         m_assetsGroup);
@@ -233,17 +240,17 @@ void ParamsPanel::setupUI() {
         value->setMinimumWidth(120);
         assetMetrics->addWidget(value, row, 1);
     };
-    addAssetMetric(0, QString::fromUtf8("可用素材"), m_assetCountValue);
-    addAssetMetric(1, QString::fromUtf8("场景门槛"), m_assetThresholdValue);
-    addAssetMetric(2, QString::fromUtf8("参考帧"), m_assetReferenceValue);
+    addAssetMetric(0, QCoreApplication::translate("Nebulens", "可用素材"), m_assetCountValue);
+    addAssetMetric(1, QCoreApplication::translate("Nebulens", "场景门槛"), m_assetThresholdValue);
+    addAssetMetric(2, QCoreApplication::translate("Nebulens", "参考帧"), m_assetReferenceValue);
     assetsLayout->addLayout(assetMetrics);
     stackPageLayout->addWidget(m_assetsGroup);
 
     m_lightCalibrationGroup = createCollapsibleGroup(
-        QString::fromUtf8("镜头与传感器"), true);
+        QCoreApplication::translate("Nebulens", "镜头与传感器"), true);
     auto* lightCalibrationLayout = new QVBoxLayout(m_lightCalibrationGroup);
     auto* linearNote = new QLabel(
-        QString::fromUtf8(
+        QCoreApplication::translate("Nebulens",
             "当前场景使用 LibRaw 线性 16-bit 解码，并在处理阶段完成"
             "黑电平、白平衡和星点色差校正。深空模式可在此设置"
             " Dark、Flat、Bias 与 Dark Flat。"),
@@ -257,13 +264,13 @@ void ParamsPanel::setupUI() {
     // intentionally session-only because removable disks and capture folders
     // often move between launches.
     m_calibrationGroup = createCollapsibleGroup(
-        QString::fromUtf8("校准帧"), true);
+        QCoreApplication::translate("Nebulens", "校准帧"), true);
     m_calibrationGroup->setVisible(false);
     auto* calibrationLayout = new QVBoxLayout(m_calibrationGroup);
     calibrationLayout->setSpacing(7);
 
     auto* calibrationNote = new QLabel(
-        QString::fromUtf8(
+        QCoreApplication::translate("Nebulens",
             "Light 主帧在底部素材胶片带导入。\n"
             "每类可使用一组 RAW 原片，或一个由 Nebulens 生成的 "
             ".spmaster，二者自动互斥。\n"
@@ -289,12 +296,12 @@ void ParamsPanel::setupUI() {
         row->setSpacing(6);
 
         auto* nameLabel = new QLabel(name, m_calibrationGroup);
-        nameLabel->setFixedWidth(64);
+        nameLabel->setFixedWidth(formLabelWidth());
         nameLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
         setRole(nameLabel, "muted");
         row->addWidget(nameLabel);
 
-        sourceLabel = new QLabel(QString::fromUtf8("未选择"), m_calibrationGroup);
+        sourceLabel = new QLabel(QCoreApplication::translate("Nebulens", "未选择"), m_calibrationGroup);
         sourceLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
         sourceLabel->setTextFormat(Qt::PlainText);
         sourceLabel->setMinimumWidth(44);
@@ -308,16 +315,16 @@ void ParamsPanel::setupUI() {
                                "compactText");
         rawButton->setFixedSize(54, 28);
         rawButton->setToolTip(
-            QString::fromUtf8("导入%1 RAW 原片组：%2").arg(name, purpose));
+            QCoreApplication::translate("Nebulens", "导入%1 RAW 原片组：%2").arg(name, purpose));
         rawButton->setAccessibleName(rawButton->toolTip());
         row->addWidget(rawButton);
 
         auto* masterButton = new QPushButton(
-            QString::fromUtf8("主帧"), m_calibrationGroup);
+            QCoreApplication::translate("Nebulens", "主帧"), m_calibrationGroup);
         masterButton->setProperty(StyleTokens::Properties::kSizeRole,
                                   "compactText");
         masterButton->setFixedSize(54, 28);
-        masterButton->setToolTip(QString::fromUtf8(
+        masterButton->setToolTip(QCoreApplication::translate("Nebulens",
             "导入 Nebulens %1（仅支持 .spmaster）").arg(name));
         masterButton->setAccessibleName(masterButton->toolTip());
         row->addWidget(masterButton);
@@ -331,7 +338,7 @@ void ParamsPanel::setupUI() {
         clearButton->setIconSize(QSize(16, 16));
         clearButton->setFixedSize(28, 28);
         clearButton->setToolTip(
-            QString::fromUtf8("清空已选%1").arg(name));
+            QCoreApplication::translate("Nebulens", "清空已选%1").arg(name));
         clearButton->setAccessibleName(clearButton->toolTip());
         clearButton->setEnabled(false);
         QStringList* const pathList = &paths;
@@ -340,7 +347,7 @@ void ParamsPanel::setupUI() {
                 [this, pathList, sourceLabel, clearButton, name]() {
                     importCalibrationFrames(
                         *pathList, sourceLabel, clearButton,
-                        QString::fromUtf8("选择%1 RAW").arg(name));
+                        QCoreApplication::translate("Nebulens", "选择%1 RAW").arg(name));
                 });
         connect(masterButton, &QPushButton::clicked, this,
                 [this, master, pathList, sourceLabel, clearButton, name,
@@ -360,29 +367,29 @@ void ParamsPanel::setupUI() {
     };
 
     addCalibrationRow(
-        QString::fromUtf8("暗场"),
-        QString::fromUtf8("校正热噪声、固定图样噪声和热像素"),
+        QCoreApplication::translate("Nebulens", "暗场"),
+        QCoreApplication::translate("Nebulens", "校正热噪声、固定图样噪声和热像素"),
         m_darkFramePaths, m_masterDarkPath,
         m_darkFrameCount, m_darkFrameClear);
     addCalibrationRow(
-        QString::fromUtf8("平场"),
-        QString::fromUtf8("校正暗角、灰尘阴影和像场亮度不均"),
+        QCoreApplication::translate("Nebulens", "平场"),
+        QCoreApplication::translate("Nebulens", "校正暗角、灰尘阴影和像场亮度不均"),
         m_flatFramePaths, m_masterFlatPath,
         m_flatFrameCount, m_flatFrameClear, true);
     addCalibrationRow(
-        QString::fromUtf8("偏置场"),
-        QString::fromUtf8("校正传感器读出偏置，并为平场标定零点"),
+        QCoreApplication::translate("Nebulens", "偏置场"),
+        QCoreApplication::translate("Nebulens", "校正传感器读出偏置，并为平场标定零点"),
         m_biasFramePaths, m_masterBiasPath,
         m_biasFrameCount, m_biasFrameClear);
     addCalibrationRow(
-        QString::fromUtf8("暗平场"),
-        QString::fromUtf8("匹配 Flat 曝光，用于替代 Bias 校准平场"),
+        QCoreApplication::translate("Nebulens", "暗平场"),
+        QCoreApplication::translate("Nebulens", "匹配 Flat 曝光，用于替代 Bias 校准平场"),
         m_darkFlatFramePaths, m_masterDarkFlatPath,
         m_darkFlatFrameCount, m_darkFlatFrameClear);
 
     m_saveGeneratedMastersCheck = new CompactToggle(
-        QString::fromUtf8("保存本次生成的 Master"), m_calibrationGroup);
-    m_saveGeneratedMastersCheck->setToolTip(QString::fromUtf8(
+        QCoreApplication::translate("Nebulens", "保存本次生成的 Master"), m_calibrationGroup);
+    m_saveGeneratedMastersCheck->setToolTip(QCoreApplication::translate("Nebulens",
         "把本次由 RAW 原片组合成的 Master 保存为 .spmaster，便于以后直接复用"));
     m_saveGeneratedMastersCheck->setChecked(false);
     m_saveGeneratedMastersCheck->setVisible(false);
@@ -400,18 +407,18 @@ void ParamsPanel::setupUI() {
     stackPageLayout->addWidget(m_calibrationGroup);
 
     // 对齐组（默认展开）
-    m_alignGroup = createCollapsibleGroup(QString::fromUtf8("对齐"), true);
+    m_alignGroup = createCollapsibleGroup(QCoreApplication::translate("Nebulens", "对齐"), true);
     auto* alignLayout = new QVBoxLayout(m_alignGroup);
     alignLayout->setSpacing(8);
 
     auto* refRow = new QHBoxLayout();
-    auto* refLabel = new QLabel(QString::fromUtf8("参考帧:"), m_alignGroup);
-    refLabel->setFixedWidth(88);
+    auto* refLabel = new QLabel(QCoreApplication::translate("Nebulens", "参考帧:"), m_alignGroup);
+    refLabel->setFixedWidth(formLabelWidth());
     refLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
     setRole(refLabel, "muted");
     refRow->addWidget(refLabel);
     m_refFrame = new QComboBox(m_alignGroup);
-    m_refFrame->addItem(QString::fromUtf8("自动选择"));
+    m_refFrame->addItem(QCoreApplication::translate("Nebulens", "自动选择"));
     connect(m_refFrame, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &ParamsPanel::onComboChanged);
     refRow->addWidget(m_refFrame, 1);
     alignLayout->addLayout(refRow);
@@ -419,22 +426,22 @@ void ParamsPanel::setupUI() {
     stackPageLayout->addWidget(m_alignGroup);
 
     // 堆栈组（默认展开）
-    m_stackGroup = createCollapsibleGroup(QString::fromUtf8("堆栈与地景"), true);
+    m_stackGroup = createCollapsibleGroup(QCoreApplication::translate("Nebulens", "堆栈与地景"), true);
     auto* stackLayout = new QVBoxLayout(m_stackGroup);
     stackLayout->setSpacing(8);
 
     auto* algoRow = new QHBoxLayout();
-    auto* algoLabel = new QLabel(QString::fromUtf8("算法:"), m_stackGroup);
-    algoLabel->setFixedWidth(88);
+    auto* algoLabel = new QLabel(QCoreApplication::translate("Nebulens", "算法:"), m_stackGroup);
+    algoLabel->setFixedWidth(formLabelWidth());
     algoLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
     setRole(algoLabel, "muted");
     algoRow->addWidget(algoLabel);
     m_stackAlgorithm = new QComboBox(m_stackGroup);
-    m_stackAlgorithm->addItems({QString::fromUtf8("中位数 Median"),
-                                QString::fromUtf8("平均值 Mean"),
+    m_stackAlgorithm->addItems({QCoreApplication::translate("Nebulens", "中位数 Median"),
+                                QCoreApplication::translate("Nebulens", "平均值 Mean"),
                                 "Kappa-Sigma", "Winsorized"});
     m_stackAlgorithm->setToolTip(
-        QString::fromUtf8("选择堆栈降噪算法：\n"
+        QCoreApplication::translate("Nebulens", "选择堆栈降噪算法：\n"
         "• Median：取中位数，简单鲁棒，适合 ≤5 帧\n"
         "• Mean：取平均值，信噪比最高但抗异常差\n"
         "• Kappa-Sigma：迭代剔除异常值，适合 6-15 帧\n"
@@ -456,18 +463,18 @@ void ParamsPanel::setupUI() {
     stackLayout->addWidget(m_stackMethodDescription);
 
     auto* kappaRow = new QHBoxLayout();
-    m_kappaNameLabel = new QLabel(QString::fromUtf8("κ值:"), m_stackGroup);
-    m_kappaNameLabel->setFixedWidth(88);
+    m_kappaNameLabel = new QLabel(QCoreApplication::translate("Nebulens", "κ值:"), m_stackGroup);
+    m_kappaNameLabel->setFixedWidth(formLabelWidth());
     m_kappaNameLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
     setRole(m_kappaNameLabel, "muted");
-    m_kappaNameLabel->setToolTip(QString::fromUtf8("κ (kappa)：异常值剔除阈值系数\n"
+    m_kappaNameLabel->setToolTip(QCoreApplication::translate("Nebulens", "κ (kappa)：异常值剔除阈值系数\n"
         "• 值越小，剔除越严格，可能误删微弱星点\n"
         "• 值越大，保留越多，可能残留飞机轨迹\n"
         "• 推荐值：2.0~3.0，深空常用 2.5"));
     kappaRow->addWidget(m_kappaNameLabel);
     m_kappaSlider = createSlider(10, 50, 25);
     m_kappaSlider->setMinimumWidth(96);
-    m_kappaSlider->setToolTip(QString::fromUtf8("拖动调整 κ 值，值越小剔除越严格"));
+    m_kappaSlider->setToolTip(QCoreApplication::translate("Nebulens", "拖动调整 κ 值，值越小剔除越严格"));
     connect(m_kappaSlider, &QSlider::valueChanged, this, [this](int v) {
         m_kappaLabel->setText(QString::number(v / 10.0, 'f', 1));
     });
@@ -481,18 +488,18 @@ void ParamsPanel::setupUI() {
     updateStackMethodDescription();
 
     m_autoRejectQualityCheck = new CompactToggle(
-        QString::fromUtf8("自动排除严重差帧"), m_stackGroup);
+        QCoreApplication::translate("Nebulens", "自动排除严重差帧"), m_stackGroup);
     m_autoRejectQualityCheck->setChecked(true);
-    m_autoRejectQualityCheck->setToolTip(QString::fromUtf8(
+    m_autoRejectQualityCheck->setToolTip(QCoreApplication::translate("Nebulens",
         "通过轻量预览识别明显失焦、拖星或云层遮挡的离群帧；正常差异不会自动删除"));
     connect(m_autoRejectQualityCheck, &QCheckBox::toggled,
             this, &ParamsPanel::onCheckChanged);
     stackLayout->addWidget(m_autoRejectQualityCheck);
 
     m_photometricCheck = new CompactToggle(
-        QString::fromUtf8("帧间光度匹配"), m_stackGroup);
+        QCoreApplication::translate("Nebulens", "帧间光度匹配"), m_stackGroup);
     m_photometricCheck->setChecked(true);
-    m_photometricCheck->setToolTip(QString::fromUtf8(
+    m_photometricCheck->setToolTip(QCoreApplication::translate("Nebulens",
         "将每帧曝光和背景色偏匹配到参考帧，减少薄云、光污染变化造成的堆栈斑块"));
     connect(m_photometricCheck, &QCheckBox::toggled,
             this, &ParamsPanel::onCheckChanged);
@@ -500,8 +507,8 @@ void ParamsPanel::setupUI() {
 
     // 天地分离
     auto* skyGroundRow = new QHBoxLayout();
-    m_skyGroundCheck = new CompactToggle(QString::fromUtf8("天地分离"), m_stackGroup);
-    m_skyGroundCheck->setToolTip(QString::fromUtf8("不带赤道仪时，天空对齐星点，地景保持固定，避免地景拖影"));
+    m_skyGroundCheck = new CompactToggle(QCoreApplication::translate("Nebulens", "天地分离"), m_stackGroup);
+    m_skyGroundCheck->setToolTip(QCoreApplication::translate("Nebulens", "不带赤道仪时，天空对齐星点，地景保持固定，避免地景拖影"));
     connect(m_skyGroundCheck, &QCheckBox::toggled, this, &ParamsPanel::onCheckChanged);
     connect(m_skyGroundCheck, &QCheckBox::toggled, this, [this]() {
         updateSkyGroundControls();
@@ -520,8 +527,8 @@ void ParamsPanel::setupUI() {
         markPresetCustom();
         emitParamsChanged();
     });
-    m_skyGroundModeLabel = new QLabel(QString::fromUtf8("模式:"), m_stackGroup);
-    m_skyGroundModeLabel->setFixedWidth(88);
+    m_skyGroundModeLabel = new QLabel(QCoreApplication::translate("Nebulens", "模式:"), m_stackGroup);
+    m_skyGroundModeLabel->setFixedWidth(formLabelWidth());
     m_skyGroundModeLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
     setRole(m_skyGroundModeLabel, "muted");
     modeRow->addWidget(m_skyGroundModeLabel);
@@ -530,16 +537,20 @@ void ParamsPanel::setupUI() {
 
     // 按钮行
     auto* btnRow = new QHBoxLayout();
-    m_detectMaskBtn = new QPushButton(QString::fromUtf8("检测地景"), m_stackGroup);
+    m_detectMaskBtn = new QPushButton(QCoreApplication::translate("Nebulens", "检测地景"), m_stackGroup);
     m_detectMaskBtn->setVisible(false);
     connect(m_detectMaskBtn, &QPushButton::clicked, this, &ParamsPanel::maskPreviewRequested);
     btnRow->addWidget(m_detectMaskBtn);
 
-    m_importMaskBtn = new QPushButton(QString::fromUtf8("导入蒙版..."), m_stackGroup);
+    m_importMaskBtn = new QPushButton(QCoreApplication::translate("Nebulens", "导入蒙版..."), m_stackGroup);
     m_importMaskBtn->setVisible(false);
     connect(m_importMaskBtn, &QPushButton::clicked, this, [this]() {
-        QString path = QFileDialog::getOpenFileName(this, QString::fromUtf8("选择蒙版"),
-                                                    QString(), "Images (*.png *.jpg *.bmp)");
+        QString path = QFileDialog::getOpenFileName(
+            this, QCoreApplication::translate("Nebulens", "选择蒙版"),
+            QString(),
+            QCoreApplication::translate(
+                "Nebulens", "图像 (*.png *.jpg *.bmp)"),
+            nullptr, QFileDialog::DontUseNativeDialog);
         if (!path.isEmpty()) {
             m_userMaskPath = path;
             m_maskPathLabel->setText(QFileInfo(path).fileName());
@@ -569,8 +580,8 @@ void ParamsPanel::setupUI() {
         onSliderValueChanged(value);
     });
     connect(m_featherSlider, &QSlider::sliderReleased, this, &ParamsPanel::onSliderReleased);
-    m_featherNameLabel = new QLabel(QString::fromUtf8("羽化:"), m_stackGroup);
-    m_featherNameLabel->setFixedWidth(88);
+    m_featherNameLabel = new QLabel(QCoreApplication::translate("Nebulens", "羽化:"), m_stackGroup);
+    m_featherNameLabel->setFixedWidth(formLabelWidth());
     m_featherNameLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
     setRole(m_featherNameLabel, "muted");
     featherRow->addWidget(m_featherNameLabel);
@@ -583,18 +594,18 @@ void ParamsPanel::setupUI() {
     // sharpness matters more than foreground noise.
     auto* groundMethodRow = new QHBoxLayout();
     m_groundStackMethod = new QComboBox(m_stackGroup);
-    m_groundStackMethod->addItem(QString::fromUtf8("平均降噪（推荐）"), "average");
-    m_groundStackMethod->addItem(QString::fromUtf8("参考帧（单帧）"), "reference");
-    m_groundStackMethod->addItem(QString::fromUtf8("中值（运动地景）"), "median");
+    m_groundStackMethod->addItem(QCoreApplication::translate("Nebulens", "平均降噪（推荐）"), "average");
+    m_groundStackMethod->addItem(QCoreApplication::translate("Nebulens", "参考帧（单帧）"), "reference");
+    m_groundStackMethod->addItem(QCoreApplication::translate("Nebulens", "中值（运动地景）"), "median");
     m_groundStackMethod->setEnabled(false);
-    m_groundStackMethod->setToolTip(QString::fromUtf8(
+    m_groundStackMethod->setToolTip(QCoreApplication::translate("Nebulens",
         "平均降噪适合静止地景；参考单帧更锐但噪声和光照可能不同；中值可抑制短暂人物或车灯"));
     connect(m_groundStackMethod,
             QOverload<int>::of(&QComboBox::currentIndexChanged),
             this, &ParamsPanel::onComboChanged);
     m_groundStackNameLabel = new QLabel(
-        QString::fromUtf8("地景合成:"), m_stackGroup);
-    m_groundStackNameLabel->setFixedWidth(88);
+        QCoreApplication::translate("Nebulens", "地景合成:"), m_stackGroup);
+    m_groundStackNameLabel->setFixedWidth(formLabelWidth());
     m_groundStackNameLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
     setRole(m_groundStackNameLabel, "muted");
     groundMethodRow->addWidget(m_groundStackNameLabel);
@@ -605,7 +616,7 @@ void ParamsPanel::setupUI() {
     m_groundDetailSlider = createSlider(0, 70, 40);
     m_groundDetailSlider->setEnabled(false);
     m_groundDetailSlider->setMinimumWidth(96);
-    m_groundDetailSlider->setToolTip(QString::fromUtf8(
+    m_groundDetailSlider->setToolTip(QCoreApplication::translate("Nebulens",
         "恢复山体和建筑的纹理与中尺度清晰度；值过高会同时增强地景噪声"));
     m_groundDetailLabel = new QLabel("40%", m_stackGroup);
     setRole(m_groundDetailLabel, "value");
@@ -618,8 +629,8 @@ void ParamsPanel::setupUI() {
     connect(m_groundDetailSlider, &QSlider::sliderReleased,
             this, &ParamsPanel::onSliderReleased);
     m_groundDetailNameLabel = new QLabel(
-        QString::fromUtf8("地景细节:"), m_stackGroup);
-    m_groundDetailNameLabel->setFixedWidth(88);
+        QCoreApplication::translate("Nebulens", "地景细节:"), m_stackGroup);
+    m_groundDetailNameLabel->setFixedWidth(formLabelWidth());
     m_groundDetailNameLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
     setRole(m_groundDetailNameLabel, "muted");
     groundDetailRow->addWidget(m_groundDetailNameLabel);
@@ -630,13 +641,13 @@ void ParamsPanel::setupUI() {
     stackPageLayout->addWidget(m_stackGroup);
 
     m_starTrailGroup = createCollapsibleGroup(
-        QString::fromUtf8("星轨合成"), true);
+        QCoreApplication::translate("Nebulens", "星轨合成"), true);
     m_starTrailGroup->setVisible(false);
     auto* starTrailLayout = new QVBoxLayout(m_starTrailGroup);
     starTrailLayout->setSpacing(10);
 
     auto* starTrailNote = new QLabel(
-        QString::fromUtf8(
+        QCoreApplication::translate("Nebulens",
             "固定机位序列保持原坐标，不进行星点对齐。天空逐帧取亮形成轨迹；开启地景保护后，山体和建筑使用原坐标均值降噪。"),
         m_starTrailGroup);
     starTrailNote->setWordWrap(true);
@@ -645,13 +656,13 @@ void ParamsPanel::setupUI() {
 
     auto* cometRow = new QHBoxLayout();
     auto* cometName = new QLabel(
-        QString::fromUtf8("彗星拖尾:"), m_starTrailGroup);
-    cometName->setFixedWidth(88);
+        QCoreApplication::translate("Nebulens", "彗星拖尾:"), m_starTrailGroup);
+    cometName->setFixedWidth(formLabelWidth());
     cometName->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
     setRole(cometName, "muted");
     m_starTrailCometSlider = createSlider(0, 100, 0);
     m_starTrailCometSlider->setMinimumWidth(96);
-    m_starTrailCometSlider->setToolTip(QString::fromUtf8(
+    m_starTrailCometSlider->setToolTip(QCoreApplication::translate("Nebulens",
         "0% 为每帧等亮的连续星轨；提高后，较早帧逐渐变暗，形成一端明、一端暗的彗星效果"));
     m_starTrailCometLabel = new QLabel("0%", m_starTrailGroup);
     setRole(m_starTrailCometLabel, "value");
@@ -672,8 +683,8 @@ void ParamsPanel::setupUI() {
     starTrailLayout->addLayout(cometRow);
 
     m_starTrailReverseCheck = new CompactToggle(
-        QString::fromUtf8("反转彗星方向"), m_starTrailGroup);
-    m_starTrailReverseCheck->setToolTip(QString::fromUtf8(
+        QCoreApplication::translate("Nebulens", "反转彗星方向"), m_starTrailGroup);
+    m_starTrailReverseCheck->setToolTip(QCoreApplication::translate("Nebulens",
         "交换星轨亮端和暗端；连续星轨（0%）不受影响"));
     m_starTrailReverseCheck->setEnabled(false);
     connect(m_starTrailReverseCheck, &QCheckBox::toggled,
@@ -681,9 +692,9 @@ void ParamsPanel::setupUI() {
     starTrailLayout->addWidget(m_starTrailReverseCheck);
 
     m_starTrailProtectGroundCheck = new CompactToggle(
-        QString::fromUtf8("保护固定地景"), m_starTrailGroup);
+        QCoreApplication::translate("Nebulens", "保护固定地景"), m_starTrailGroup);
     m_starTrailProtectGroundCheck->setChecked(true);
-    m_starTrailProtectGroundCheck->setToolTip(QString::fromUtf8(
+    m_starTrailProtectGroundCheck->setToolTip(QCoreApplication::translate("Nebulens",
         "自动检测地平线；天空合成星轨，地景在相机坐标中平均降噪，避免灯光取亮和前景发糊"));
     connect(m_starTrailProtectGroundCheck, &QCheckBox::toggled,
             this, &ParamsPanel::onCheckChanged);
@@ -691,22 +702,22 @@ void ParamsPanel::setupUI() {
     stackPageLayout->addWidget(m_starTrailGroup);
 
     m_timelapseGroup = createCollapsibleGroup(
-        QString::fromUtf8("滑动窗口降噪"), true);
+        QCoreApplication::translate("Nebulens", "滑动窗口降噪"), true);
     m_timelapseGroup->setVisible(false);
     auto* timelapseLayout = new QVBoxLayout(m_timelapseGroup);
     timelapseLayout->setSpacing(10);
 
     auto* windowRow = new QHBoxLayout();
     auto* windowLabel = new QLabel(
-        QString::fromUtf8("邻近窗口:"), m_timelapseGroup);
-    windowLabel->setFixedWidth(88);
+        QCoreApplication::translate("Nebulens", "邻近窗口:"), m_timelapseGroup);
+    windowLabel->setFixedWidth(formLabelWidth());
     windowLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
     setRole(windowLabel, "muted");
     m_timelapseWindow = new QComboBox(m_timelapseGroup);
-    m_timelapseWindow->addItem(QString::fromUtf8("3 帧（更快）"), 3);
-    m_timelapseWindow->addItem(QString::fromUtf8("5 帧（更干净）"), 5);
+    m_timelapseWindow->addItem(QCoreApplication::translate("Nebulens", "3 帧（更快）"), 3);
+    m_timelapseWindow->addItem(QCoreApplication::translate("Nebulens", "5 帧（更干净）"), 5);
     m_timelapseWindow->setCurrentIndex(1);
-    m_timelapseWindow->setToolTip(QString::fromUtf8(
+    m_timelapseWindow->setToolTip(QCoreApplication::translate("Nebulens",
         "每张输出以自身为中心，使用前后邻近 RAW 对齐降噪；序列两端自动缩短窗口"));
     connect(m_timelapseWindow,
             QOverload<int>::of(&QComboBox::currentIndexChanged),
@@ -717,13 +728,13 @@ void ParamsPanel::setupUI() {
 
     auto* temporalStrengthRow = new QHBoxLayout();
     auto* temporalStrengthName = new QLabel(
-        QString::fromUtf8("时域强度:"), m_timelapseGroup);
-    temporalStrengthName->setFixedWidth(88);
+        QCoreApplication::translate("Nebulens", "时域强度:"), m_timelapseGroup);
+    temporalStrengthName->setFixedWidth(formLabelWidth());
     temporalStrengthName->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
     setRole(temporalStrengthName, "muted");
     temporalStrengthRow->addWidget(temporalStrengthName);
     m_timelapseStrengthSlider = createSlider(0, 100, 80);
-    m_timelapseStrengthSlider->setToolTip(QString::fromUtf8(
+    m_timelapseStrengthSlider->setToolTip(QCoreApplication::translate("Nebulens",
         "控制邻近帧对当前帧的贡献；值越高降噪越强，动态云层应适当降低"));
     m_timelapseStrengthLabel = new QLabel("80%", m_timelapseGroup);
     setRole(m_timelapseStrengthLabel, "value");
@@ -741,13 +752,13 @@ void ParamsPanel::setupUI() {
 
     auto* motionProtectionRow = new QHBoxLayout();
     auto* motionProtectionName = new QLabel(
-        QString::fromUtf8("动态内容保护:"), m_timelapseGroup);
-    motionProtectionName->setFixedWidth(88);
+        QCoreApplication::translate("Nebulens", "动态内容保护:"), m_timelapseGroup);
+    motionProtectionName->setFixedWidth(formLabelWidth());
     motionProtectionName->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
     setRole(motionProtectionName, "muted");
     motionProtectionRow->addWidget(motionProtectionName);
     m_timelapseMotionProtectionSlider = createSlider(0, 100, 75);
-    m_timelapseMotionProtectionSlider->setToolTip(QString::fromUtf8(
+    m_timelapseMotionProtectionSlider->setToolTip(QCoreApplication::translate("Nebulens",
         "在云层、草木、灯光等变化区域降低邻帧贡献，并偏向保留目标帧；值越高保护越强"));
     m_timelapseMotionProtectionLabel = new QLabel("75%", m_timelapseGroup);
     setRole(m_timelapseMotionProtectionLabel, "value");
@@ -765,7 +776,7 @@ void ParamsPanel::setupUI() {
     timelapseLayout->addLayout(motionProtectionRow);
 
     auto* motionProtectionNote = new QLabel(
-        QString::fromUtf8(
+        QCoreApplication::translate("Nebulens",
             "变化区域会自动减少邻帧混合，优先保留当前目标帧。"),
         m_timelapseGroup);
     motionProtectionNote->setWordWrap(true);
@@ -773,16 +784,16 @@ void ParamsPanel::setupUI() {
     timelapseLayout->addWidget(motionProtectionNote);
 
     m_timelapseProtectGroundCheck = new CompactToggle(
-        QString::fromUtf8("固定地景保持原位"), m_timelapseGroup);
+        QCoreApplication::translate("Nebulens", "固定地景保持原位"), m_timelapseGroup);
     m_timelapseProtectGroundCheck->setChecked(true);
-    m_timelapseProtectGroundCheck->setToolTip(QString::fromUtf8(
+    m_timelapseProtectGroundCheck->setToolTip(QCoreApplication::translate("Nebulens",
         "天空按星点对齐，山体和建筑在相机坐标中降噪，再沿地平线融合"));
     connect(m_timelapseProtectGroundCheck, &QCheckBox::toggled,
             this, &ParamsPanel::onCheckChanged);
     timelapseLayout->addWidget(m_timelapseProtectGroundCheck);
 
     auto* outputNote = new QLabel(
-        QString::fromUtf8("每张输入 RAW 对应一张带原文件名的输出图片。"),
+        QCoreApplication::translate("Nebulens", "每张输入 RAW 对应一张带原文件名的输出图片。"),
         m_timelapseGroup);
     outputNote->setWordWrap(true);
     setRole(outputNote, "note");
@@ -792,7 +803,7 @@ void ParamsPanel::setupUI() {
 
     // 基础调整与快速预览共用同一套参数和收尾处理管线。
     m_basicAdjustGroup = createCollapsibleGroup(
-        QString::fromUtf8("基础调色"), true);
+        QCoreApplication::translate("Nebulens", "基础调色"), true);
     auto* basicAdjustLayout = new QVBoxLayout(m_basicAdjustGroup);
     basicAdjustLayout->setSpacing(7);
 
@@ -809,7 +820,7 @@ void ParamsPanel::setupUI() {
         auto* row = new QHBoxLayout();
         row->setSpacing(8);
         auto* nameLabel = new QLabel(name, m_basicAdjustGroup);
-        nameLabel->setFixedWidth(88);
+        nameLabel->setFixedWidth(formLabelWidth());
         nameLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
         setRole(nameLabel, "muted");
         nameLabel->setToolTip(tooltip);
@@ -838,57 +849,57 @@ void ParamsPanel::setupUI() {
         basicAdjustLayout->addLayout(row);
     };
 
-    addSectionLabel(QString::fromUtf8("白平衡"));
-    addAdjustmentRow(QString::fromUtf8("色温偏移"), -100, 100,
+    addSectionLabel(QCoreApplication::translate("Nebulens", "白平衡"));
+    addAdjustmentRow(QCoreApplication::translate("Nebulens", "色温偏移"), -100, 100,
                      m_temperatureSlider, m_temperatureLabel,
-                     QString::fromUtf8("向左冷却画面，向右增加暖色；这是相对偏移，不代表绝对 Kelvin"));
-    addAdjustmentRow(QString::fromUtf8("色调"), -100, 100,
+                     QCoreApplication::translate("Nebulens", "向左冷却画面，向右增加暖色；这是相对偏移，不代表绝对 Kelvin"));
+    addAdjustmentRow(QCoreApplication::translate("Nebulens", "色调"), -100, 100,
                      m_tintSlider, m_tintLabel,
-                     QString::fromUtf8("在绿色与洋红之间校正色偏"));
+                     QCoreApplication::translate("Nebulens", "在绿色与洋红之间校正色偏"));
 
-    addSectionLabel(QString::fromUtf8("光线"));
-    addAdjustmentRow(QString::fromUtf8("曝光"), -50, 50,
+    addSectionLabel(QCoreApplication::translate("Nebulens", "光线"));
+    addAdjustmentRow(QCoreApplication::translate("Nebulens", "曝光"), -50, 50,
                      m_exposureSlider, m_exposureLabel,
-                     QString::fromUtf8("整体曝光补偿，范围 -5.0 EV 到 +5.0 EV"), true);
-    addAdjustmentRow(QString::fromUtf8("对比度"), -100, 100,
+                     QCoreApplication::translate("Nebulens", "整体曝光补偿，范围 -5.0 EV 到 +5.0 EV"), true);
+    addAdjustmentRow(QCoreApplication::translate("Nebulens", "对比度"), -100, 100,
                      m_contrastSlider, m_contrastLabel,
-                     QString::fromUtf8("围绕中间调压缩或扩展明暗层次"));
-    addAdjustmentRow(QString::fromUtf8("高光"), -100, 100,
+                     QCoreApplication::translate("Nebulens", "围绕中间调压缩或扩展明暗层次"));
+    addAdjustmentRow(QCoreApplication::translate("Nebulens", "高光"), -100, 100,
                      m_highlightsSlider, m_highlightsLabel,
-                     QString::fromUtf8("主要调整亮部，并保护中间调和黑位"));
-    addAdjustmentRow(QString::fromUtf8("阴影"), -100, 100,
+                     QCoreApplication::translate("Nebulens", "主要调整亮部，并保护中间调和黑位"));
+    addAdjustmentRow(QCoreApplication::translate("Nebulens", "阴影"), -100, 100,
                      m_shadowsSlider, m_shadowsLabel,
-                     QString::fromUtf8("主要调整暗部，并保护高光"));
-    addAdjustmentRow(QString::fromUtf8("白色色阶"), -100, 100,
+                     QCoreApplication::translate("Nebulens", "主要调整暗部，并保护高光"));
+    addAdjustmentRow(QCoreApplication::translate("Nebulens", "白色色阶"), -100, 100,
                      m_whitesSlider, m_whitesLabel,
-                     QString::fromUtf8("设置最亮区域的视觉强度"));
-    addAdjustmentRow(QString::fromUtf8("黑色色阶"), -100, 100,
+                     QCoreApplication::translate("Nebulens", "设置最亮区域的视觉强度"));
+    addAdjustmentRow(QCoreApplication::translate("Nebulens", "黑色色阶"), -100, 100,
                      m_blacksSlider, m_blacksLabel,
-                     QString::fromUtf8("设置最暗区域的视觉深度"));
+                     QCoreApplication::translate("Nebulens", "设置最暗区域的视觉深度"));
 
-    addSectionLabel(QString::fromUtf8("颜色"));
-    addAdjustmentRow(QString::fromUtf8("自然饱和度"), -100, 100,
+    addSectionLabel(QCoreApplication::translate("Nebulens", "颜色"));
+    addAdjustmentRow(QCoreApplication::translate("Nebulens", "自然饱和度"), -100, 100,
                      m_vibranceSlider, m_vibranceLabel,
-                     QString::fromUtf8("优先增强低饱和颜色，降低鲜艳区域溢色风险"));
-    addAdjustmentRow(QString::fromUtf8("饱和度"), -100, 100,
+                     QCoreApplication::translate("Nebulens", "优先增强低饱和颜色，降低鲜艳区域溢色风险"));
+    addAdjustmentRow(QCoreApplication::translate("Nebulens", "饱和度"), -100, 100,
                      m_saturationSlider, m_saturationLabel,
-                     QString::fromUtf8("统一调整全部颜色的饱和程度"));
+                     QCoreApplication::translate("Nebulens", "统一调整全部颜色的饱和程度"));
 
-    addSectionLabel(QString::fromUtf8("细节"));
-    addAdjustmentRow(QString::fromUtf8("锐化"), 0, 100,
+    addSectionLabel(QCoreApplication::translate("Nebulens", "细节"));
+    addAdjustmentRow(QCoreApplication::translate("Nebulens", "锐化"), 0, 100,
                      m_sharpeningSlider, m_sharpeningLabel,
-                     QString::fromUtf8("亮度通道阈值锐化，抑制暗部噪声和彩色边缘"));
+                     QCoreApplication::translate("Nebulens", "亮度通道阈值锐化，抑制暗部噪声和彩色边缘"));
     adjustPageLayout->addWidget(m_basicAdjustGroup);
 
     // 自动优化组（默认展开）
-    m_optimizeGroup = createCollapsibleGroup(QString::fromUtf8("降噪与增强"), true);
+    m_optimizeGroup = createCollapsibleGroup(QCoreApplication::translate("Nebulens", "降噪与增强"), true);
     auto* optimizeLayout = new QVBoxLayout(m_optimizeGroup);
     optimizeLayout->setSpacing(8);
 
     auto* noiseReductionRow = new QHBoxLayout();
-    m_noiseReductionCheck = new CompactToggle(QString::fromUtf8("多尺度降噪"), m_optimizeGroup);
+    m_noiseReductionCheck = new CompactToggle(QCoreApplication::translate("Nebulens", "多尺度降噪"), m_optimizeGroup);
     m_noiseReductionCheck->setMinimumWidth(106);
-    m_noiseReductionCheck->setToolTip(QString::fromUtf8(
+    m_noiseReductionCheck->setToolTip(QCoreApplication::translate("Nebulens",
         "在线性堆栈结果上抑制亮度和色彩噪声\n"
         "建议在去雾和曲线拉伸之前使用"));
     connect(m_noiseReductionCheck, &QCheckBox::toggled, this, &ParamsPanel::onCheckChanged);
@@ -899,7 +910,7 @@ void ParamsPanel::setupUI() {
     m_noiseReductionLabel = new QLabel("30%", m_optimizeGroup);
     setRole(m_noiseReductionLabel, "value");
     m_noiseReductionLabel->setMinimumWidth(32);
-    m_noiseReductionSlider->setToolTip(QString::fromUtf8("降噪强度：0 为保留全部细节，70 为最强"));
+    m_noiseReductionSlider->setToolTip(QCoreApplication::translate("Nebulens", "降噪强度：0 为保留全部细节，70 为最强"));
     connect(m_noiseReductionSlider, &QSlider::valueChanged, this, [this](int value) {
         m_noiseReductionLabel->setText(QString("%1%").arg(value));
         onSliderValueChanged(value);
@@ -910,8 +921,8 @@ void ParamsPanel::setupUI() {
     optimizeLayout->addLayout(noiseReductionRow);
 
     m_modifiedCameraColorCheck = new CompactToggle(
-        QString::fromUtf8("BCF 改机色彩还原"), m_optimizeGroup);
-    m_modifiedCameraColorCheck->setToolTip(QString::fromUtf8(
+        QCoreApplication::translate("Nebulens", "BCF 改机色彩还原"), m_optimizeGroup);
+    m_modifiedCameraColorCheck->setToolTip(QCoreApplication::translate("Nebulens",
         "适用于 BCF 或天文改机造成的整体红偏\n"
         "自动采样中性天空并校正通道响应；普通相机请关闭"));
     connect(m_modifiedCameraColorCheck, &QCheckBox::toggled,
@@ -923,14 +934,14 @@ void ParamsPanel::setupUI() {
 
     auto* modifiedStrengthRow = new QHBoxLayout();
     auto* modifiedStrengthName = new QLabel(
-        QString::fromUtf8("校正强度"), m_optimizeGroup);
-    modifiedStrengthName->setFixedWidth(88);
+        QCoreApplication::translate("Nebulens", "校正强度"), m_optimizeGroup);
+    modifiedStrengthName->setFixedWidth(formLabelWidth());
     modifiedStrengthName->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
     setRole(modifiedStrengthName, "muted");
     modifiedStrengthRow->addWidget(modifiedStrengthName);
     m_modifiedCameraColorStrengthSlider = createSlider(0, 100, 100);
     m_modifiedCameraColorStrengthSlider->setMinimumWidth(84);
-    m_modifiedCameraColorStrengthSlider->setToolTip(QString::fromUtf8(
+    m_modifiedCameraColorStrengthSlider->setToolTip(QCoreApplication::translate("Nebulens",
         "0 为保留原始改机色偏，100 为完整回归中性色彩"));
     connect(m_modifiedCameraColorStrengthSlider, &QSlider::valueChanged,
             this, [this](int value) {
@@ -950,9 +961,9 @@ void ParamsPanel::setupUI() {
 
     auto* modifiedSampleRow = new QHBoxLayout();
     m_modifiedCameraColorMode = new QComboBox(m_optimizeGroup);
-    m_modifiedCameraColorMode->addItem(QString::fromUtf8("自动灰点"));
-    m_modifiedCameraColorMode->addItem(QString::fromUtf8("手动灰点"));
-    m_modifiedCameraColorMode->setToolTip(QString::fromUtf8(
+    m_modifiedCameraColorMode->addItem(QCoreApplication::translate("Nebulens", "自动灰点"));
+    m_modifiedCameraColorMode->addItem(QCoreApplication::translate("Nebulens", "手动灰点"));
+    m_modifiedCameraColorMode->setToolTip(QCoreApplication::translate("Nebulens",
         "自动模式从中性天空估计；手动模式从预览中选择应为灰色的区域"));
     connect(m_modifiedCameraColorMode,
             QOverload<int>::of(&QComboBox::currentIndexChanged),
@@ -980,7 +991,7 @@ void ParamsPanel::setupUI() {
     m_modifiedCameraGrayPointButton->setIconSize(QSize(16, 16));
     m_modifiedCameraGrayPointButton->setFixedSize(30, 28);
     m_modifiedCameraGrayPointButton->setToolTip(
-        QString::fromUtf8("在结果预览中重新采样手动灰点"));
+        QCoreApplication::translate("Nebulens", "在结果预览中重新采样手动灰点"));
     m_modifiedCameraGrayPointButton->setAccessibleName(
         m_modifiedCameraGrayPointButton->toolTip());
     connect(m_modifiedCameraGrayPointButton, &QPushButton::clicked,
@@ -995,10 +1006,10 @@ void ParamsPanel::setupUI() {
     updateModifiedCameraColorControls();
 
     auto* dewarpRow = new QHBoxLayout();
-    m_dewarpCheck = new CompactToggle(QString::fromUtf8("去雾"), m_optimizeGroup);
+    m_dewarpCheck = new CompactToggle(QCoreApplication::translate("Nebulens", "去雾"), m_optimizeGroup);
     m_dewarpCheck->setMinimumWidth(106);
     m_dewarpCheck->setEnabled(true);
-    m_dewarpCheck->setToolTip(QString::fromUtf8(
+    m_dewarpCheck->setToolTip(QCoreApplication::translate("Nebulens",
         "亮度引导的 Dark Channel Prior 去雾\n"
         "适合明显薄雾；银河暗尘丰富时建议关闭"));
     connect(m_dewarpCheck, &QCheckBox::toggled, this, &ParamsPanel::onCheckChanged);
@@ -1018,9 +1029,9 @@ void ParamsPanel::setupUI() {
     dewarpRow->addWidget(m_dewarpLabel);
     optimizeLayout->addLayout(dewarpRow);
 
-    m_stretchCheck = new CompactToggle(QString::fromUtf8("曲线拉伸"), m_optimizeGroup);
+    m_stretchCheck = new CompactToggle(QCoreApplication::translate("Nebulens", "曲线拉伸"), m_optimizeGroup);
     m_stretchCheck->setEnabled(true);
-    m_stretchCheck->setToolTip(QString::fromUtf8(
+    m_stretchCheck->setToolTip(QCoreApplication::translate("Nebulens",
         "背景色偏中和 + RGB 联动 Arcsinh 拉伸\n"
         "增强暗部并保留星点颜色"));
     connect(m_stretchCheck, &QCheckBox::toggled, this, &ParamsPanel::onCheckChanged);
@@ -1030,14 +1041,14 @@ void ParamsPanel::setupUI() {
 
     // 星点修饰沿用普通无框分区，不再额外绘制标题卡片。
     m_starReduceGroup = createCollapsibleGroup(
-        QString::fromUtf8("星点修饰"), true);
+        QCoreApplication::translate("Nebulens", "星点修饰"), true);
     auto* starLayout = new QVBoxLayout(m_starReduceGroup);
     starLayout->setSpacing(10);
 
     auto* defringeRow = new QHBoxLayout();
     m_starDefringeCheck = new CompactToggle(
-        QString::fromUtf8("去除星点紫边"), m_starReduceGroup);
-    m_starDefringeCheck->setToolTip(QString::fromUtf8(
+        QCoreApplication::translate("Nebulens", "去除星点紫边"), m_starReduceGroup);
+    m_starDefringeCheck->setToolTip(QCoreApplication::translate("Nebulens",
         "比较星核与星翼色度，只抑制向边缘突增的紫、蓝或绿色边\n"
         "不会改变星点尺寸，也不会全局降低饱和度"));
     connect(m_starDefringeCheck, &QCheckBox::toggled,
@@ -1047,8 +1058,8 @@ void ParamsPanel::setupUI() {
 
     auto* defringeStrengthRow = new QHBoxLayout();
     auto* defringeStrengthLabel = new QLabel(
-        QString::fromUtf8("去边强度:"), m_starReduceGroup);
-    defringeStrengthLabel->setFixedWidth(88);
+        QCoreApplication::translate("Nebulens", "去边强度:"), m_starReduceGroup);
+    defringeStrengthLabel->setFixedWidth(formLabelWidth());
     defringeStrengthLabel->setAlignment(
         Qt::AlignRight | Qt::AlignVCenter);
     setRole(defringeStrengthLabel, "muted");
@@ -1060,7 +1071,7 @@ void ParamsPanel::setupUI() {
     setRole(m_starDefringeLabel, "value");
     m_starDefringeLabel->setMinimumWidth(32);
     m_starDefringeLabel->setEnabled(false);
-    m_starDefringeSlider->setToolTip(QString::fromUtf8(
+    m_starDefringeSlider->setToolTip(QCoreApplication::translate("Nebulens",
         "40-60 适合普通镜头色差；更高强度用于明显的蓝紫星翼\n"
         "建议在 100% 预览下确认真实蓝星仍保留颜色"));
     connect(m_starDefringeSlider, &QSlider::valueChanged,
@@ -1075,9 +1086,9 @@ void ParamsPanel::setupUI() {
     starLayout->addLayout(defringeStrengthRow);
 
     auto* starRow = new QHBoxLayout();
-    m_starReduceCheck = new CompactToggle(QString::fromUtf8("启用缩星"), m_starReduceGroup);
+    m_starReduceCheck = new CompactToggle(QCoreApplication::translate("Nebulens", "启用缩星"), m_starReduceGroup);
     m_starReduceCheck->setEnabled(true);
-    m_starReduceCheck->setToolTip(QString::fromUtf8(
+    m_starReduceCheck->setToolTip(QCoreApplication::translate("Nebulens",
         "自动建立无星层，仅对星层应用亚像素圆形 Minimum\n"
         "饱和大星保持原样，避免宽光晕形成暗环"));
     connect(m_starReduceCheck, &QCheckBox::toggled, this, &ParamsPanel::onCheckChanged);
@@ -1085,11 +1096,11 @@ void ParamsPanel::setupUI() {
     starLayout->addLayout(starRow);
 
     auto* strengthRow = new QHBoxLayout();
-    auto* strengthLabel = new QLabel(QString::fromUtf8("强度:"), m_starReduceGroup);
-    strengthLabel->setFixedWidth(88);
+    auto* strengthLabel = new QLabel(QCoreApplication::translate("Nebulens", "强度:"), m_starReduceGroup);
+    strengthLabel->setFixedWidth(formLabelWidth());
     strengthLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
     setRole(strengthLabel, "muted");
-    strengthLabel->setToolTip(QString::fromUtf8(
+    strengthLabel->setToolTip(QCoreApplication::translate("Nebulens",
         "缩星强度：40 温和，70 强烈，90 接近清星\n"
         "请在 100% 预览下判断，过高会损失星点细节"));
     strengthRow->addWidget(strengthLabel);
@@ -1099,7 +1110,7 @@ void ParamsPanel::setupUI() {
     m_starReduceLabel = new QLabel("70%", m_starReduceGroup);
     setRole(m_starReduceLabel, "value");
     m_starReduceLabel->setMinimumWidth(32);
-    m_starReduceSlider->setToolTip(QString::fromUtf8(
+    m_starReduceSlider->setToolTip(QCoreApplication::translate("Nebulens",
         "40 温和收紧；70 强烈缩星；90 会清除多数暗弱小星\n"
         "推荐在 100% 预览下调整"));
     connect(m_starReduceSlider, &QSlider::valueChanged, this, [this](int value) {
@@ -1116,7 +1127,7 @@ void ParamsPanel::setupUI() {
 
     // 输出组与其他检查器分区共用同一套无框标题和细分隔线。
     m_outputGroup = createCollapsibleGroup(
-        QString::fromUtf8("文件设置"), true);
+        QCoreApplication::translate("Nebulens", "文件设置"), true);
     auto* outputLayout = new QVBoxLayout(m_outputGroup);
     outputLayout->setSpacing(14);
 
@@ -1126,15 +1137,15 @@ void ParamsPanel::setupUI() {
     outputForm->setVerticalSpacing(11);
     outputForm->setColumnStretch(1, 1);
 
-    auto* formatLabel = new QLabel(QString::fromUtf8("文件格式"), m_outputGroup);
-    formatLabel->setFixedWidth(88);
+    auto* formatLabel = new QLabel(QCoreApplication::translate("Nebulens", "文件格式"), m_outputGroup);
+    formatLabel->setFixedWidth(formLabelWidth());
     formatLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
     setRole(formatLabel, "muted");
-    formatLabel->setToolTip(QString::fromUtf8("TIFF 16-bit：最高质量，保留完整动态范围（推荐）\nPNG 8-bit：无损压缩，预览/分享首选"));
+    formatLabel->setToolTip(QCoreApplication::translate("Nebulens", "TIFF 16-bit：最高质量，保留完整动态范围（推荐）\nPNG 8-bit：无损压缩，预览/分享首选"));
     outputForm->addWidget(formatLabel, 0, 0);
     m_outputFormat = new QComboBox(m_outputGroup);
     m_outputFormat->addItems({"TIFF 16-bit", "PNG 8-bit (预览)"});
-    m_outputFormat->setToolTip(QString::fromUtf8("输出图像格式，TIFF 16-bit 为推荐默认"));
+    m_outputFormat->setToolTip(QCoreApplication::translate("Nebulens", "输出图像格式，TIFF 16-bit 为推荐默认"));
     connect(m_outputFormat, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &ParamsPanel::onComboChanged);
     outputForm->addWidget(m_outputFormat, 0, 1, 1, 2);
 
@@ -1142,8 +1153,8 @@ void ParamsPanel::setupUI() {
     // 后续完整实现色彩空间转换后再恢复
 
     // 输出路径选择
-    auto* pathLabel = new QLabel(QString::fromUtf8("输出目录"), m_outputGroup);
-    pathLabel->setFixedWidth(88);
+    auto* pathLabel = new QLabel(QCoreApplication::translate("Nebulens", "输出目录"), m_outputGroup);
+    pathLabel->setFixedWidth(formLabelWidth());
     pathLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
     setRole(pathLabel, "muted");
     outputForm->addWidget(pathLabel, 1, 0);
@@ -1159,11 +1170,14 @@ void ParamsPanel::setupUI() {
             UiAssets::Glyph::Folder,
             StyleTokens::Colors::fromHex(
                 StyleTokens::Colors::kTextSecondary)));
-    pathBtn->setToolTip(QString::fromUtf8("选择输出目录"));
+    pathBtn->setToolTip(QCoreApplication::translate("Nebulens", "选择输出目录"));
     pathBtn->setAccessibleName(pathBtn->toolTip());
     setButtonVariant(pathBtn, "icon");
     connect(pathBtn, &QPushButton::clicked, this, [this]() {
-        QString dir = QFileDialog::getExistingDirectory(nullptr, QString::fromUtf8("选择输出目录"));
+        QString dir = QFileDialog::getExistingDirectory(
+            this, QCoreApplication::translate("Nebulens", "选择输出目录"),
+            outputPath(),
+            QFileDialog::ShowDirsOnly | QFileDialog::DontUseNativeDialog);
         if (!dir.isEmpty()) {
             displayOutputPath(m_outputPath, dir);
             refreshRecentResults();
@@ -1177,7 +1191,7 @@ void ParamsPanel::setupUI() {
     outputPageLayout->addWidget(m_outputGroup, 0, Qt::AlignTop);
 
     m_processingReportGroup = createCollapsibleGroup(
-        QString::fromUtf8("处理报告"), true);
+        QCoreApplication::translate("Nebulens", "处理报告"), true);
     auto* reportLayout = new QVBoxLayout(m_processingReportGroup);
     m_processingReportLabel = new QLabel(m_processingReportGroup);
     m_processingReportLabel->setWordWrap(true);
@@ -1189,18 +1203,18 @@ void ParamsPanel::setupUI() {
     outputPageLayout->addWidget(m_processingReportGroup, 0, Qt::AlignTop);
 
     m_recentResultsGroup = createCollapsibleGroup(
-        QString::fromUtf8("最近结果"), true);
+        QCoreApplication::translate("Nebulens", "最近结果"), true);
     auto* recentLayout = new QVBoxLayout(m_recentResultsGroup);
     m_recentResultsList = new QListWidget(m_recentResultsGroup);
     m_recentResultsList->setMaximumHeight(148);
-    m_recentResultsList->setAccessibleName(QString::fromUtf8("最近处理结果"));
+    m_recentResultsList->setAccessibleName(QCoreApplication::translate("Nebulens", "最近处理结果"));
     recentLayout->addWidget(m_recentResultsList);
     auto* recentButtons = new QHBoxLayout();
     m_loadRecentResultBtn = new QPushButton(
-        QString::fromUtf8("只读预览"), m_recentResultsGroup);
+        QCoreApplication::translate("Nebulens", "只读预览"), m_recentResultsGroup);
     setButtonVariant(m_loadRecentResultBtn, "secondary");
     m_revealRecentResultBtn = new QPushButton(
-        QString::fromUtf8("在文件夹中显示"), m_recentResultsGroup);
+        QCoreApplication::translate("Nebulens", "在文件夹中显示"), m_recentResultsGroup);
     setButtonVariant(m_revealRecentResultBtn, "ghost");
     recentButtons->addWidget(m_loadRecentResultBtn);
     recentButtons->addWidget(m_revealRecentResultBtn);
@@ -1236,14 +1250,14 @@ void ParamsPanel::setupUI() {
     btnLayout->setContentsMargins(0, StyleTokens::Spacing::kBase, 0, 0);
     btnLayout->setSpacing(8);
 
-    m_restoreBtn = new QPushButton(QString::fromUtf8("恢复默认"), m_footerBar);
+    m_restoreBtn = new QPushButton(QCoreApplication::translate("Nebulens", "恢复默认"), m_footerBar);
     setButtonVariant(m_restoreBtn, "ghost");
     connect(m_restoreBtn, &QPushButton::clicked, this, &ParamsPanel::onRestoreDefaults);
     btnLayout->addWidget(m_restoreBtn);
 
     btnLayout->addStretch();
 
-    m_savePresetBtn = new QPushButton(QString::fromUtf8("保存预设"), m_footerBar);
+    m_savePresetBtn = new QPushButton(QCoreApplication::translate("Nebulens", "保存预设"), m_footerBar);
     setButtonVariant(m_savePresetBtn, "secondary");
     connect(m_savePresetBtn, &QPushButton::clicked, this, &ParamsPanel::onSavePreset);
     btnLayout->addWidget(m_savePresetBtn);
@@ -1362,16 +1376,16 @@ void ParamsPanel::updateModifiedCameraColorControls() {
     m_modifiedCameraGrayPointStatus->setEnabled(enabled);
     if (!enabled) {
         m_modifiedCameraGrayPointStatus->setText(
-            QString::fromUtf8("普通相机请保持关闭"));
+            QCoreApplication::translate("Nebulens", "普通相机请保持关闭"));
     } else if (!manual) {
         m_modifiedCameraGrayPointStatus->setText(
-            QString::fromUtf8("自动从中等亮度天空估计中性色"));
+            QCoreApplication::translate("Nebulens", "自动从中等亮度天空估计中性色"));
     } else if (hasModifiedCameraGrayPoint()) {
         m_modifiedCameraGrayPointStatus->setText(
-            QString::fromUtf8("手动灰点已设置，可用吸管重新采样"));
+            QCoreApplication::translate("Nebulens", "手动灰点已设置，可用吸管重新采样"));
     } else {
         m_modifiedCameraGrayPointStatus->setText(
-            QString::fromUtf8("请点击吸管，再在结果预览中选择中性天空"));
+            QCoreApplication::translate("Nebulens", "请点击吸管，再在结果预览中选择中性天空"));
     }
 }
 
@@ -1513,8 +1527,8 @@ void ParamsPanel::onRestoreDefaults() {
 
 void ParamsPanel::onSavePreset() {
     bool ok;
-    QString name = QInputDialog::getText(this, QString::fromUtf8("保存预设"),
-                                          QString::fromUtf8("预设名称:"),
+    QString name = QInputDialog::getText(this, QCoreApplication::translate("Nebulens", "保存预设"),
+                                          QCoreApplication::translate("Nebulens", "预设名称:"),
                                           QLineEdit::Normal, QString(), &ok);
     if (!ok || name.isEmpty()) return;
 
@@ -1569,8 +1583,8 @@ void ParamsPanel::onSavePreset() {
     m_presetCombo->addItem(name);
     m_presetCombo->setCurrentIndex(m_presetCombo->count() - 1);
 
-    QMessageBox::information(this, QString::fromUtf8("保存预设"),
-                             QString::fromUtf8("预设 \"%1\" 已保存").arg(name));
+    QMessageBox::information(this, QCoreApplication::translate("Nebulens", "保存预设"),
+                             QCoreApplication::translate("Nebulens", "预设 \"%1\" 已保存").arg(name));
 }
 
 void ParamsPanel::recommendStackMethod(int frameCount) {
@@ -2114,7 +2128,7 @@ void ParamsPanel::applySceneProfile(ProcessingScene scene,
 
     switch (scene) {
     case ProcessingScene::SingleFrame:
-        preset.name = QString::fromUtf8("单张精修");
+        preset.name = QCoreApplication::translate("Nebulens", "单张精修");
         preset.stackMethod = "median";
         preset.autoRejectLowQualityFrames = false;
         preset.photometricNormalizationEnabled = false;
@@ -2122,27 +2136,27 @@ void ParamsPanel::applySceneProfile(ProcessingScene scene,
         preset.noiseReductionStrength = 25;
         preset.stretchEnabled = true;
         preset.starReduceEnabled = false;
-        title = QString::fromUtf8("单张精修参数");
+        title = QCoreApplication::translate("Nebulens", "单张精修参数");
         activeTab = 1;
         break;
     case ProcessingScene::Nightscape:
         if (!builtins.isEmpty()) preset = builtins[0];
         presetIndex = 1;
-        title = QString::fromUtf8("银河星景参数");
+        title = QCoreApplication::translate("Nebulens", "银河星景参数");
         break;
     case ProcessingScene::DeepSky:
         if (builtins.size() > 1) preset = builtins[1];
         presetIndex = 2;
-        title = QString::fromUtf8("深空堆栈参数");
+        title = QCoreApplication::translate("Nebulens", "深空堆栈参数");
         break;
     case ProcessingScene::SkyGround:
         if (!builtins.isEmpty()) preset = builtins[0];
         presetIndex = 0;
         skyGroundEnabled = true;
-        title = QString::fromUtf8("天地分离参数");
+        title = QCoreApplication::translate("Nebulens", "天地分离参数");
         break;
     case ProcessingScene::StarTrail:
-        preset.name = QString::fromUtf8("星轨合成");
+        preset.name = QCoreApplication::translate("Nebulens", "星轨合成");
         preset.stackMethod = "average";
         preset.autoRejectLowQualityFrames = false;
         preset.photometricNormalizationEnabled = true;
@@ -2151,10 +2165,10 @@ void ParamsPanel::applySceneProfile(ProcessingScene scene,
         preset.stretchEnabled = true;
         preset.starReduceEnabled = false;
         presetIndex = 0;
-        title = QString::fromUtf8("星轨合成参数");
+        title = QCoreApplication::translate("Nebulens", "星轨合成参数");
         break;
     case ProcessingScene::Timelapse:
-        preset.name = QString::fromUtf8("延时序列");
+        preset.name = QCoreApplication::translate("Nebulens", "延时序列");
         preset.stackMethod = "average";
         preset.autoRejectLowQualityFrames = false;
         preset.photometricNormalizationEnabled = true;
@@ -2163,7 +2177,7 @@ void ParamsPanel::applySceneProfile(ProcessingScene scene,
         preset.stretchEnabled = false;
         preset.starReduceEnabled = false;
         presetIndex = 0;
-        title = QString::fromUtf8("延时序列参数");
+        title = QCoreApplication::translate("Nebulens", "延时序列参数");
         break;
     }
 
@@ -2215,29 +2229,29 @@ void ParamsPanel::showWorkflowStage(WorkflowStage stage) {
     QString title;
     switch (stage) {
     case WorkflowStage::Assets:
-        kicker = QStringLiteral("01 / ASSETS");
-        title = QString::fromUtf8("素材与序列");
+        kicker = QCoreApplication::translate("Nebulens", "01 / 素材");
+        title = QCoreApplication::translate("Nebulens", "素材与序列");
         break;
     case WorkflowStage::Calibration:
-        kicker = QStringLiteral("02 / CALIBRATE");
-        title = QString::fromUtf8("镜头与传感器");
+        kicker = QCoreApplication::translate("Nebulens", "02 / 校准");
+        title = QCoreApplication::translate("Nebulens", "镜头与传感器");
         break;
     case WorkflowStage::Alignment:
-        kicker = QStringLiteral("03 / ALIGN");
-        title = QString::fromUtf8("星点与地景对齐");
+        kicker = QCoreApplication::translate("Nebulens", "03 / 对齐");
+        title = QCoreApplication::translate("Nebulens", "星点与地景对齐");
         break;
     case WorkflowStage::Stacking:
-        kicker = QStringLiteral("04 / STACK");
-        title = QString::fromUtf8("帧合成");
+        kicker = QCoreApplication::translate("Nebulens", "04 / 合成");
+        title = QCoreApplication::translate("Nebulens", "帧合成");
         break;
     case WorkflowStage::Adjustment:
-        kicker = QStringLiteral("05 / ADJUST");
-        title = QString::fromUtf8("成片调整");
+        kicker = QCoreApplication::translate("Nebulens", "05 / 调整");
+        title = QCoreApplication::translate("Nebulens", "成片调整");
         tabIndex = 1;
         break;
     case WorkflowStage::Output:
-        kicker = QStringLiteral("06 / OUTPUT");
-        title = QString::fromUtf8("输出与历史");
+        kicker = QCoreApplication::translate("Nebulens", "06 / 输出");
+        title = QCoreApplication::translate("Nebulens", "输出与历史");
         tabIndex = 2;
         refreshRecentResults();
         break;
@@ -2335,8 +2349,8 @@ void ParamsPanel::setAssetSummary(int total, int available,
     }
     if (m_assetThresholdValue) {
         m_assetThresholdValue->setText(
-            ready ? QString::fromUtf8("已满足")
-                  : QString::fromUtf8("素材不足"));
+            ready ? QCoreApplication::translate("Nebulens", "已满足")
+                  : QCoreApplication::translate("Nebulens", "素材不足"));
         m_assetThresholdValue->setProperty(
             StyleTokens::Properties::kStatusRole,
             QString::fromLatin1(
@@ -2347,7 +2361,7 @@ void ParamsPanel::setAssetSummary(int total, int available,
     }
     if (m_assetReferenceValue) {
         m_assetReferenceValue->setText(
-            reference.isEmpty() ? QString::fromUtf8("自动") : reference);
+            reference.isEmpty() ? QCoreApplication::translate("Nebulens", "自动") : reference);
         m_assetReferenceValue->setToolTip(reference);
     }
 }
@@ -2416,7 +2430,7 @@ void ParamsPanel::refreshRecentResults() {
         const QFileInfo& file = files[index];
         auto* item = new QListWidgetItem(file.fileName(), m_recentResultsList);
         item->setData(Qt::UserRole, file.absoluteFilePath());
-        item->setToolTip(QString::fromUtf8("%1\n%2 · %3 MB")
+        item->setToolTip(QCoreApplication::translate("Nebulens", "%1\n%2 · %3 MB")
             .arg(file.absoluteFilePath())
             .arg(file.lastModified().toString(QStringLiteral("yyyy-MM-dd HH:mm")))
             .arg(file.size() / (1024.0 * 1024.0), 0, 'f', 1));
@@ -2444,19 +2458,19 @@ void ParamsPanel::updateStackMethodDescription() {
     QString description;
     switch (m_stackAlgorithm->currentIndex()) {
         case 0:
-            description = QString::fromUtf8(
+            description = QCoreApplication::translate("Nebulens",
                 "<b>少帧稳健</b><br>逐像素取中位数，能压制飞机轨迹和热像素；信噪比提升低于平均值。");
             break;
         case 1:
-            description = QString::fromUtf8(
+            description = QCoreApplication::translate("Nebulens",
                 "<b>细节优先</b><br>逐像素平均，信噪比利用率最高；异常轨迹、坏点和薄云更容易残留。");
             break;
         case 2:
-            description = QString::fromUtf8(
+            description = QCoreApplication::translate("Nebulens",
                 "<b>均衡推荐</b><br>迭代剔除超出 κ 阈值的异常像素，适合 6–15 帧；κ 越小剔除越严格。");
             break;
         case 3:
-            description = QString::fromUtf8(
+            description = QCoreApplication::translate("Nebulens",
                 "<b>长序列稳健</b><br>限制极端值后求均值，兼顾信噪比与异常值抑制；帧数越多越稳定。");
             break;
         default:
@@ -2638,7 +2652,7 @@ void ParamsPanel::updateRefFrameList(const QStringList& fileNames) {
     const QString currentPath = m_refFrame->currentData().toString();
     QSignalBlocker blocker(m_refFrame);
     m_refFrame->clear();
-    m_refFrame->addItem(QString::fromUtf8("自动选择"));
+    m_refFrame->addItem(QCoreApplication::translate("Nebulens", "自动选择"));
     for (const QString& path : fileNames) {
         m_refFrame->addItem(QFileInfo(path).fileName(), path);
     }
@@ -2805,9 +2819,10 @@ void ParamsPanel::importCalibrationFrames(QStringList& paths,
                                           const QString& dialogTitle) {
     const QStringList selected = QFileDialog::getOpenFileNames(
         this, dialogTitle, QString(),
-        QString::fromUtf8(
+        QCoreApplication::translate("Nebulens",
             "RAW 文件 (*.nef *.cr2 *.arw *.dng *.raw *.orf *.raf *.pef *.cr3);;"
-            "所有文件 (*)"));
+            "所有文件 (*)"),
+        nullptr, QFileDialog::DontUseNativeDialog);
     if (selected.isEmpty()) return;
 
     auto pathIdentity = [](const QString& path) {
@@ -2854,8 +2869,8 @@ void ParamsPanel::importCalibrationFrames(QStringList& paths,
     }
     if (categoryConflicts > 0) {
         QMessageBox::information(
-            this, QString::fromUtf8("已跳过重复校准帧"),
-            QString::fromUtf8(
+            this, QCoreApplication::translate("Nebulens", "已跳过重复校准帧"),
+            QCoreApplication::translate("Nebulens",
                 "%1 张 RAW 已属于另一类校准帧，未重复导入。")
                 .arg(categoryConflicts));
     }
@@ -2876,16 +2891,21 @@ void ParamsPanel::importCalibrationMaster(QString& masterPath,
                                           const QString& roleName,
                                           bool confirmNormalizedFlat) {
     const QString selected = QFileDialog::getOpenFileName(
-        this, QString::fromUtf8("选择 Master %1").arg(roleName), QString(),
-        QString::fromUtf8("Nebulens Master (*.spmaster)"));
+        this,
+        QCoreApplication::translate("Nebulens", "选择 Master %1")
+            .arg(roleName),
+        QString(),
+        QCoreApplication::translate(
+            "Nebulens", "Nebulens Master (*.spmaster)"),
+        nullptr, QFileDialog::DontUseNativeDialog);
     if (selected.isEmpty()) return;
 
     const QFileInfo selectedInfo(selected);
     if (selectedInfo.suffix().compare(
             QStringLiteral("spmaster"), Qt::CaseInsensitive) != 0) {
         QMessageBox::warning(
-            this, QString::fromUtf8("不支持的 Master 文件"),
-            QString::fromUtf8(
+            this, QCoreApplication::translate("Nebulens", "不支持的 Master 文件"),
+            QCoreApplication::translate("Nebulens",
                 "Master 只能导入由 Nebulens 生成的 .spmaster 文件。"));
         return;
     }
@@ -2893,16 +2913,16 @@ void ParamsPanel::importCalibrationMaster(QString& masterPath,
     if (calibrationPathUsedElsewhere(
             absolutePath, &rawPaths, &masterPath)) {
         QMessageBox::warning(
-            this, QString::fromUtf8("Master 已被使用"),
-            QString::fromUtf8(
+            this, QCoreApplication::translate("Nebulens", "Master 已被使用"),
+            QCoreApplication::translate("Nebulens",
                 "同一个文件不能同时分配给多个校准角色。"));
         return;
     }
 
     if (confirmNormalizedFlat) {
         QMessageBox::information(
-            this, QString::fromUtf8("Master Flat 校验"),
-            QString::fromUtf8(
+            this, QCoreApplication::translate("Nebulens", "Master Flat 校验"),
+            QCoreApplication::translate("Nebulens",
                 "Nebulens 会读取 .spmaster 内的处理状态。只有已经"
                 "完成偏移校准并按 CFA phase 分相归一化的 Master Flat "
                 "才能通过正式预检。"));
@@ -2935,10 +2955,10 @@ void ParamsPanel::updateCalibrationSource(
             label->setText(QFileInfo(masterPath).fileName());
             label->setToolTip(masterPath);
         } else if (!rawPaths.isEmpty()) {
-            label->setText(QString::fromUtf8("RAW %1 张").arg(rawPaths.size()));
+            label->setText(QCoreApplication::translate("Nebulens", "RAW %1 张").arg(rawPaths.size()));
             label->setToolTip(rawPaths.join(QLatin1Char('\n')));
         } else {
-            label->setText(QString::fromUtf8("未选择"));
+            label->setText(QCoreApplication::translate("Nebulens", "未选择"));
             label->setToolTip(QString());
         }
     }
@@ -2990,7 +3010,7 @@ void ParamsPanel::updateCalibrationStatus() {
     if (!m_calibrationStatus) return;
     const bool ready = deepSkyCalibrationInputsComplete();
     if (ready) {
-        m_calibrationStatus->setText(QString::fromUtf8(
+        m_calibrationStatus->setText(QCoreApplication::translate("Nebulens",
             "校准来源已就绪。处理前仍会检查相机、尺寸、ISO、曝光、"
             "CFA 和 Master 元数据。"));
     } else {
@@ -3001,41 +3021,41 @@ void ParamsPanel::updateCalibrationStatus() {
                 (rawPaths.isEmpty() && !masterPath.isEmpty());
         };
         if (!sourceReady(m_darkFramePaths, m_masterDarkPath)) {
-            missing.append(QString::fromUtf8("Dark（≥3 RAW 或 Master）"));
+            missing.append(QCoreApplication::translate("Nebulens", "Dark（≥3 RAW 或 Master）"));
         }
         if (!sourceReady(m_flatFramePaths, m_masterFlatPath)) {
-            missing.append(QString::fromUtf8("Flat（≥3 RAW 或 Master）"));
+            missing.append(QCoreApplication::translate("Nebulens", "Flat（≥3 RAW 或 Master）"));
         }
         const bool hasBias = !m_biasFramePaths.isEmpty() ||
             !m_masterBiasPath.isEmpty();
         const bool hasDarkFlat = !m_darkFlatFramePaths.isEmpty() ||
             !m_masterDarkFlatPath.isEmpty();
         if (m_masterFlatPath.isEmpty() && hasBias == hasDarkFlat) {
-            missing.append(QString::fromUtf8(
+            missing.append(QCoreApplication::translate("Nebulens",
                 "生成 Flat 时 Bias / Dark Flat 恰选一种"));
         } else if (!m_masterFlatPath.isEmpty() && hasDarkFlat) {
-            missing.append(QString::fromUtf8(
+            missing.append(QCoreApplication::translate("Nebulens",
                 "Master Flat 不再搭配 Dark Flat"));
         }
         if (!m_masterFlatPath.isEmpty() && m_masterDarkPath.isEmpty() &&
             hasBias) {
-            missing.append(QString::fromUtf8(
+            missing.append(QCoreApplication::translate("Nebulens",
                 "RAW Dark 含偏置基底，Master Flat 不再搭配 Bias"));
         }
         if (hasBias && !sourceReady(m_biasFramePaths, m_masterBiasPath)) {
-            missing.append(QString::fromUtf8(
+            missing.append(QCoreApplication::translate("Nebulens",
                 "Bias（≥3 RAW 或 Master）"));
         }
         if (hasDarkFlat &&
             !sourceReady(m_darkFlatFramePaths, m_masterDarkFlatPath)) {
-            missing.append(QString::fromUtf8(
+            missing.append(QCoreApplication::translate("Nebulens",
                 "Dark Flat（≥3 RAW 或 Master）"));
         }
         m_calibrationStatus->setText(
             missing.isEmpty()
-                ? QString::fromUtf8("校准来源尚未就绪，请检查各 RAW 组数量。")
-                : QString::fromUtf8("还需要：%1").arg(
-                      missing.join(QString::fromUtf8("；"))));
+                ? QCoreApplication::translate("Nebulens", "校准来源尚未就绪，请检查各 RAW 组数量。")
+                : QCoreApplication::translate("Nebulens", "还需要：%1").arg(
+                      missing.join(QCoreApplication::translate("Nebulens", "；"))));
     }
     m_calibrationStatus->setProperty(
         "status", ready ? "ready" : "waiting");

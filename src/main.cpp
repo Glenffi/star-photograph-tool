@@ -50,6 +50,7 @@
 #include "ui/StyleTokens.h"
 #include "ui/TaskStatusBar.h"
 #include "ui/WorkflowRail.h"
+#include "i18n/AppLocalization.h"
 #include "update/UpdateManager.h"
 
 #include "core/RawImageLoader.h"
@@ -65,7 +66,7 @@ class MainWindow : public QMainWindow {
 
 public:
     MainWindow(QWidget* parent = nullptr) : QMainWindow(parent) {
-        setWindowTitle(QString::fromUtf8("Nebulens — 星空影像工作台"));
+        setWindowTitle(QCoreApplication::translate("Nebulens", "Nebulens — 星空影像工作台"));
         resize(1400, 900);
         setMinimumSize(920, 540);
         setAcceptDrops(true);
@@ -93,7 +94,8 @@ public:
                 });
         m_updateManager->scheduleAutomaticCheck();
 
-        statusBar()->showMessage("就绪 — 拖入 RAW 文件或点击导入开始");
+        statusBar()->showMessage(QCoreApplication::translate(
+            "Nebulens", "就绪 — 拖入 RAW 文件或点击导入开始"));
     }
 
     void importFiles(const QStringList& paths) {
@@ -171,7 +173,7 @@ protected:
     void dropEvent(QDropEvent* event) override {
         if (processingActive()) {
             event->ignore();
-            statusBar()->showMessage(QString::fromUtf8("处理中不能修改素材"), 3000);
+            statusBar()->showMessage(QCoreApplication::translate("Nebulens", "处理中不能修改素材"), 3000);
             return;
         }
         const QMimeData* mimeData = event->mimeData();
@@ -187,7 +189,7 @@ protected:
         if (!filePaths.isEmpty()) {
             importFiles(filePaths);
             statusBar()->showMessage(
-                QString("拖放导入 %1 个文件").arg(filePaths.size()),
+                QCoreApplication::translate("Nebulens", "拖放导入 %1 个文件").arg(filePaths.size()),
                 5000
             );
         }
@@ -347,17 +349,17 @@ private:
     QString sceneName() const {
         switch (m_scene) {
         case ProcessingScene::SingleFrame:
-            return QString::fromUtf8("单张精修");
+            return QCoreApplication::translate("Nebulens", "单张精修");
         case ProcessingScene::Nightscape:
-            return QString::fromUtf8("银河星景");
+            return QCoreApplication::translate("Nebulens", "银河星景");
         case ProcessingScene::DeepSky:
-            return QString::fromUtf8("深空天体");
+            return QCoreApplication::translate("Nebulens", "深空天体");
         case ProcessingScene::SkyGround:
-            return QString::fromUtf8("天地分离");
+            return QCoreApplication::translate("Nebulens", "天地分离");
         case ProcessingScene::StarTrail:
-            return QString::fromUtf8("星轨合成");
+            return QCoreApplication::translate("Nebulens", "星轨合成");
         case ProcessingScene::Timelapse:
-            return QString::fromUtf8("延时序列");
+            return QCoreApplication::translate("Nebulens", "延时序列");
         }
         return QString();
     }
@@ -377,7 +379,7 @@ private:
         if (changed) {
             m_paramsPanel->clearModifiedCameraGrayPoint();
             markCachedResultStale(
-                QString::fromUtf8("场景已切换 · 这是上次处理的成片"));
+                QCoreApplication::translate("Nebulens", "场景已切换 · 这是上次处理的成片"));
             m_paramsPanel->applySceneProfile(scene, resetParameters);
         }
         m_projectPanel->setScene(scene);
@@ -393,7 +395,7 @@ private:
             "ui/processingScene", static_cast<int>(scene));
         updateProjectReadiness();
         statusBar()->showMessage(
-            QString::fromUtf8("已进入%1流程").arg(sceneName()), 3000);
+            QCoreApplication::translate("Nebulens", "已进入%1流程").arg(sceneName()), 3000);
     }
 
     void updateProjectReadiness() {
@@ -406,9 +408,9 @@ private:
                                            const QString& master) {
             if (!master.isEmpty()) return QStringLiteral("Master");
             if (!paths.isEmpty()) {
-                return QString::fromUtf8("%1 张").arg(paths.size());
+                return QCoreApplication::translate("Nebulens", "%1 张").arg(paths.size());
             }
-            return QString::fromUtf8("未设置");
+            return QCoreApplication::translate("Nebulens", "未设置");
         };
         m_projectPanel->setCalibrationSummary(
             calibrationSummary(m_paramsPanel->darkFramePaths(),
@@ -432,8 +434,8 @@ private:
             WorkflowStage::Calibration, count >= required && !calibrationReady);
         m_toolbar->setProjectSummary(
             count > 0
-                ? QString::fromUtf8("%1 · %2 张素材").arg(sceneName()).arg(count)
-                : QString::fromUtf8("%1 · 等待素材").arg(sceneName()));
+                ? QCoreApplication::translate("Nebulens", "%1 · %2 张素材").arg(sceneName()).arg(count)
+                : QCoreApplication::translate("Nebulens", "%1 · 等待素材").arg(sceneName()));
         m_paramsPanel->updateRefFrameList(m_projectPanel->includedFilePaths());
         m_paramsPanel->setAssetSummary(
             m_projectPanel->totalFileCount(), count,
@@ -445,43 +447,47 @@ private:
                  m_scene == ProcessingScene::SkyGround) && count >= 2) {
                 m_paramsPanel->recommendStackMethod(count);
             }
-            QString status = QString::fromUtf8("%1 张照片已就绪").arg(count);
+            QString status = QCoreApplication::translate("Nebulens", "%1 张照片已就绪").arg(count);
             if (m_scene == ProcessingScene::DeepSky && count < 6) {
-                status += QString::fromUtf8(" · 建议 6 张以上获得更稳健结果");
+                status += QCoreApplication::translate("Nebulens", " · 建议 6 张以上获得更稳健结果");
             }
             setWorkflowStage(
                 m_scene == ProcessingScene::DeepSky ? 0 : 1,
                 m_scene == ProcessingScene::DeepSky
-                    ? QString::fromUtf8("%1 张 Light 与校准帧已齐，可以开始处理")
+                    ? QCoreApplication::translate("Nebulens", "%1 张 Light 与校准帧已齐，可以开始处理")
                           .arg(count)
                     : status);
         } else if (count < required) {
             const int remaining = required - count;
             setWorkflowStage(0,
-                QString::fromUtf8("还需要 %1 张照片").arg(remaining));
+                QCoreApplication::translate("Nebulens", "还需要 %1 张照片").arg(remaining));
         } else {
-            setWorkflowStage(0, QString::fromUtf8(
+            setWorkflowStage(0, QCoreApplication::translate("Nebulens",
                 "请补齐 Dark、Flat，以及 Bias 或同曝光 Dark Flat；也可导入 Master"));
         }
     }
 
     void setupMenuBar() {
         // 文件菜单
-        auto* fileMenu = menuBar()->addMenu("文件");
+        auto* fileMenu = menuBar()->addMenu(
+            QCoreApplication::translate("Nebulens", "文件"));
 
-        auto* importAction = new QAction("导入 RAW...", this);
+        auto* importAction = new QAction(
+            QCoreApplication::translate("Nebulens", "导入 RAW..."), this);
         importAction->setShortcut(QKeySequence::Open);
         connect(importAction, &QAction::triggered, this, &MainWindow::onImportClicked);
         fileMenu->addAction(importAction);
 
-        auto* importFolderAction = new QAction("导入文件夹...", this);
+        auto* importFolderAction = new QAction(
+            QCoreApplication::translate("Nebulens", "导入文件夹..."), this);
         importFolderAction->setShortcut(QKeySequence("Ctrl+Shift+O"));
         connect(importFolderAction, &QAction::triggered, this, &MainWindow::onImportFolderClicked);
         fileMenu->addAction(importFolderAction);
 
         fileMenu->addSeparator();
 
-        auto* clearAction = new QAction("清空项目", this);
+        auto* clearAction = new QAction(
+            QCoreApplication::translate("Nebulens", "清空项目"), this);
         connect(clearAction, &QAction::triggered, this, [this]() {
             if (processingActive()) return;
             m_projectPanel->clearFiles();
@@ -491,21 +497,25 @@ private:
             m_toolbar->enableProcess(false);
             m_toolbar->enableExport(false);
             updateProjectReadiness();
-            statusBar()->showMessage("项目已清空", 3000);
+            statusBar()->showMessage(QCoreApplication::translate(
+                "Nebulens", "项目已清空"), 3000);
         });
         fileMenu->addAction(clearAction);
 
         fileMenu->addSeparator();
 
-        auto* exitAction = new QAction("退出", this);
+        auto* exitAction = new QAction(
+            QCoreApplication::translate("Nebulens", "退出"), this);
         exitAction->setShortcut(QKeySequence::Quit);
         connect(exitAction, &QAction::triggered, this, &QWidget::close);
         fileMenu->addAction(exitAction);
 
         // 编辑菜单
-        auto* editMenu = menuBar()->addMenu("编辑");
+        auto* editMenu = menuBar()->addMenu(
+            QCoreApplication::translate("Nebulens", "编辑"));
 
-        auto* removeAction = new QAction("移除所选", this);
+        auto* removeAction = new QAction(
+            QCoreApplication::translate("Nebulens", "移除所选"), this);
         removeAction->setShortcut(QKeySequence::Delete);
         connect(removeAction, &QAction::triggered, this, [this]() {
             if (!processingActive()) m_projectPanel->removeSelected();
@@ -513,16 +523,17 @@ private:
         editMenu->addAction(removeAction);
 
         // 视图菜单
-        auto* viewMenu = menuBar()->addMenu("视图");
+        auto* viewMenu = menuBar()->addMenu(
+            QCoreApplication::translate("Nebulens", "视图"));
 
         auto* cycleCompareAction = new QAction(
-            QString::fromUtf8("循环对比\tB"), this);
+            QCoreApplication::translate("Nebulens", "循环对比\tB"), this);
         connect(cycleCompareAction, &QAction::triggered,
                 m_previewPanel, &PreviewPanel::cycleComparisonMode);
         viewMenu->addAction(cycleCompareAction);
 
         m_beforeAfterAction = new QAction(
-            QString::fromUtf8("处理前后分屏\tShift+B"), this);
+            QCoreApplication::translate("Nebulens", "处理前后分屏\tShift+B"), this);
         m_beforeAfterAction->setCheckable(true);
         m_beforeAfterAction->setEnabled(false);
         connect(m_beforeAfterAction, &QAction::toggled,
@@ -531,52 +542,58 @@ private:
 
         viewMenu->addSeparator();
 
-        auto* fitViewAction = new QAction(QString::fromUtf8("适应视图\tF"), this);
+        auto* fitViewAction = new QAction(QCoreApplication::translate("Nebulens", "适应视图\tF"), this);
         connect(fitViewAction, &QAction::triggered, m_previewPanel, &PreviewPanel::fitToView);
         viewMenu->addAction(fitViewAction);
 
         auto* actualPixelsAction = new QAction(
-            QString::fromUtf8("实际像素 (1:1)\t1"), this);
+            QCoreApplication::translate("Nebulens", "实际像素 (1:1)\t1"), this);
         connect(actualPixelsAction, &QAction::triggered, m_previewPanel, &PreviewPanel::resetZoom);
         viewMenu->addAction(actualPixelsAction);
 
-        auto* maskAction = new QAction(QString::fromUtf8("蒙版叠加\tM"), this);
+        auto* maskAction = new QAction(QCoreApplication::translate("Nebulens", "蒙版叠加\tM"), this);
         connect(maskAction, &QAction::triggered,
                 m_previewPanel, &PreviewPanel::toggleMaskOverlay);
         viewMenu->addAction(maskAction);
-        auto* resultAction = new QAction(QString::fromUtf8("返回当前结果\tR"), this);
+        auto* resultAction = new QAction(QCoreApplication::translate("Nebulens", "返回当前结果\tR"), this);
         connect(resultAction, &QAction::triggered,
                 this, &MainWindow::showBestAvailableResult);
         viewMenu->addAction(resultAction);
 
         // 处理菜单
-        auto* processMenu = menuBar()->addMenu("处理");
+        auto* processMenu = menuBar()->addMenu(
+            QCoreApplication::translate("Nebulens", "处理"));
 
-        auto* startAction = new QAction("开始处理", this);
+        auto* startAction = new QAction(
+            QCoreApplication::translate("Nebulens", "开始处理"), this);
         startAction->setShortcut(QKeySequence("Ctrl+Return"));
         connect(startAction, &QAction::triggered, this, &MainWindow::onProcessClicked);
         processMenu->addAction(startAction);
 
-        auto* exportAction = new QAction("导出结果", this);
+        auto* exportAction = new QAction(
+            QCoreApplication::translate("Nebulens", "导出结果"), this);
         exportAction->setShortcut(QKeySequence("Ctrl+E"));
         connect(exportAction, &QAction::triggered, this, &MainWindow::onExportClicked);
         processMenu->addAction(exportAction);
 
         // 帮助菜单
-        auto* helpMenu = menuBar()->addMenu("帮助");
+        auto* helpMenu = menuBar()->addMenu(
+            QCoreApplication::translate("Nebulens", "帮助"));
 
-        auto* updateAction = new QAction("检查更新...", this);
+        auto* updateAction = new QAction(
+            QCoreApplication::translate("Nebulens", "检查更新..."), this);
         connect(updateAction, &QAction::triggered, this, [this]() {
             m_updateManager->checkForUpdates(true);
         });
         helpMenu->addAction(updateAction);
-        auto* shortcutsAction = new QAction(QString::fromUtf8("快捷键..."), this);
+        auto* shortcutsAction = new QAction(QCoreApplication::translate("Nebulens", "快捷键..."), this);
         connect(shortcutsAction, &QAction::triggered,
                 this, &MainWindow::showShortcutsDialog);
         helpMenu->addAction(shortcutsAction);
         helpMenu->addSeparator();
 
-        auto* aboutAction = new QAction("关于", this);
+        auto* aboutAction = new QAction(
+            QCoreApplication::translate("Nebulens", "关于"), this);
         connect(aboutAction, &QAction::triggered, this, &MainWindow::onAboutClicked);
         helpMenu->addAction(aboutAction);
     }
@@ -588,13 +605,13 @@ private:
         m_undoRemoveBtn->setProperty(
             StyleTokens::Properties::kVariant,
             StyleTokens::Properties::kGhost);
-        m_undoRemoveBtn->setAccessibleName(QString::fromUtf8("撤销移除素材"));
+        m_undoRemoveBtn->setAccessibleName(QCoreApplication::translate("Nebulens", "撤销移除素材"));
         m_undoRemoveBtn->hide();
         statusBar()->addWidget(m_undoRemoveBtn);
         connect(m_undoRemoveBtn, &QPushButton::clicked, this, [this]() {
             m_projectPanel->undoLastRemoval();
         });
-        m_pixelInfoLabel = new QLabel(QString::fromUtf8("RGB —"), statusBar());
+        m_pixelInfoLabel = new QLabel(QCoreApplication::translate("Nebulens", "RGB —"), statusBar());
         m_pixelInfoLabel->setProperty(
             StyleTokens::Properties::kTextRole,
             QString::fromLatin1(StyleTokens::Properties::kMono));
@@ -678,7 +695,8 @@ private:
             m_toolbar->enableProcess(false);
             m_toolbar->enableExport(false);
             updateProjectReadiness();
-            statusBar()->showMessage("项目已清空", 3000);
+            statusBar()->showMessage(QCoreApplication::translate(
+                "Nebulens", "项目已清空"), 3000);
         });
         connect(m_toolbar, &Toolbar::startProcessClicked, this, &MainWindow::onProcessClicked);
         connect(m_toolbar, &Toolbar::exportResultClicked, this, &MainWindow::onExportClicked);
@@ -704,7 +722,7 @@ private:
                     if (!m_undoRemoveBtn) return;
                     m_undoRemoveBtn->setText(
                         available
-                            ? QString::fromUtf8("撤销移除 · %1").arg(fileName)
+                            ? QCoreApplication::translate("Nebulens", "撤销移除 · %1").arg(fileName)
                             : QString());
                     m_undoRemoveBtn->setVisible(available);
                 });
@@ -727,7 +745,7 @@ private:
                 handleProcessingParametersChanged();
             }
             statusBar()->showMessage(
-                QString("正在加载：%1").arg(QFileInfo(filePath).fileName()));
+                QCoreApplication::translate("Nebulens", "正在加载：%1").arg(QFileInfo(filePath).fileName()));
         });
         connect(m_previewPanel, &PreviewPanel::sourcePreviewReady, this,
                 [this](const QString& filePath, const QImage& image,
@@ -748,10 +766,10 @@ private:
                                 m_editedSkyGroundMaskHeight);
                         }
                         m_pixelInfoLabel->setText(
-                            QString::fromUtf8("%1×%2 · RGB —")
+                            QCoreApplication::translate("Nebulens", "%1×%2 · RGB —")
                                 .arg(image.width()).arg(image.height()));
                         statusBar()->showMessage(
-                            QString("已加载：%1")
+                            QCoreApplication::translate("Nebulens", "已加载：%1")
                                 .arg(QFileInfo(filePath).fileName()),
                             3000);
                     }
@@ -759,7 +777,7 @@ private:
         connect(m_previewPanel, &PreviewPanel::mousePixelInfo,
                 this, [this](int x, int y, int r, int g, int b) {
                     m_pixelInfoLabel->setText(
-                        QString::fromUtf8("%1,%2 · RGB %3,%4,%5")
+                        QCoreApplication::translate("Nebulens", "%1,%2 · RGB %3,%4,%5")
                             .arg(x).arg(y).arg(r).arg(g).arg(b));
                 });
         connect(m_previewPanel, &PreviewPanel::sourcePreviewFailed, this,
@@ -767,7 +785,7 @@ private:
                     m_projectPanel->requestThumbnail(filePath);
                     if (m_projectPanel->currentFilePath() == filePath) {
                         statusBar()->showMessage(
-                            QString("预览加载失败：%1")
+                            QCoreApplication::translate("Nebulens", "预览加载失败：%1")
                                 .arg(QFileInfo(filePath).fileName()),
                             5000);
                     }
@@ -788,8 +806,8 @@ private:
                     if (!m_quickPreviewSource || m_quickPreviewSource->empty()) {
                         m_paramsPanel->clearModifiedCameraGrayPoint();
                         QMessageBox::information(
-                            this, QString::fromUtf8("手动灰点"),
-                            QString::fromUtf8(
+                            this, QCoreApplication::translate("Nebulens", "手动灰点"),
+                            QCoreApplication::translate("Nebulens",
                                 "请先完成一次正式处理。之后可在结果预览中采样，"
                                 "并立即通过快速预览检查色彩。"));
                         return;
@@ -798,7 +816,7 @@ private:
                     showBestAvailableResult();
                     m_previewPanel->setPointSelectionActive(true);
                     statusBar()->showMessage(
-                        QString::fromUtf8("请在结果中点击应为灰色的天空区域"));
+                        QCoreApplication::translate("Nebulens", "请在结果中点击应为灰色的天空区域"));
                 });
         connect(m_previewPanel, &PreviewPanel::imagePointSelected,
                 this, [this](double normalizedX, double normalizedY) {
@@ -807,14 +825,14 @@ private:
                     m_previewPanel->setSelectedPoint(
                         normalizedX, normalizedY);
                     statusBar()->showMessage(
-                        QString::fromUtf8("灰点已采样，正在更新快速预览"), 3000);
+                        QCoreApplication::translate("Nebulens", "灰点已采样，正在更新快速预览"), 3000);
                 });
 
         // 项目面板拖放导入
         connect(m_projectPanel, &ProjectPanel::filesDropped, this, [this](const QStringList& paths) {
             if (!paths.isEmpty()) {
                 statusBar()->showMessage(
-                    QString("拖放导入 %1 个文件").arg(paths.size()),
+                    QCoreApplication::translate("Nebulens", "拖放导入 %1 个文件").arg(paths.size()),
                     5000
                 );
             } else {
@@ -836,7 +854,7 @@ private:
             }
             m_paramsPanel->clearModifiedCameraGrayPoint();
             markCachedResultStale(
-                QString::fromUtf8("素材已修改 · 这是上次处理的成片"));
+                QCoreApplication::translate("Nebulens", "素材已修改 · 这是上次处理的成片"));
             m_workflowRail->setStageComplete(WorkflowStage::Alignment, false);
             m_workflowRail->setStageComplete(WorkflowStage::Stacking, false);
             m_workflowRail->setStageComplete(WorkflowStage::Adjustment, false);
@@ -860,9 +878,9 @@ private:
                 discardEditedMaskForDifferentReference();
             statusBar()->showMessage(
                 discarded
-                    ? QString::fromUtf8(
+                    ? QCoreApplication::translate("Nebulens",
                           "参考帧已更新，请为新参考帧重新检测和修补地景")
-                    : QString::fromUtf8("参考帧已更新"),
+                    : QCoreApplication::translate("Nebulens", "参考帧已更新"),
                 discarded ? 5000 : 2000);
             handleProcessingParametersChanged();
         });
@@ -899,7 +917,7 @@ private:
                                     m_editedMaskSourceFile);
                             }
                             statusBar()->showMessage(
-                                QString::fromUtf8(
+                                QCoreApplication::translate("Nebulens",
                                     "地景蒙版已绑定参考帧：%1")
                                     .arg(QFileInfo(m_editedMaskSourceFile)
                                              .fileName()),
@@ -918,14 +936,14 @@ private:
         connect(m_previewPanel, &PreviewPanel::maskRefinementStarted,
                 this, [this]() {
                     statusBar()->showMessage(
-                        QString::fromUtf8("正在根据笔迹贴合地景边缘..."));
+                        QCoreApplication::translate("Nebulens", "正在根据笔迹贴合地景边缘..."));
                 });
         connect(m_previewPanel, &PreviewPanel::maskRefinementFinished,
                 this, [this](bool success) {
                     statusBar()->showMessage(
                         success
-                            ? QString::fromUtf8("蒙版已贴合边缘，可继续修补或开始处理")
-                            : QString::fromUtf8("蒙版精修失败，已保留上一次结果"),
+                            ? QCoreApplication::translate("Nebulens", "蒙版已贴合边缘，可继续修补或开始处理")
+                            : QCoreApplication::translate("Nebulens", "蒙版精修失败，已保留上一次结果"),
                         4000);
                 });
 
@@ -939,7 +957,10 @@ private:
         connect(m_paramsPanel, &ParamsPanel::maskPreviewRequested, this, [this]() {
             QString currentFile = m_projectPanel->currentFilePath();
             if (currentFile.isEmpty()) {
-                QMessageBox::information(this, "提示", "请先选择一张图像用于检测");
+                QMessageBox::information(
+                    this, QCoreApplication::translate("Nebulens", "提示"),
+                    QCoreApplication::translate(
+                        "Nebulens", "请先选择一张图像用于检测"));
                 return;
             }
 
@@ -948,7 +969,9 @@ private:
                 m_maskPreviewWorker->requestInterruption();
                 if (!m_maskPreviewWorker->wait(3000)) {
                     // 超时：拒绝启动新任务，避免旧 worker 失去清理路径
-                    statusBar()->showMessage("上一个检测任务仍在运行，请稍后再试", 3000);
+                    statusBar()->showMessage(QCoreApplication::translate(
+                        "Nebulens", "上一个检测任务仍在运行，请稍后再试"),
+                        3000);
                     return;
                 }
             }
@@ -969,10 +992,14 @@ private:
                         m_previewPanel->setMaskOverlay(worker->takeMask(),
                                                         worker->width(),
                                                         worker->height());
-                        statusBar()->showMessage("地景检测完成，蓝色=天空，绿色=地景", 5000);
+                        statusBar()->showMessage(QCoreApplication::translate(
+                            "Nebulens", "地景检测完成，蓝色=天空，绿色=地景"),
+                            5000);
                     }
                 } else if (worker == m_maskPreviewWorker) {
-                    QMessageBox::warning(this, "错误", worker->errorString());
+                    QMessageBox::warning(
+                        this, QCoreApplication::translate("Nebulens", "错误"),
+                        worker->errorString());
                 }
                 worker->deleteLater();
                 if (m_maskPreviewWorker == worker) {
@@ -990,7 +1017,7 @@ private:
         if (seconds > 0.0) {
             return QString("1/%1s").arg(qRound(1.0 / seconds));
         }
-        return QString::fromUtf8("—");
+        return QCoreApplication::translate("Nebulens", "—");
     }
 
     bool processingActive() const {
@@ -1085,7 +1112,7 @@ private:
         if (current) {
             cancelQuickPreview(false);
             setWorkflowStage(3,
-                QString::fromUtf8("当前结果 · %1 帧 · %2×%3")
+                QCoreApplication::translate("Nebulens", "当前结果 · %1 帧 · %2×%3")
                     .arg(m_cachedFrameCount).arg(m_cachedWidth).arg(m_cachedHeight),
                 true);
             if (m_previewPanel->isShowingResult()) {
@@ -1094,10 +1121,10 @@ private:
         } else if (quickPreviewEligible()) {
             if (m_previewPanel->isShowingResult()) {
                 m_previewPanel->setResultLabel(
-                    QString::fromUtf8("参数已修改 · 这是上次处理的成片"));
+                    QCoreApplication::translate("Nebulens", "参数已修改 · 这是上次处理的成片"));
             }
             if (currentQuickPreviewAvailable()) {
-                setWorkflowStage(3, QString::fromUtf8(
+                setWorkflowStage(3, QCoreApplication::translate("Nebulens",
                     "快速预览已更新 · 完整导出需重新处理"));
             } else {
                 scheduleQuickPreview();
@@ -1106,10 +1133,10 @@ private:
             cancelQuickPreview(false);
             if (m_previewPanel->isShowingResult()) {
                 m_previewPanel->setResultLabel(
-                    QString::fromUtf8("参数已修改 · 这是上次处理的成片"));
+                    QCoreApplication::translate("Nebulens", "参数已修改 · 这是上次处理的成片"));
             }
             setWorkflowStage(1,
-                QString::fromUtf8("参数已修改，重新处理后生效"));
+                QCoreApplication::translate("Nebulens", "参数已修改，重新处理后生效"));
         }
     }
 
@@ -1183,7 +1210,7 @@ private:
                     m_quickPreviewWidth, m_quickPreviewHeight,
                     contentKey);
             }
-            m_previewPanel->setResultLabel(QString::fromUtf8(
+            m_previewPanel->setResultLabel(QCoreApplication::translate("Nebulens",
                 "快速预览 %1×%2 · 完整导出需重新处理")
                 .arg(m_quickPreviewWidth).arg(m_quickPreviewHeight));
             if (m_paramsPanel->modifiedCameraColorEnabled() &&
@@ -1204,7 +1231,7 @@ private:
                 m_previewPanel->loadReadOnlyResultPreview(
                     m_lastValidResultPreview,
                     m_lastValidResultPreviewKey,
-                    QString::fromUtf8("上次有效结果 · 只读"));
+                    QCoreApplication::translate("Nebulens", "上次有效结果 · 只读"));
                 m_previewPanel->setResultAvailable(true, true);
                 m_toolbar->enableExport(false);
             }
@@ -1227,7 +1254,7 @@ private:
             m_previewPanel->setResultLabel(QString());
         } else {
             m_previewPanel->setResultLabel(
-                QString::fromUtf8("参数已修改 · 这是上次处理的成片"));
+                QCoreApplication::translate("Nebulens", "参数已修改 · 这是上次处理的成片"));
         }
         if (m_paramsPanel->modifiedCameraColorEnabled() &&
             m_paramsPanel->modifiedCameraColorMode() ==
@@ -1262,7 +1289,7 @@ private:
             m_quickPreviewWorker->requestCancel();
         }
         if (m_quickPreviewTimer) m_quickPreviewTimer->start();
-        setWorkflowStage(3, QString::fromUtf8("参数已修改 · 准备快速预览"));
+        setWorkflowStage(3, QCoreApplication::translate("Nebulens", "参数已修改 · 准备快速预览"));
     }
 
     void startQuickPreview() {
@@ -1303,32 +1330,32 @@ private:
                             m_quickPreviewSignature = finishingSignature;
                             showBestAvailableResult();
                             m_toolbar->enableExport(false);
-                            setWorkflowStage(3, QString::fromUtf8(
+                            setWorkflowStage(3, QCoreApplication::translate("Nebulens",
                                 "快速预览已更新 · 完整导出需重新处理"));
                             const StarReductionStats& starStats =
                                 worker->starReductionStats();
                             if (m_paramsPanel->starReduceEnabled()) {
                                 statusBar()->showMessage(
-                                    QString::fromUtf8(
+                                    QCoreApplication::translate("Nebulens",
                                         "快速预览已更新 · 缩星处理 %1 颗，"
                                         "请在 100% 下检查")
                                         .arg(starStats.processedStars),
                                     4000);
                             } else if (m_paramsPanel->starDefringeEnabled()) {
                                 statusBar()->showMessage(
-                                    QString::fromUtf8(
+                                    QCoreApplication::translate("Nebulens",
                                         "快速预览已更新 · 去紫边修正 %1 个星缘像素")
                                         .arg(worker->starDefringeStats()
                                                  .defringedPixels),
                                     4000);
                             } else {
                                 statusBar()->showMessage(
-                                    QString::fromUtf8("快速预览已更新"), 2500);
+                                    QCoreApplication::translate("Nebulens", "快速预览已更新"), 2500);
                             }
                         }
                     } else if (isLatest && !worker->wasCancelled()) {
                         statusBar()->showMessage(
-                            QString::fromUtf8("快速预览失败：%1")
+                            QCoreApplication::translate("Nebulens", "快速预览失败：%1")
                                 .arg(worker->errorString()),
                             4000);
                     }
@@ -1394,7 +1421,7 @@ private:
             m_previewPanel->loadReadOnlyResultPreview(
                 m_lastValidResultPreview,
                 m_lastValidResultPreviewKey,
-                QString::fromUtf8("上次有效结果 · 本次处理未完成"));
+                QCoreApplication::translate("Nebulens", "上次有效结果 · 本次处理未完成"));
             m_previewPanel->setResultAvailable(true, true);
         } else {
             m_previewPanel->setResultAvailable(true, false);
@@ -1405,20 +1432,24 @@ private:
 private slots:
     void onImportClicked() {
         if (processingActive()) {
-            statusBar()->showMessage(QString::fromUtf8("处理完成后再添加照片"), 3000);
+            statusBar()->showMessage(QCoreApplication::translate("Nebulens", "处理完成后再添加照片"), 3000);
             return;
         }
         QStringList fileNames = QFileDialog::getOpenFileNames(
             this,
-            "选择 RAW 文件",
+            QCoreApplication::translate("Nebulens", "选择 RAW 文件"),
             QString(),
-            "RAW 文件 (*.nef *.cr2 *.arw *.dng *.raw *.orf *.raf *.pef *.cr3);;所有文件 (*)"
+            QCoreApplication::translate(
+                "Nebulens",
+                "RAW 文件 (*.nef *.cr2 *.arw *.dng *.raw *.orf *.raf *.pef *.cr3);;所有文件 (*)"),
+            nullptr,
+            QFileDialog::DontUseNativeDialog
         );
 
         if (!fileNames.isEmpty()) {
             importFiles(fileNames);
             statusBar()->showMessage(
-                QString("已导入 %1 个文件").arg(fileNames.size()),
+                QCoreApplication::translate("Nebulens", "已导入 %1 个文件").arg(fileNames.size()),
                 5000
             );
         }
@@ -1426,10 +1457,15 @@ private slots:
 
     void onImportFolderClicked() {
         if (processingActive()) {
-            statusBar()->showMessage(QString::fromUtf8("处理完成后再添加文件夹"), 3000);
+            statusBar()->showMessage(QCoreApplication::translate("Nebulens", "处理完成后再添加文件夹"), 3000);
             return;
         }
-        QString dir = QFileDialog::getExistingDirectory(this, "选择包含 RAW 文件的文件夹");
+        QString dir = QFileDialog::getExistingDirectory(
+            this,
+            QCoreApplication::translate(
+                "Nebulens", "选择包含 RAW 文件的文件夹"),
+            QString(),
+            QFileDialog::ShowDirsOnly | QFileDialog::DontUseNativeDialog);
         if (!dir.isEmpty()) {
             QDir directory(dir);
             QStringList filters;
@@ -1445,7 +1481,7 @@ private slots:
                 if (!m_sceneActive) activateScene(ProcessingScene::Nightscape);
                 m_projectPanel->addFiles(fullPaths);
                 statusBar()->showMessage(
-                    QString("从文件夹导入 %1 个文件").arg(fullPaths.size()),
+                    QCoreApplication::translate("Nebulens", "从文件夹导入 %1 个文件").arg(fullPaths.size()),
                     5000
                 );
             }
@@ -1456,11 +1492,12 @@ private slots:
         RawImageLoader loader;
         RawImageLoader::Metadata metadata;
         if (!loader.loadMetadata(filePath, metadata)) {
-            QMessageBox::warning(this, "元数据", "无法加载文件元数据");
+            QMessageBox::warning(
+                this, QCoreApplication::translate("Nebulens", "元数据"),
+                QCoreApplication::translate("Nebulens", "无法加载文件元数据"));
             return;
         }
-        QString info = QString(
-            "<b>文件路径：</b>%1<br>"
+        QString info = QCoreApplication::translate("Nebulens", "<b>文件路径：</b>%1<br>"
             "<b>相机型号：</b>%2<br>"
             "<b>ISO：</b>%3<br>"
             "<b>曝光时间：</b>%4<br>"
@@ -1477,14 +1514,15 @@ private slots:
          .arg(metadata.width)
          .arg(metadata.height)
          .arg(QString::fromStdString(metadata.timestamp));
-        QMessageBox::information(this, "图像元数据", info);
+        QMessageBox::information(
+            this, QCoreApplication::translate("Nebulens", "图像元数据"), info);
     }
 
     void onAboutClicked() {
         QMessageBox::about(
             this,
-            QString::fromUtf8("关于 Nebulens"),
-            QString::fromUtf8("Nebulens\n"
+            QCoreApplication::translate("Nebulens", "关于 Nebulens"),
+            QCoreApplication::translate("Nebulens", "Nebulens\n"
             "版本 " STARPROCESSOR_VERSION "\n"
             "星空影像工作台\n"
             "MIT License")
@@ -1494,17 +1532,17 @@ private slots:
     void onProcessClicked() {
         if (m_worker && m_worker->isRunning()) {
             m_worker->requestCancel();
-            setWorkflowStage(1, QString::fromUtf8("正在安全停止..."));
+            setWorkflowStage(1, QCoreApplication::translate("Nebulens", "正在安全停止..."));
             return;
         }
         if (m_exportWorker && m_exportWorker->isRunning()) {
             m_exportWorker->requestCancel();
-            setWorkflowStage(3, QString::fromUtf8("正在取消导出..."));
+            setWorkflowStage(3, QCoreApplication::translate("Nebulens", "正在取消导出..."));
             return;
         }
         if (m_previewPanel->maskRefinementActive()) {
             statusBar()->showMessage(
-                QString::fromUtf8("请等待地景蒙版精修完成"), 3000);
+                QCoreApplication::translate("Nebulens", "请等待地景蒙版精修完成"), 3000);
             return;
         }
 
@@ -1514,12 +1552,12 @@ private slots:
             QMessageBox::warning(
                 this, "处理",
                 requiredFrameCount() == 1
-                    ? QString::fromUtf8("请先导入 1 张 RAW 图像")
+                    ? QCoreApplication::translate("Nebulens", "请先导入 1 张 RAW 图像")
                     : requiredFrameCount() == 3
                         ? (m_scene == ProcessingScene::StarTrail
-                               ? QString::fromUtf8("星轨合成需要至少 3 张未排除的固定机位 RAW 图像")
-                               : QString::fromUtf8("延时降噪需要至少 3 张未排除的 RAW 图像"))
-                        : QString::fromUtf8("需要至少 2 张未排除的图像才能开始处理"));
+                               ? QCoreApplication::translate("Nebulens", "星轨合成需要至少 3 张未排除的固定机位 RAW 图像")
+                               : QCoreApplication::translate("Nebulens", "延时降噪需要至少 3 张未排除的 RAW 图像"))
+                        : QCoreApplication::translate("Nebulens", "需要至少 2 张未排除的图像才能开始处理"));
             return;
         }
         if (m_scene == ProcessingScene::SingleFrame) {
@@ -1529,8 +1567,8 @@ private slots:
         if (m_scene == ProcessingScene::DeepSky &&
             !m_paramsPanel->deepSkyCalibrationInputsComplete()) {
             QMessageBox::warning(
-                this, QString::fromUtf8("深空校准来源不完整"),
-                QString::fromUtf8(
+                this, QCoreApplication::translate("Nebulens", "深空校准来源不完整"),
+                QCoreApplication::translate("Nebulens",
                     "Dark 与 Flat 各需要至少 3 张 RAW 或一个 Master；"
                     "生成 Master Flat 时还需 Bias 或同曝光 Dark Flat 二选一。"));
             return;
@@ -1563,8 +1601,8 @@ private slots:
                 !addUniquePaths({m_paramsPanel->masterBiasPath()}) ||
                 !addUniquePaths({m_paramsPanel->masterDarkFlatPath()})) {
                 QMessageBox::warning(
-                    this, QString::fromUtf8("校准素材重复"),
-                    QString::fromUtf8(
+                    this, QCoreApplication::translate("Nebulens", "校准素材重复"),
+                    QCoreApplication::translate("Nebulens",
                         "同一个文件不能同时作为 Light 或多个校准角色：\n%1")
                         .arg(QFileInfo(duplicatePath).fileName()));
                 return;
@@ -1591,8 +1629,8 @@ private slots:
                 refFrame = m_editedMaskSourceFile;
             } else if (refFrame != m_editedMaskSourceFile) {
                 QMessageBox::warning(
-                    this, QString::fromUtf8("地景蒙版参考帧已变化"),
-                    QString::fromUtf8(
+                    this, QCoreApplication::translate("Nebulens", "地景蒙版参考帧已变化"),
+                    QCoreApplication::translate("Nebulens",
                         "当前修补蒙版来自 %1，但处理参考帧为 %2。"
                         "请重新检测并修补地景。")
                         .arg(QFileInfo(m_editedMaskSourceFile).fileName(),
@@ -1698,8 +1736,8 @@ private slots:
         setWorkflowStage(
             m_scene == ProcessingScene::DeepSky ? 0 : 1,
             m_scene == ProcessingScene::DeepSky
-                ? QString::fromUtf8("正在准备 Bayer 校准")
-                : QString::fromUtf8("正在准备处理"));
+                ? QCoreApplication::translate("Nebulens", "正在准备 Bayer 校准")
+                : QCoreApplication::translate("Nebulens", "正在准备处理"));
 
         // 创建后台线程。进度与取消都留在主窗口，不再弹出第二个窗口。
         auto* worker = new ProcessingWorker(files, refFrame, params, this);
@@ -1709,60 +1747,65 @@ private slots:
         connect(worker, &ProcessingWorker::progress,
                 m_toolbar, &Toolbar::setProgress);
         connect(worker, &ProcessingWorker::stageMessage, this, [this](const QString& msg) {
+            const auto hasStageText = [&msg](const char* source) {
+                return msg.contains(
+                    QCoreApplication::translate("Nebulens", source),
+                    Qt::CaseInsensitive);
+            };
             int stage = 1;
             if (m_scene == ProcessingScene::StarTrail) {
-                if (msg.contains(QString::fromUtf8("地景")) ||
-                    msg.contains(QString::fromUtf8("蒙版"))) {
+                if (hasStageText("地景") ||
+                    hasStageText("蒙版")) {
                     stage = 2;
-                } else if (msg.contains(QString::fromUtf8("优化")) ||
-                           msg.contains(QString::fromUtf8("降噪")) ||
-                           msg.contains(QString::fromUtf8("色彩")) ||
-                           msg.contains(QString::fromUtf8("导出")) ||
-                           msg.contains(QString::fromUtf8("完成"))) {
+                } else if (hasStageText("优化") ||
+                           hasStageText("降噪") ||
+                           hasStageText("色彩") ||
+                           hasStageText("导出") ||
+                           hasStageText("完成")) {
                     stage = 3;
                 }
             } else if (m_scene == ProcessingScene::Timelapse) {
-                if (msg.contains(QString::fromUtf8("逐帧")) ||
-                    msg.contains(QString::fromUtf8("滑动窗口"))) {
+                if (hasStageText("逐帧") ||
+                    hasStageText("滑动窗口")) {
                     stage = 2;
-                } else if (msg.contains(QString::fromUtf8("输出")) ||
-                           msg.contains(QString::fromUtf8("完成"))) {
+                } else if (hasStageText("输出") ||
+                           hasStageText("完成")) {
                     stage = 3;
                 }
             } else if (m_scene == ProcessingScene::SingleFrame) {
-                if (msg.contains(QString::fromUtf8("导出")) ||
-                    msg.contains(QString::fromUtf8("完成"))) {
+                if (hasStageText("导出") ||
+                    hasStageText("完成")) {
                     stage = 3;
-                } else if (msg.contains(QString::fromUtf8("预览"))) {
+                } else if (hasStageText("预览")) {
                     stage = 2;
                 }
             } else if (m_scene == ProcessingScene::DeepSky) {
-                if (msg.contains(QString::fromUtf8("Master")) ||
-                    msg.contains(QString::fromUtf8("Bayer")) ||
-                    msg.contains(QString::fromUtf8("校准"))) {
+                if (hasStageText("Master") ||
+                    hasStageText("Bayer") ||
+                    hasStageText("校准")) {
                     stage = 0;
-                } else if (msg.contains(QString::fromUtf8("堆栈")) ||
-                           msg.contains(QString::fromUtf8("裁切"))) {
+                } else if (hasStageText("堆栈") ||
+                           hasStageText("裁切")) {
                     stage = 2;
-                } else if (msg.contains(QString::fromUtf8("优化")) ||
-                           msg.contains(QString::fromUtf8("降噪")) ||
-                           msg.contains(QString::fromUtf8("色彩")) ||
-                           msg.contains(QString::fromUtf8("缩星")) ||
-                           msg.contains(QString::fromUtf8("导出")) ||
-                           msg.contains(QString::fromUtf8("完成"))) {
+                } else if (hasStageText("优化") ||
+                           hasStageText("降噪") ||
+                           hasStageText("色彩") ||
+                           hasStageText("缩星") ||
+                           hasStageText("导出") ||
+                           hasStageText("完成")) {
                     stage = 3;
                 }
-            } else if (msg.contains(QString::fromUtf8("堆栈")) ||
-                msg.contains(QString::fromUtf8("蒙版")) ||
-                msg.contains(QString::fromUtf8("裁切"))) {
+            } else if (hasStageText("堆栈") ||
+                hasStageText("蒙版") ||
+                hasStageText("裁切")) {
                 stage = 2;
-            } else if (msg.contains(QString::fromUtf8("优化")) ||
-                       msg.contains(QString::fromUtf8("降噪")) ||
-                       msg.contains(QString::fromUtf8("色彩")) ||
-                       msg.contains(QString::fromUtf8("地景细节")) ||
-                       msg.contains(QString::fromUtf8("缩星")) ||
-                       msg.contains(QString::fromUtf8("导出")) ||
-                       msg.contains(QString::fromUtf8("完成"))) {
+            } else if (hasStageText("优化") ||
+                       hasStageText("降噪") ||
+                       hasStageText("色彩") ||
+                       hasStageText("地景细节") ||
+                       hasStageText("缩星") ||
+                       hasStageText("导出") ||
+                       hasStageText("完成")) {
                 stage = 3;
             }
             setWorkflowStage(stage, msg);
@@ -1774,8 +1817,9 @@ private slots:
             m_taskStatusBar->setProgressVisible(false);
             if (worker->wasCancelled()) {
                 restoreLastValidResultAfterFailedRun();
-                setWorkflowStage(1, QString::fromUtf8("处理已取消，可调整参数后重试"));
-                statusBar()->showMessage("处理已取消", 3000);
+                setWorkflowStage(1, QCoreApplication::translate("Nebulens", "处理已取消，可调整参数后重试"));
+                statusBar()->showMessage(QCoreApplication::translate(
+                    "Nebulens", "处理已取消"), 3000);
             } else if (worker->errorString().isEmpty()) {
                 // 保留结果用于预览和再次导出。ProcessingWorker 已经把正式
                 // 成片写到输出目录，这里不再额外写无上限的重复 TIFF 缓存。
@@ -1827,28 +1871,28 @@ private slots:
                 const int skippedCount = static_cast<int>(
                     worker->skippedFrames().size());
                 QStringList reportLines;
-                reportLines << QString::fromUtf8("输出：%1×%2，%3 帧")
+                reportLines << QCoreApplication::translate("Nebulens", "输出：%1×%2，%3 帧")
                                    .arg(m_cachedWidth).arg(m_cachedHeight)
                                    .arg(frameCount);
                 if (m_scene != ProcessingScene::SingleFrame &&
                     m_scene != ProcessingScene::Timelapse &&
                     m_scene != ProcessingScene::StarTrail) {
-                    reportLines << QString::fromUtf8(
+                    reportLines << QCoreApplication::translate("Nebulens",
                         "对齐：RMS %1 px，P95 %2 px，最低网格覆盖 %3%")
                         .arg(worker->averageAlignmentRms(), 0, 'f', 2)
                         .arg(worker->worstAlignmentP95(), 0, 'f', 2)
                         .arg(worker->minimumAlignmentGridCoverage() * 100.0,
                              0, 'f', 0);
-                    reportLines << QString::fromUtf8(
+                    reportLines << QCoreApplication::translate("Nebulens",
                         "模型：Affine %1 帧，Homography %2 帧")
                         .arg(worker->affineFrameCount())
                         .arg(worker->homographyFrameCount());
                 }
-                reportLines << QString::fromUtf8(
+                reportLines << QCoreApplication::translate("Nebulens",
                     "帧筛选：质量排除 %1，处理跳过 %2")
                     .arg(rejectedCount).arg(skippedCount);
                 if (worker->photometricNormalizedFrameCount() > 0) {
-                    reportLines << QString::fromUtf8(
+                    reportLines << QCoreApplication::translate("Nebulens",
                         "光度归一化：%1 帧，平均增益 %2，范围 %3–%4")
                         .arg(worker->photometricNormalizedFrameCount())
                         .arg(worker->averagePhotometricGain(), 0, 'f', 3)
@@ -1856,16 +1900,16 @@ private slots:
                         .arg(worker->maximumPhotometricGain(), 0, 'f', 3);
                 }
                 if (m_scene == ProcessingScene::SkyGround) {
-                    reportLines << QString::fromUtf8(
+                    reportLines << QCoreApplication::translate("Nebulens",
                         "天地蒙版：天空占比 %1%，来源 %2")
                         .arg(worker->skyGroundSkyFraction() * 100.0, 0, 'f', 1)
                         .arg(worker->skyGroundMaskSource());
                 }
-                reportLines << QString::fromUtf8("堆栈耗时：%1 s")
+                reportLines << QCoreApplication::translate("Nebulens", "堆栈耗时：%1 s")
                                    .arg(worker->stackingElapsedMs() / 1000.0,
                                         0, 'f', 2);
                 if (!worker->outputFile().isEmpty()) {
-                    reportLines << QString::fromUtf8("文件：%1")
+                    reportLines << QCoreApplication::translate("Nebulens", "文件：%1")
                                        .arg(worker->outputFile());
                 }
                 m_paramsPanel->setProcessingReport(reportLines.join('\n'));
@@ -1879,10 +1923,10 @@ private slots:
                     m_scene != ProcessingScene::StarTrail &&
                     medianEllipticity >= 0.22;
                 setWorkflowStage(3,
-                    (QString::fromUtf8("处理完成 · %1 帧 · %2×%3")
+                    (QCoreApplication::translate("Nebulens", "处理完成 · %1 帧 · %2×%3")
                         .arg(frameCount).arg(m_cachedWidth).arg(m_cachedHeight) +
                      (elongatedStars
-                          ? QString::fromUtf8(" · 星点偏长，请检查曝光拖线/像差")
+                          ? QCoreApplication::translate("Nebulens", " · 星点偏长，请检查曝光拖线/像差")
                           : QString())),
                     true);
                 QString methodName = m_paramsPanel->stackMethod();
@@ -1896,36 +1940,36 @@ private slots:
                     methodName = QStringLiteral("Winsorized");
                 }
                 m_previewPanel->showResultSummary(
-                    QString::fromUtf8("%1×%2 · %3 帧 · %4")
+                    QCoreApplication::translate("Nebulens", "%1×%2 · %3 帧 · %4")
                         .arg(m_cachedWidth).arg(m_cachedHeight)
                         .arg(frameCount).arg(methodName));
                 if (currentProcessingSignature() !=
                     m_lastProcessedSignature) {
                     setWorkflowStage(1,
-                        QString::fromUtf8("处理完成，但参数已变化，请重新处理"));
+                        QCoreApplication::translate("Nebulens", "处理完成，但参数已变化，请重新处理"));
                 }
                 statusBar()->showMessage(
                     m_scene == ProcessingScene::SingleFrame
-                        ? QString::fromUtf8("单张精修完成 — %1×%2 | %3")
+                        ? QCoreApplication::translate("Nebulens", "单张精修完成 — %1×%2 | %3")
                               .arg(m_cachedWidth).arg(m_cachedHeight)
                               .arg(referenceName)
                         : m_scene == ProcessingScene::Timelapse
-                            ? QString::fromUtf8(
+                            ? QCoreApplication::translate("Nebulens",
                                   "延时降噪完成 — 已输出 %1 张 · %2×%3 | %4")
                                   .arg(frameCount).arg(m_cachedWidth).arg(m_cachedHeight)
                                   .arg(worker->outputFile())
                             : m_scene == ProcessingScene::StarTrail
-                                ? QString::fromUtf8(
+                                ? QCoreApplication::translate("Nebulens",
                                       "星轨合成完成 — %1×%2 · %3 帧 | %4")
                                       .arg(m_cachedWidth).arg(m_cachedHeight)
                                       .arg(frameCount).arg(worker->outputFile())
-                        : (QString::fromUtf8(
+                        : (QCoreApplication::translate("Nebulens",
                               "处理完成 — %1×%2 已堆栈 %3 帧 | 参考 %4 | 质量排除 %5 帧 | 跳过 %6 帧")
                               .arg(m_cachedWidth).arg(m_cachedHeight)
                               .arg(frameCount).arg(referenceName)
                               .arg(rejectedCount).arg(skippedCount) +
                            (elongatedStars
-                                ? QString::fromUtf8(
+                                ? QCoreApplication::translate("Nebulens",
                                       " | 星点偏长，检查曝光拖线/像差")
                                 : QString())),
                     5000);
@@ -1935,7 +1979,7 @@ private slots:
                     worker->generatedMasterFiles();
                 if (!generatedMasters.isEmpty()) {
                     statusBar()->showMessage(
-                        QString::fromUtf8(
+                        QCoreApplication::translate("Nebulens",
                             "处理完成，已保存 %1 个 Master 到 %2")
                             .arg(generatedMasters.size())
                             .arg(QFileInfo(generatedMasters.first())
@@ -1946,21 +1990,25 @@ private slots:
                     !calibrationWarnings.isEmpty()) {
                     auto* advice = new QMessageBox(
                         QMessageBox::Information,
-                        QString::fromUtf8("校准素材建议"),
-                        QString::fromUtf8(
+                        QCoreApplication::translate("Nebulens", "校准素材建议"),
+                        QCoreApplication::translate("Nebulens",
                             "处理已经完成，但校准素材还有可改进之处。"),
                         QMessageBox::Ok, this);
                     advice->setInformativeText(
-                        QString::fromUtf8("• ") +
-                        calibrationWarnings.join(QString::fromUtf8("\n• ")));
+                        QCoreApplication::translate("Nebulens", "• ") +
+                        calibrationWarnings.join(QCoreApplication::translate("Nebulens", "\n• ")));
                     advice->setAttribute(Qt::WA_DeleteOnClose);
                     advice->open();
                 }
             } else {
                 restoreLastValidResultAfterFailedRun();
-                QMessageBox::warning(this, "处理失败", worker->errorString());
-                setWorkflowStage(1, QString::fromUtf8("处理失败，请检查素材或参数"));
-                statusBar()->showMessage("处理失败", 3000);
+                QMessageBox::warning(
+                    this,
+                    QCoreApplication::translate("Nebulens", "处理失败"),
+                    worker->errorString());
+                setWorkflowStage(1, QCoreApplication::translate("Nebulens", "处理失败，请检查素材或参数"));
+                statusBar()->showMessage(QCoreApplication::translate(
+                    "Nebulens", "处理失败"), 3000);
             }
             worker->deleteLater();
             if (m_worker == worker) m_worker = nullptr;
@@ -1970,30 +2018,33 @@ private slots:
 
     void onExportClicked() {
         if (processingActive()) {
-            statusBar()->showMessage(QString::fromUtf8("处理完成后再导出"), 3000);
+            statusBar()->showMessage(QCoreApplication::translate("Nebulens", "处理完成后再导出"), 3000);
             return;
         }
         if (m_scene == ProcessingScene::Timelapse) {
             QMessageBox::information(
-                this, QString::fromUtf8("延时图片序列"),
-                QString::fromUtf8("处理完成时已经逐张输出整个序列，无需再次导出。"));
+                this, QCoreApplication::translate("Nebulens", "延时图片序列"),
+                QCoreApplication::translate("Nebulens", "处理完成时已经逐张输出整个序列，无需再次导出。"));
             return;
         }
         if (m_previewPanel->isShowingHistoryResult()) {
             QMessageBox::information(
-                this, QString::fromUtf8("历史结果只读"),
-                QString::fromUtf8(
+                this, QCoreApplication::translate("Nebulens", "历史结果只读"),
+                QCoreApplication::translate("Nebulens",
                     "历史结果仅用于查看。按 R 返回当前会话结果后再导出。"));
             return;
         }
         if (m_cachedStackedData.empty()) {
-            QMessageBox::warning(this, "导出", "没有可用的堆栈结果，请先完成处理");
+            QMessageBox::warning(
+                this, QCoreApplication::translate("Nebulens", "导出"),
+                QCoreApplication::translate(
+                    "Nebulens", "没有可用的堆栈结果，请先完成处理"));
             return;
         }
         if (currentProcessingSignature() != m_lastProcessedSignature) {
             QMessageBox::information(
-                this, QString::fromUtf8("结果需要更新"),
-                QString::fromUtf8("处理参数已经改变。请重新处理后再导出，避免把旧结果误认为当前参数的结果。"));
+                this, QCoreApplication::translate("Nebulens", "结果需要更新"),
+                QCoreApplication::translate("Nebulens", "处理参数已经改变。请重新处理后再导出，避免把旧结果误认为当前参数的结果。"));
             return;
         }
 
@@ -2025,7 +2076,7 @@ private slots:
         m_toolbar->setProcessing(true);
         m_inlineProgress->setRange(0, 100);
         m_taskStatusBar->setProgressVisible(false);
-        statusBar()->showMessage(QString::fromUtf8("正在导出 %1...").arg(fileName));
+        statusBar()->showMessage(QCoreApplication::translate("Nebulens", "正在导出 %1...").arg(fileName));
 
         connect(worker, &ExportWorker::finished, this,
                 [this, worker, image, fileName]() {
@@ -2039,17 +2090,17 @@ private slots:
                     if (worker->succeeded()) {
                         m_paramsPanel->refreshRecentResults();
                         QMessageBox::information(
-                            this, QString::fromUtf8("导出成功"),
-                            QString::fromUtf8("已导出到：%1")
+                            this, QCoreApplication::translate("Nebulens", "导出成功"),
+                            QCoreApplication::translate("Nebulens", "已导出到：%1")
                                 .arg(worker->outputPath()));
                         statusBar()->showMessage(
-                            QString::fromUtf8("已导出：%1").arg(fileName), 5000);
+                            QCoreApplication::translate("Nebulens", "已导出：%1").arg(fileName), 5000);
                     } else if (worker->wasCancelled()) {
-                        statusBar()->showMessage(QString::fromUtf8("导出已取消"), 3000);
+                        statusBar()->showMessage(QCoreApplication::translate("Nebulens", "导出已取消"), 3000);
                     } else {
                         QMessageBox::warning(
-                            this, QString::fromUtf8("导出失败"),
-                            QString::fromUtf8("无法写入文件，请检查输出目录权限"));
+                            this, QCoreApplication::translate("Nebulens", "导出失败"),
+                            QCoreApplication::translate("Nebulens", "无法写入文件，请检查输出目录权限"));
                     }
                     if (m_exportWorker == worker) m_exportWorker = nullptr;
                     worker->deleteLater();
@@ -2059,23 +2110,52 @@ private slots:
 
     void onSettingsClicked() {
         auto* dialog = new QDialog(this);
-        dialog->setWindowTitle("设置");
-        dialog->setFixedSize(480, 160);
+        dialog->setWindowTitle(
+            QCoreApplication::translate("Nebulens", "设置"));
+        dialog->setFixedSize(520, 252);
 
         auto* layout = new QVBoxLayout(dialog);
         layout->setSpacing(16);
         layout->setContentsMargins(20, 20, 20, 20);
 
-        auto* title = new QLabel(QString::fromUtf8("应用设置"), dialog);
+        auto* title = new QLabel(QCoreApplication::translate("Nebulens", "应用设置"), dialog);
         title->setProperty(
             StyleTokens::Properties::kTextRole,
             StyleTokens::Properties::kTitle);
         layout->addWidget(title);
 
+        QSettings settings("StarProcessor", "App");
+        const QString currentLanguage = AppLocalization::preferredLanguage();
+        auto* languageRow = new QHBoxLayout();
+        auto* languageLabel = new QLabel(
+            QCoreApplication::translate("Nebulens", "界面语言:"), dialog);
+        languageLabel->setFixedWidth(82);
+        auto* languageCombo = new QComboBox(dialog);
+        languageCombo->addItem(
+            QCoreApplication::translate("Nebulens", "简体中文"),
+            QString::fromLatin1(AppLocalization::kSimplifiedChinese));
+        languageCombo->addItem(
+            QStringLiteral("English"),
+            QString::fromLatin1(AppLocalization::kEnglish));
+        const int languageIndex = languageCombo->findData(currentLanguage);
+        languageCombo->setCurrentIndex(std::max(0, languageIndex));
+        languageRow->addWidget(languageLabel);
+        languageRow->addWidget(languageCombo, 1);
+        layout->addLayout(languageRow);
+
+        auto* languageNote = new QLabel(
+            QCoreApplication::translate(
+                "Nebulens", "语言切换将在重启应用后完整生效。"), dialog);
+        languageNote->setProperty(
+            StyleTokens::Properties::kTextRole,
+            StyleTokens::Properties::kCaption);
+        layout->addWidget(languageNote);
+
         // 输出目录
         auto* outDirRow = new QHBoxLayout();
-        auto* outDirLabel = new QLabel("输出目录:", dialog);
-        QSettings settings("StarProcessor", "App");
+        auto* outDirLabel = new QLabel(
+            QCoreApplication::translate("Nebulens", "输出目录:"), dialog);
+        outDirLabel->setFixedWidth(82);
         QString defaultOutDir = settings.value(
             "outputPath", QDir::homePath() + "/Nebulens/Output").toString();
         auto* outDirEdit = new QLineEdit(defaultOutDir, dialog);
@@ -2086,13 +2166,17 @@ private slots:
                 UiAssets::Glyph::Folder,
                 StyleTokens::Colors::fromHex(
                     StyleTokens::Colors::kTextSecondary)));
-        outDirBtn->setToolTip(QString::fromUtf8("选择输出目录"));
+        outDirBtn->setToolTip(QCoreApplication::translate("Nebulens", "选择输出目录"));
         outDirBtn->setFixedSize(28, 28);
         outDirBtn->setProperty(
             StyleTokens::Properties::kVariant,
             StyleTokens::Properties::kIcon);
-        connect(outDirBtn, &QPushButton::clicked, this, [outDirEdit]() {
-            QString dir = QFileDialog::getExistingDirectory(nullptr, "选择输出目录");
+        connect(outDirBtn, &QPushButton::clicked, this, [this, outDirEdit]() {
+            QString dir = QFileDialog::getExistingDirectory(
+                this,
+                QCoreApplication::translate("Nebulens", "选择输出目录"),
+                outDirEdit->text(),
+                QFileDialog::ShowDirsOnly | QFileDialog::DontUseNativeDialog);
             if (!dir.isEmpty()) outDirEdit->setText(dir);
         });
         outDirRow->addWidget(outDirLabel);
@@ -2105,18 +2189,60 @@ private slots:
         // 底部按钮
         auto* btnRow = new QHBoxLayout();
         btnRow->addStretch();
-        auto* okBtn = new QPushButton("确定", dialog);
+        auto* cancelBtn = new QPushButton(
+            QCoreApplication::translate("Nebulens", "取消"), dialog);
+        connect(cancelBtn, &QPushButton::clicked,
+                dialog, &QDialog::reject);
+        btnRow->addWidget(cancelBtn);
+        auto* okBtn = new QPushButton(
+            QCoreApplication::translate("Nebulens", "确定"), dialog);
         okBtn->setProperty(
             StyleTokens::Properties::kVariant,
             StyleTokens::Properties::kPrimary);
-        connect(okBtn, &QPushButton::clicked, dialog, [this, dialog, outDirEdit]() {
+        connect(okBtn, &QPushButton::clicked, dialog,
+                [this, dialog, outDirEdit, languageCombo,
+                 currentLanguage]() {
             QSettings s("StarProcessor", "App");
             s.setValue("outputPath", outDirEdit->text());
             // 同步更新参数面板的输出路径（无需重启即生效）
             if (m_paramsPanel) {
                 m_paramsPanel->setOutputPath(outDirEdit->text());
             }
+            const QString selectedLanguage =
+                languageCombo->currentData().toString();
+            const bool languageChanged = selectedLanguage != currentLanguage;
+            if (languageChanged) {
+                AppLocalization::setPreferredLanguage(selectedLanguage);
+            }
             dialog->accept();
+
+            if (!languageChanged) return;
+            QMessageBox restartPrompt(this);
+            restartPrompt.setWindowTitle(QCoreApplication::translate(
+                "Nebulens", "切换界面语言"));
+            restartPrompt.setText(QCoreApplication::translate(
+                "Nebulens",
+                "需要重启 Nebulens 才能统一更新全部界面和文件对话框。"
+                "当前项目不会自动保存。"));
+            auto* restartButton = restartPrompt.addButton(
+                QCoreApplication::translate("Nebulens", "立即重启"),
+                QMessageBox::AcceptRole);
+            restartPrompt.addButton(
+                QCoreApplication::translate("Nebulens", "稍后"),
+                QMessageBox::RejectRole);
+            restartPrompt.exec();
+            if (restartPrompt.clickedButton() == restartButton) {
+                if (AppLocalization::restartApplication()) {
+                    qApp->quit();
+                } else {
+                    QMessageBox::warning(
+                        this,
+                        QCoreApplication::translate(
+                            "Nebulens", "无法重启应用"),
+                        QCoreApplication::translate(
+                            "Nebulens", "请手动退出并重新打开 Nebulens。"));
+                }
+            }
         });
         btnRow->addWidget(okBtn);
         layout->addLayout(btnRow);
@@ -2127,8 +2253,8 @@ private slots:
 
     void showShortcutsDialog() {
         QMessageBox::information(
-            this, QString::fromUtf8("快捷键"),
-            QString::fromUtf8(
+            this, QCoreApplication::translate("Nebulens", "快捷键"),
+            QCoreApplication::translate("Nebulens",
                 "导入文件    Cmd/Ctrl+O\n"
                 "导入目录    Shift+Cmd/Ctrl+O\n"
                 "处理/取消   Cmd/Ctrl+Return\n"
@@ -2150,13 +2276,13 @@ private slots:
         if (path.isEmpty() || !QFileInfo::exists(path)) return;
         if (m_historyPreviewWorker && m_historyPreviewWorker->isRunning()) {
             statusBar()->showMessage(
-                QString::fromUtf8("正在载入另一张历史结果，请稍候"), 3000);
+                QCoreApplication::translate("Nebulens", "正在载入另一张历史结果，请稍候"), 3000);
             return;
         }
         auto* worker = new HistoryPreviewWorker(path, this);
         m_historyPreviewWorker = worker;
         statusBar()->showMessage(
-            QString::fromUtf8("正在载入历史结果：%1")
+            QCoreApplication::translate("Nebulens", "正在载入历史结果：%1")
                 .arg(QFileInfo(path).fileName()));
         connect(worker, &HistoryPreviewWorker::loaded, this,
                 [this, worker](const QString& loadedPath,
@@ -2170,7 +2296,7 @@ private slots:
                         false);
                     m_toolbar->enableExport(false);
                     statusBar()->showMessage(
-                        QString::fromUtf8("历史结果只读预览 · %1")
+                        QCoreApplication::translate("Nebulens", "历史结果只读预览 · %1")
                             .arg(QFileInfo(loadedPath).fileName()), 5000);
                 });
         connect(worker, &HistoryPreviewWorker::failed, this,
@@ -2178,7 +2304,7 @@ private slots:
                                const QString& reason) {
                     if (m_historyPreviewWorker != worker) return;
                     statusBar()->showMessage(
-                        QString::fromUtf8("历史结果载入失败：%1 · %2")
+                        QCoreApplication::translate("Nebulens", "历史结果载入失败：%1 · %2")
                             .arg(QFileInfo(failedPath).fileName(), reason),
                         5000);
                 });
@@ -2276,6 +2402,7 @@ int main(int argc, char* argv[]) {
     app.setApplicationVersion(STARPROCESSOR_VERSION);
     app.setOrganizationName("StarProcessor");
     app.setWindowIcon(UiAssets::appIcon());
+    AppLocalization::install(app);
 
     // The Windows packaging job uses this path to load the deployed platform
     // plugin and its transitive DLLs without opening the main window.

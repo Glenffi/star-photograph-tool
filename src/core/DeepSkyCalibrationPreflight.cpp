@@ -1,6 +1,7 @@
 #include "DeepSkyCalibrationPreflight.h"
 #include "MasterFrameIO.h"
 
+#include <QCoreApplication>
 #include <QFileInfo>
 #include <QHash>
 #include <QSet>
@@ -68,14 +69,14 @@ QString describeGroup(const FindingGroup& group, bool includeSeverity) {
     if (includeSeverity) {
         text = group.severity ==
                        DeepSkyCalibrationPreflight::Severity::Error
-            ? QString::fromUtf8("[必须修复] ")
-            : QString::fromUtf8("[建议] ");
+            ? QCoreApplication::translate("Nebulens", "[必须修复] ")
+            : QCoreApplication::translate("Nebulens", "[建议] ");
     }
     text += group.message;
     if (!group.examples.isEmpty()) {
-        text += QString::fromUtf8("（%1 张，例如 %2）")
+        text += QCoreApplication::translate("Nebulens", "（%1 张，例如 %2）")
                     .arg(group.count)
-                    .arg(group.examples.join(QString::fromUtf8("、")));
+                    .arg(group.examples.join(QCoreApplication::translate("Nebulens", "、")));
     }
     return text;
 }
@@ -92,17 +93,17 @@ bool DeepSkyCalibrationPreflight::Report::hasErrors() const {
 QString DeepSkyCalibrationPreflight::Report::userMessage(
     int maximumGroups) const {
     maximumGroups = std::max(1, maximumGroups);
-    QString message = QString::fromUtf8(
+    QString message = QCoreApplication::translate("Nebulens",
         "校准素材预检%1。\n"
         "Light %2 张 · Dark %3 张 · Flat %4 张 · Bias %5 张")
-        .arg(hasErrors() ? QString::fromUtf8("未通过")
-                         : QString::fromUtf8("通过"))
+        .arg(hasErrors() ? QCoreApplication::translate("Nebulens", "未通过")
+                         : QCoreApplication::translate("Nebulens", "通过"))
         .arg(lightCount)
         .arg(darkCount)
         .arg(flatCount)
         .arg(biasCount);
     if (!referenceCamera.isEmpty()) {
-        message += QString::fromUtf8(
+        message += QCoreApplication::translate("Nebulens",
             "\n基准 Light：%1 · ISO %2 · %3 秒 · %4×%5")
             .arg(referenceCamera)
             .arg(referenceIso)
@@ -112,7 +113,7 @@ QString DeepSkyCalibrationPreflight::Report::userMessage(
     }
     if (darkFlatCount > 0 || masterDarkCount > 0 || masterFlatCount > 0 ||
         masterBiasCount > 0 || masterDarkFlatCount > 0) {
-        message += QString::fromUtf8(
+        message += QCoreApplication::translate("Nebulens",
             "\nDark Flat %1 张 · Master Dark/Flat/Bias/Dark Flat %2/%3/%4/%5")
             .arg(darkFlatCount)
             .arg(masterDarkCount)
@@ -124,20 +125,20 @@ QString DeepSkyCalibrationPreflight::Report::userMessage(
     const std::vector<FindingGroup> groups =
         groupFindings(findings, true, true);
     if (groups.empty()) {
-        return message + QString::fromUtf8(
+        return message + QCoreApplication::translate("Nebulens",
             "\n\n元数据规则均符合，可以继续解包 Bayer 并检查 Flat 亮度。");
     }
-    message += QString::fromUtf8("\n\n检查结果：");
+    message += QCoreApplication::translate("Nebulens", "\n\n检查结果：");
     const int shown = std::min<int>(maximumGroups, groups.size());
     for (int i = 0; i < shown; ++i) {
-        message += QString::fromUtf8("\n• ") +
+        message += QCoreApplication::translate("Nebulens", "\n• ") +
             describeGroup(groups[static_cast<size_t>(i)], true);
     }
     if (shown < static_cast<int>(groups.size())) {
-        message += QString::fromUtf8("\n• 另有 %1 类问题未展开")
+        message += QCoreApplication::translate("Nebulens", "\n• 另有 %1 类问题未展开")
                        .arg(static_cast<int>(groups.size()) - shown);
     }
-    message += QString::fromUtf8(
+    message += QCoreApplication::translate("Nebulens",
         "\n\n预检只读取 RAW 头信息；CFA 布局和 Flat 实际亮度会在正式校准时继续检查。");
     return message;
 }
@@ -153,7 +154,7 @@ QStringList DeepSkyCalibrationPreflight::Report::warningMessages(
         messages.append(describeGroup(groups[static_cast<size_t>(i)], false));
     }
     if (shown < static_cast<int>(groups.size())) {
-        messages.append(QString::fromUtf8("另有 %1 类建议未展开")
+        messages.append(QCoreApplication::translate("Nebulens", "另有 %1 类建议未展开")
                             .arg(static_cast<int>(groups.size()) - shown));
     }
     return messages;
@@ -256,7 +257,7 @@ DeepSkyCalibrationPreflight::Report DeepSkyCalibrationPreflight::validate(
         if (paths.contains(identity)) {
             addFinding(
                 Severity::Error, frame.role, QStringLiteral("duplicate-path"),
-                QString::fromUtf8(
+                QCoreApplication::translate("Nebulens",
                     "同一个文件被重复导入，或同时分配给多个素材角色。"),
                 frame.path);
         } else {
@@ -272,10 +273,10 @@ DeepSkyCalibrationPreflight::Report DeepSkyCalibrationPreflight::validate(
                 QStringLiteral("unreadable-") +
                     QString::number(static_cast<int>(frame.role)),
                 masterRole
-                    ? QString::fromUtf8(
+                    ? QCoreApplication::translate("Nebulens",
                           "%1 文件无效、已损坏或角色不匹配。")
                           .arg(roleName(frame.role))
-                    : QString::fromUtf8(
+                    : QCoreApplication::translate("Nebulens",
                           "%1 中存在无法读取 RAW 头信息的文件。")
                           .arg(roleName(frame.role)),
                 frame.path);
@@ -303,7 +304,7 @@ DeepSkyCalibrationPreflight::Report DeepSkyCalibrationPreflight::validate(
                 Severity::Error, role,
                 QStringLiteral("count-") +
                     QString::number(static_cast<int>(role)),
-                QString::fromUtf8("%1 数量不足：当前 %2 张，至少需要 %3 张。")
+                QCoreApplication::translate("Nebulens", "%1 数量不足：当前 %2 张，至少需要 %3 张。")
                     .arg(roleName(role))
                     .arg(count)
                     .arg(minimum));
@@ -312,7 +313,7 @@ DeepSkyCalibrationPreflight::Report DeepSkyCalibrationPreflight::validate(
                 Severity::Warning, role,
                 QStringLiteral("recommended-count-") +
                     QString::number(static_cast<int>(role)),
-                QString::fromUtf8(
+                QCoreApplication::translate("Nebulens",
                     "%1 当前为 %2 张；可以处理，但建议 10–20 张以降低 Master 自身噪声。")
                     .arg(roleName(role))
                     .arg(count));
@@ -321,7 +322,7 @@ DeepSkyCalibrationPreflight::Report DeepSkyCalibrationPreflight::validate(
     if (report.lightCount < 2) {
         addFinding(
             Severity::Error, Role::Light, QStringLiteral("count-light"),
-            QString::fromUtf8("Light 数量不足：当前 %1 张，至少需要 2 张。")
+            QCoreApplication::translate("Nebulens", "Light 数量不足：当前 %1 张，至少需要 2 张。")
                 .arg(report.lightCount));
     }
 
@@ -333,7 +334,7 @@ DeepSkyCalibrationPreflight::Report DeepSkyCalibrationPreflight::validate(
                 Severity::Error, masterRole,
                 QStringLiteral("multiple-master-") +
                     QString::number(static_cast<int>(masterRole)),
-                QString::fromUtf8("%1 只能导入 1 个，当前为 %2 个。")
+                QCoreApplication::translate("Nebulens", "%1 只能导入 1 个，当前为 %2 个。")
                     .arg(roleName(masterRole))
                     .arg(masterCount));
         }
@@ -342,7 +343,7 @@ DeepSkyCalibrationPreflight::Report DeepSkyCalibrationPreflight::validate(
                 Severity::Error, masterRole,
                 QStringLiteral("raw-and-master-") +
                     QString::number(static_cast<int>(rawRole)),
-                QString::fromUtf8("%1 原片组和 %2 不能同时使用，请二选一。")
+                QCoreApplication::translate("Nebulens", "%1 原片组和 %2 不能同时使用，请二选一。")
                     .arg(roleName(rawRole), roleName(masterRole)));
         }
         const bool rawRequired = required && masterCount == 0;
@@ -372,7 +373,7 @@ DeepSkyCalibrationPreflight::Report DeepSkyCalibrationPreflight::validate(
         addFinding(
             Severity::Error, Role::Flat,
             QStringLiteral("flat-offset-missing"),
-            QString::fromUtf8(
+            QCoreApplication::translate("Nebulens",
                 "生成 Master Flat 需要 Bias 或与 Flat 匹配的 Dark Flat，至少提供一种。"));
     }
     if (buildsFlat && biasSources > 0 && darkFlatSources > 0 &&
@@ -380,7 +381,7 @@ DeepSkyCalibrationPreflight::Report DeepSkyCalibrationPreflight::validate(
         addFinding(
             Severity::Error, Role::DarkFlat,
             QStringLiteral("flat-offset-ambiguous"),
-            QString::fromUtf8(
+            QCoreApplication::translate("Nebulens",
                 "Flat 校准同时提供了 Bias 与 Dark Flat；请选择其中一种偏移校准方式。"
                 "只有已减 Bias 的 Master Dark 需要额外 Bias 时，两者才可并存。"));
     } else if (!buildsFlat &&
@@ -389,21 +390,21 @@ DeepSkyCalibrationPreflight::Report DeepSkyCalibrationPreflight::validate(
         addFinding(
             Severity::Error, Role::MasterFlat,
             QStringLiteral("unused-flat-offset"),
-            QString::fromUtf8(
+            QCoreApplication::translate("Nebulens",
                 "Master Flat 已完成偏移校准和归一化，不应再导入 Bias 或 Dark Flat。"));
     }
     if (hasBiasCorrectedMasterDark && biasSources == 0) {
         addFinding(
             Severity::Error, Role::MasterDark,
             QStringLiteral("corrected-dark-needs-bias"),
-            QString::fromUtf8(
+            QCoreApplication::translate("Nebulens",
                 "已减 Bias 的 Master Dark 必须同时提供 Bias 或 Master Bias，才能完整校准 Light。"));
     }
 
     if (!reference) {
         addFinding(
             Severity::Error, Role::Light, QStringLiteral("no-reference"),
-            QString::fromUtf8("没有可读取的 Light，无法建立校准基准。"));
+            QCoreApplication::translate("Nebulens", "没有可读取的 Light，无法建立校准基准。"));
         return report;
     }
 
@@ -419,7 +420,7 @@ DeepSkyCalibrationPreflight::Report DeepSkyCalibrationPreflight::validate(
         baseline.exposureTime <= 0.0) {
         addFinding(
             Severity::Error, Role::Light, QStringLiteral("invalid-reference"),
-            QString::fromUtf8(
+            QCoreApplication::translate("Nebulens",
                 "基准 Light 缺少相机、ISO、尺寸或曝光信息，无法可靠匹配校准帧。"),
             reference->path);
         return report;
@@ -446,8 +447,8 @@ DeepSkyCalibrationPreflight::Report DeepSkyCalibrationPreflight::validate(
                 QStringLiteral("camera-%1-%2")
                     .arg(static_cast<int>(frame.role))
                     .arg(camera),
-                QString::fromUtf8("%1 相机不匹配：当前为 %2，基准 Light 为 %3。")
-                    .arg(role, camera.isEmpty() ? QString::fromUtf8("未知") : camera,
+                QCoreApplication::translate("Nebulens", "%1 相机不匹配：当前为 %2，基准 Light 为 %3。")
+                    .arg(role, camera.isEmpty() ? QCoreApplication::translate("Nebulens", "未知") : camera,
                          report.referenceCamera),
                 frame.path);
         }
@@ -459,7 +460,7 @@ DeepSkyCalibrationPreflight::Report DeepSkyCalibrationPreflight::validate(
                     .arg(static_cast<int>(frame.role))
                     .arg(metadata.width)
                     .arg(metadata.height),
-                QString::fromUtf8("%1 尺寸不匹配：当前 %2×%3，基准 Light 为 %4×%5。")
+                QCoreApplication::translate("Nebulens", "%1 尺寸不匹配：当前 %2×%3，基准 Light 为 %4×%5。")
                     .arg(role)
                     .arg(metadata.width)
                     .arg(metadata.height)
@@ -473,7 +474,7 @@ DeepSkyCalibrationPreflight::Report DeepSkyCalibrationPreflight::validate(
                 QStringLiteral("iso-%1-%2")
                     .arg(static_cast<int>(frame.role))
                     .arg(metadata.iso),
-                QString::fromUtf8("%1 ISO 不匹配：当前 ISO %2，基准 Light 为 ISO %3。")
+                QCoreApplication::translate("Nebulens", "%1 ISO 不匹配：当前 ISO %2，基准 Light 为 ISO %3。")
                     .arg(role)
                     .arg(metadata.iso)
                     .arg(baseline.iso),
@@ -485,7 +486,7 @@ DeepSkyCalibrationPreflight::Report DeepSkyCalibrationPreflight::validate(
                 Severity::Error, frame.role,
                 QStringLiteral("missing-exposure-") +
                     QString::number(static_cast<int>(frame.role)),
-                QString::fromUtf8("%1 缺少有效曝光时间。").arg(role),
+                QCoreApplication::translate("Nebulens", "%1 缺少有效曝光时间。").arg(role),
                 frame.path);
             continue;
         }
@@ -495,7 +496,7 @@ DeepSkyCalibrationPreflight::Report DeepSkyCalibrationPreflight::validate(
                 Severity::Error, frame.role,
                 QStringLiteral("light-exposure-%1")
                     .arg(metadata.exposureTime, 0, 'g', 6),
-                QString::fromUtf8("Light 曝光不一致：当前 %1 秒，基准为 %2 秒。")
+                QCoreApplication::translate("Nebulens", "Light 曝光不一致：当前 %1 秒，基准为 %2 秒。")
                     .arg(metadata.exposureTime, 0, 'g', 6)
                     .arg(baseline.exposureTime, 0, 'g', 6),
                 frame.path);
@@ -507,7 +508,7 @@ DeepSkyCalibrationPreflight::Report DeepSkyCalibrationPreflight::validate(
                 Severity::Error, frame.role,
                 QStringLiteral("dark-exposure-%1")
                     .arg(metadata.exposureTime, 0, 'g', 6),
-                QString::fromUtf8("%1 曝光不匹配：当前 %2 秒，Light 为 %3 秒。")
+                QCoreApplication::translate("Nebulens", "%1 曝光不匹配：当前 %2 秒，Light 为 %3 秒。")
                     .arg(role)
                     .arg(metadata.exposureTime, 0, 'g', 6)
                     .arg(baseline.exposureTime, 0, 'g', 6),
@@ -519,7 +520,7 @@ DeepSkyCalibrationPreflight::Report DeepSkyCalibrationPreflight::validate(
                 Severity::Error, frame.role,
                 QStringLiteral("bias-exposure-%1")
                     .arg(metadata.exposureTime, 0, 'g', 6),
-                QString::fromUtf8(
+                QCoreApplication::translate("Nebulens",
                     "%1 曝光过长：当前 %2 秒，本组必须不超过 %3 秒并使用相机最短曝光。")
                     .arg(role)
                     .arg(metadata.exposureTime, 0, 'g', 6)
@@ -534,7 +535,7 @@ DeepSkyCalibrationPreflight::Report DeepSkyCalibrationPreflight::validate(
                 Severity::Error, frame.role,
                 QStringLiteral("dark-flat-exposure-%1")
                     .arg(metadata.exposureTime, 0, 'g', 6),
-                QString::fromUtf8(
+                QCoreApplication::translate("Nebulens",
                     "%1 曝光不匹配：当前 %2 秒，Flat 为 %3 秒。")
                     .arg(role)
                     .arg(metadata.exposureTime, 0, 'g', 6)
@@ -548,7 +549,7 @@ DeepSkyCalibrationPreflight::Report DeepSkyCalibrationPreflight::validate(
                 Severity::Error, frame.role,
                 QStringLiteral("flat-exposure-%1")
                     .arg(metadata.exposureTime, 0, 'g', 6),
-                QString::fromUtf8(
+                QCoreApplication::translate("Nebulens",
                     "Dark Flat 模式要求所有 Flat 曝光一致：当前 %1 秒，基准为 %2 秒。")
                     .arg(metadata.exposureTime, 0, 'g', 6)
                     .arg(flatReference->metadata.exposureTime, 0, 'g', 6),
@@ -559,7 +560,7 @@ DeepSkyCalibrationPreflight::Report DeepSkyCalibrationPreflight::validate(
                 Severity::Warning, frame.role,
                 QStringLiteral("long-flat-%1")
                     .arg(metadata.exposureTime, 0, 'g', 6),
-                QString::fromUtf8(
+                QCoreApplication::translate("Nebulens",
                     "Flat 曝光为 %1 秒；当前选择 Bias 校准，长曝光平场建议改用匹配曝光的 Dark Flat。")
                     .arg(metadata.exposureTime, 0, 'g', 6),
                 frame.path);
@@ -600,5 +601,5 @@ QString DeepSkyCalibrationPreflight::roleName(Role role) {
     case Role::MasterDarkFlat:
         return QStringLiteral("Master Dark Flat");
     }
-    return QString::fromUtf8("未知素材");
+    return QCoreApplication::translate("Nebulens", "未知素材");
 }

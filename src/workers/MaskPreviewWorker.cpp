@@ -1,5 +1,7 @@
 #include "MaskPreviewWorker.h"
 
+#include <QCoreApplication>
+
 #include "core/RawImageLoader.h"
 #include "core/SkyGroundMask.h"
 
@@ -28,7 +30,7 @@ void MaskPreviewWorker::run() {
     constexpr int kPreviewLongSide = 2400;
     if (!loader.loadPreview(m_filePath, kPreviewLongSide,
                             preview, &metadata)) {
-        m_error = "无法加载图像";
+        m_error = QCoreApplication::translate("Nebulens", "无法加载图像");
         return;
     }
     if (isInterruptionRequested()) return;
@@ -43,7 +45,7 @@ void MaskPreviewWorker::run() {
         image = borrowed.copy();
     }
     if (image.isNull()) {
-        m_error = "RAW 预览数据无效";
+        m_error = QCoreApplication::translate("Nebulens", "RAW 预览数据无效");
         return;
     }
     if (std::max(image.width(), image.height()) > kPreviewLongSide) {
@@ -60,7 +62,7 @@ void MaskPreviewWorker::run() {
     const int previewFeather = std::max(0, qRound(m_featherRadius * previewScale));
     if (!SkyGroundMask::autoDetectPreview(image, previewWidth, previewHeight,
                                           m_mask, previewFeather)) {
-        m_error = "地景检测失败";
+        m_error = QCoreApplication::translate("Nebulens", "地景检测失败");
         return;
     }
     if (isInterruptionRequested()) return;

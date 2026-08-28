@@ -3,6 +3,7 @@
 #include "core/VerifiedDownloadFinalizer.h"
 
 #include <QApplication>
+#include <QCoreApplication>
 #include <QCryptographicHash>
 #include <QDesktopServices>
 #include <QDir>
@@ -76,15 +77,15 @@ void UpdateManager::scheduleAutomaticCheck() {
 void UpdateManager::checkForUpdates(bool interactive) {
     if (m_manifestReply) {
         if (interactive) {
-            emit statusMessage(QStringLiteral("正在检查更新..."), 2500);
+            emit statusMessage(QCoreApplication::translate("Nebulens", "正在检查更新..."), 2500);
         }
         return;
     }
 
     if (platformKey().isEmpty()) {
         if (interactive) {
-            QMessageBox::information(m_parentWindow, QStringLiteral("检查更新"),
-                                     QStringLiteral("当前平台暂不支持自动更新。"));
+            QMessageBox::information(m_parentWindow, QCoreApplication::translate("Nebulens", "检查更新"),
+                                     QCoreApplication::translate("Nebulens", "当前平台暂不支持自动更新。"));
         }
         return;
     }
@@ -94,7 +95,7 @@ void UpdateManager::checkForUpdates(bool interactive) {
     m_manifestFailure.clear();
     QSettings().setValue(QStringLiteral("updates/lastCheckUtc"),
                          QDateTime::currentDateTimeUtc());
-    emit statusMessage(QStringLiteral("正在检查更新..."), 0);
+    emit statusMessage(QCoreApplication::translate("Nebulens", "正在检查更新..."), 0);
 
     QNetworkRequest request(m_manifestUrl);
     request.setAttribute(QNetworkRequest::RedirectPolicyAttribute,
@@ -113,7 +114,7 @@ void UpdateManager::checkForUpdates(bool interactive) {
         const qint64 declaredSize = m_manifestReply->header(
             QNetworkRequest::ContentLengthHeader).toLongLong();
         if (declaredSize > kMaximumManifestBytes) {
-            m_manifestFailure = QStringLiteral("更新清单超过允许大小");
+            m_manifestFailure = QCoreApplication::translate("Nebulens", "更新清单超过允许大小");
             m_manifestReply->abort();
         }
     });
@@ -157,7 +158,7 @@ void UpdateManager::consumeManifestData() {
     if (!m_manifestReply || !m_manifestFailure.isEmpty()) return;
     const QByteArray chunk = m_manifestReply->readAll();
     if (chunk.size() > kMaximumManifestBytes - m_manifestPayload.size()) {
-        m_manifestFailure = QStringLiteral("更新清单超过允许大小");
+        m_manifestFailure = QCoreApplication::translate("Nebulens", "更新清单超过允许大小");
         m_manifestReply->abort();
         return;
     }
@@ -173,7 +174,7 @@ void UpdateManager::handleManifestFinished() {
     // backend that delivers data immediately before finished().
     const QByteArray finalChunk = reply->readAll();
     if (finalChunk.size() > kMaximumManifestBytes - m_manifestPayload.size()) {
-        m_manifestFailure = QStringLiteral("更新清单超过允许大小");
+        m_manifestFailure = QCoreApplication::translate("Nebulens", "更新清单超过允许大小");
     } else {
         m_manifestPayload.append(finalChunk);
     }
@@ -193,7 +194,7 @@ void UpdateManager::handleManifestFinished() {
         return;
     }
     if (!networkOk || status < 200 || status >= 300) {
-        showCheckError(QStringLiteral("服务器连接失败：%1").arg(networkError));
+        showCheckError(QCoreApplication::translate("Nebulens", "服务器连接失败：%1").arg(networkError));
         return;
     }
     UpdateManifest manifest;
@@ -203,43 +204,43 @@ void UpdateManager::handleManifestFinished() {
         return;
     }
     if (!trustedPackageUrl(manifest.package.url)) {
-        showCheckError(QStringLiteral("更新包地址不属于受信任下载目录"));
+        showCheckError(QCoreApplication::translate("Nebulens", "更新包地址不属于受信任下载目录"));
         return;
     }
 
     if (!UpdateManifestParser::isNewerVersion(
             manifest.version, QApplication::applicationVersion())) {
-        emit statusMessage(QStringLiteral("当前已是最新版本"), 3500);
+        emit statusMessage(QCoreApplication::translate("Nebulens", "当前已是最新版本"), 3500);
         if (m_manifestInteractive) {
             QMessageBox::information(
-                m_parentWindow, QStringLiteral("检查更新"),
-                QStringLiteral("当前版本 %1 已是最新版本。")
+                m_parentWindow, QCoreApplication::translate("Nebulens", "检查更新"),
+                QCoreApplication::translate("Nebulens", "当前版本 %1 已是最新版本。")
                     .arg(QApplication::applicationVersion()));
         }
         return;
     }
 
     emit statusMessage(
-        QStringLiteral("发现新版本 %1").arg(manifest.version), 5000);
+        QCoreApplication::translate("Nebulens", "发现新版本 %1").arg(manifest.version), 5000);
     offerUpdate(manifest);
 }
 
 void UpdateManager::offerUpdate(const UpdateManifest& manifest) {
     QMessageBox dialog(m_parentWindow);
-    dialog.setWindowTitle(QStringLiteral("发现新版本"));
+    dialog.setWindowTitle(QCoreApplication::translate("Nebulens", "发现新版本"));
     dialog.setIcon(QMessageBox::Information);
     dialog.setTextFormat(Qt::PlainText);
-    dialog.setText(QString::fromUtf8("Nebulens %1 已发布")
+    dialog.setText(QCoreApplication::translate("Nebulens", "Nebulens %1 已发布")
                        .arg(manifest.version));
     dialog.setInformativeText(
-        QStringLiteral("安装包大小：%1\n\n%2")
+        QCoreApplication::translate("Nebulens", "安装包大小：%1\n\n%2")
             .arg(humanReadableSize(manifest.package.size),
                  manifest.releaseNotes.isEmpty()
-                     ? QStringLiteral("此版本包含功能改进和问题修复。")
+                     ? QCoreApplication::translate("Nebulens", "此版本包含功能改进和问题修复。")
                      : manifest.releaseNotes));
     auto* downloadButton = dialog.addButton(
-        QStringLiteral("下载更新"), QMessageBox::AcceptRole);
-    dialog.addButton(QStringLiteral("稍后"), QMessageBox::RejectRole);
+        QCoreApplication::translate("Nebulens", "下载更新"), QMessageBox::AcceptRole);
+    dialog.addButton(QCoreApplication::translate("Nebulens", "稍后"), QMessageBox::RejectRole);
     dialog.exec();
     if (dialog.clickedButton() == downloadButton) {
         startDownload(manifest.package, manifest.version);
@@ -249,7 +250,7 @@ void UpdateManager::offerUpdate(const UpdateManifest& manifest) {
 void UpdateManager::startDownload(const UpdatePackage& package,
                                   const QString& version) {
     if (m_downloadReply) {
-        emit statusMessage(QStringLiteral("已有更新正在下载"), 3000);
+        emit statusMessage(QCoreApplication::translate("Nebulens", "已有更新正在下载"), 3000);
         return;
     }
 
@@ -258,8 +259,8 @@ void UpdateManager::startDownload(const UpdatePackage& package,
     if (downloadDirectory.isEmpty()) downloadDirectory = QDir::homePath();
     QDir directory(downloadDirectory);
     if (!directory.exists() && !directory.mkpath(QStringLiteral("."))) {
-        QMessageBox::warning(m_parentWindow, QStringLiteral("下载更新"),
-                             QStringLiteral("无法创建下载目录。"));
+        QMessageBox::warning(m_parentWindow, QCoreApplication::translate("Nebulens", "下载更新"),
+                             QCoreApplication::translate("Nebulens", "无法创建下载目录。"));
         return;
     }
 
@@ -267,8 +268,8 @@ void UpdateManager::startDownload(const UpdatePackage& package,
     if (storage.isValid() && storage.isReady() &&
         storage.bytesAvailable() < package.size + kDownloadSpaceReserve) {
         QMessageBox::warning(
-            m_parentWindow, QStringLiteral("下载更新"),
-            QStringLiteral("下载目录空间不足。至少需要 %1 可用空间。")
+            m_parentWindow, QCoreApplication::translate("Nebulens", "下载更新"),
+            QCoreApplication::translate("Nebulens", "下载目录空间不足。至少需要 %1 可用空间。")
                 .arg(humanReadableSize(package.size + kDownloadSpaceReserve)));
         return;
     }
@@ -285,8 +286,8 @@ void UpdateManager::startDownload(const UpdatePackage& package,
     m_downloadFile->setAutoRemove(true);
     if (!m_downloadFile->open()) {
         QMessageBox::warning(
-            m_parentWindow, QStringLiteral("下载更新"),
-            QStringLiteral("无法写入下载目录：%1")
+            m_parentWindow, QCoreApplication::translate("Nebulens", "下载更新"),
+            QCoreApplication::translate("Nebulens", "无法写入下载目录：%1")
                 .arg(m_downloadFile->errorString()));
         resetDownload();
         return;
@@ -295,9 +296,9 @@ void UpdateManager::startDownload(const UpdatePackage& package,
         QCryptographicHash::Sha256);
 
     m_progressDialog = new QProgressDialog(
-        QString::fromUtf8("正在下载 Nebulens %1...").arg(version),
-        QStringLiteral("取消"), 0, 1000, m_parentWindow);
-    m_progressDialog->setWindowTitle(QStringLiteral("下载更新"));
+        QCoreApplication::translate("Nebulens", "正在下载 Nebulens %1...").arg(version),
+        QCoreApplication::translate("Nebulens", "取消"), 0, 1000, m_parentWindow);
+    m_progressDialog->setWindowTitle(QCoreApplication::translate("Nebulens", "下载更新"));
     m_progressDialog->setMinimumDuration(0);
     m_progressDialog->setWindowModality(Qt::WindowModal);
     m_progressDialog->setAutoClose(false);
@@ -326,7 +327,7 @@ void UpdateManager::startDownload(const UpdatePackage& package,
                     : 0;
                 m_progressDialog->setValue(progress);
                 m_progressDialog->setLabelText(
-                    QString::fromUtf8("正在下载 Nebulens %1... %2 / %3")
+                    QCoreApplication::translate("Nebulens", "正在下载 Nebulens %1... %2 / %3")
                         .arg(m_downloadVersion,
                              humanReadableSize(received),
                              humanReadableSize(denominator)));
@@ -347,12 +348,12 @@ void UpdateManager::consumeDownloadData() {
     const QByteArray data = m_downloadReply->readAll();
     if (data.isEmpty()) return;
     if (m_downloadedBytes > m_downloadPackage.size - data.size()) {
-        m_downloadFailure = QStringLiteral("服务器返回的数据超过清单声明大小");
+        m_downloadFailure = QCoreApplication::translate("Nebulens", "服务器返回的数据超过清单声明大小");
         m_downloadReply->abort();
         return;
     }
     if (m_downloadFile->write(data) != data.size()) {
-        m_downloadFailure = QStringLiteral("写入安装包失败：%1")
+        m_downloadFailure = QCoreApplication::translate("Nebulens", "写入安装包失败：%1")
                                 .arg(m_downloadFile->errorString());
         m_downloadReply->abort();
         return;
@@ -380,26 +381,26 @@ void UpdateManager::handleDownloadFinished() {
 
     QString error = m_downloadFailure;
     if (!m_downloadCancelled && error.isEmpty() && !networkOk) {
-        error = QStringLiteral("下载失败：%1").arg(networkError);
+        error = QCoreApplication::translate("Nebulens", "下载失败：%1").arg(networkError);
     }
     if (!m_downloadCancelled && error.isEmpty() &&
         !trustedPackageUrl(finalUrl)) {
-        error = QStringLiteral("下载被重定向到不受信任的地址");
+        error = QCoreApplication::translate("Nebulens", "下载被重定向到不受信任的地址");
     }
     if (!m_downloadCancelled && error.isEmpty() &&
         m_downloadedBytes != m_downloadPackage.size) {
-        error = QStringLiteral("安装包大小不匹配（收到 %1，预期 %2）")
+        error = QCoreApplication::translate("Nebulens", "安装包大小不匹配（收到 %1，预期 %2）")
                     .arg(m_downloadedBytes)
                     .arg(m_downloadPackage.size);
     }
     if (!m_downloadCancelled && error.isEmpty() &&
         m_downloadHash->result().toHex().toLower() !=
             m_downloadPackage.sha256Hex) {
-        error = QStringLiteral("安装包 SHA-256 校验失败，文件已丢弃");
+        error = QCoreApplication::translate("Nebulens", "安装包 SHA-256 校验失败，文件已丢弃");
     }
     if (!m_downloadCancelled && error.isEmpty() &&
         !m_downloadFile->flush()) {
-        error = QStringLiteral("写入安装包失败：%1")
+        error = QCoreApplication::translate("Nebulens", "写入安装包失败：%1")
                     .arg(m_downloadFile->errorString());
     }
     if (!m_downloadCancelled && error.isEmpty()) {
@@ -420,11 +421,11 @@ void UpdateManager::handleDownloadFinished() {
     if (m_downloadCancelled || !error.isEmpty()) {
         if (m_downloadFile) m_downloadFile->close();
         if (m_downloadCancelled) {
-            emit statusMessage(QStringLiteral("已取消更新下载"), 3000);
+            emit statusMessage(QCoreApplication::translate("Nebulens", "已取消更新下载"), 3000);
         } else {
-            QMessageBox::warning(m_parentWindow, QStringLiteral("下载更新"),
+            QMessageBox::warning(m_parentWindow, QCoreApplication::translate("Nebulens", "下载更新"),
                                  error);
-            emit statusMessage(QStringLiteral("更新下载失败"), 4000);
+            emit statusMessage(QCoreApplication::translate("Nebulens", "更新下载失败"), 4000);
         }
         resetDownload();
         return;
@@ -433,10 +434,10 @@ void UpdateManager::handleDownloadFinished() {
     const QString completedPath = m_downloadPath;
     const QString completedVersion = m_downloadVersion;
     resetDownload();
-    emit statusMessage(QStringLiteral("更新包已下载并通过校验"), 5000);
+    emit statusMessage(QCoreApplication::translate("Nebulens", "更新包已下载并通过校验"), 5000);
     const auto choice = QMessageBox::question(
-        m_parentWindow, QStringLiteral("更新已就绪"),
-        QString::fromUtf8("Nebulens %1 已下载并通过 SHA-256 校验。\n\n"
+        m_parentWindow, QCoreApplication::translate("Nebulens", "更新已就绪"),
+        QCoreApplication::translate("Nebulens", "Nebulens %1 已下载并通过 SHA-256 校验。\n\n"
                        "是否现在打开安装包？\n%2")
             .arg(completedVersion, completedPath),
         QMessageBox::Open | QMessageBox::Cancel, QMessageBox::Open);
@@ -446,9 +447,9 @@ void UpdateManager::handleDownloadFinished() {
 }
 
 void UpdateManager::showCheckError(const QString& detail) {
-    emit statusMessage(QStringLiteral("检查更新失败"), 3500);
+    emit statusMessage(QCoreApplication::translate("Nebulens", "检查更新失败"), 3500);
     if (m_manifestInteractive) {
-        QMessageBox::warning(m_parentWindow, QStringLiteral("检查更新"), detail);
+        QMessageBox::warning(m_parentWindow, QCoreApplication::translate("Nebulens", "检查更新"), detail);
     }
 }
 

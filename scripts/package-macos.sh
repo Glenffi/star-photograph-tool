@@ -137,6 +137,7 @@ if [[ -n "${VCPKG_INSTALLED_DIR:-}" && -n "${VCPKG_TARGET_TRIPLET:-}" ]]; then
 fi
 MACDEPLOYQT="${QT_PREFIX}/bin/macdeployqt"
 QT_PLUGIN_DIR="$(${QT_PREFIX}/bin/qtpaths --plugin-dir)"
+QT_TRANSLATION_DIR="$(${QT_PREFIX}/bin/qtpaths --query QT_INSTALL_TRANSLATIONS)"
 
 if [[ ! -x "${MACDEPLOYQT}" ]]; then
     echo "macdeployqt was not found at ${MACDEPLOYQT}" >&2
@@ -227,6 +228,18 @@ done
     "${plugin_executable_arguments[@]}" \
     -libpath="${LIBRAW_PREFIX}/lib" \
     -libpath="${TIFF_PREFIX}/lib"
+
+# QFileDialog uses the Qt widget implementation so its standard controls must
+# share the application's selected language instead of inheriting a mixed
+# native-panel locale. English is Qt's source language; only Chinese is copied.
+QTBASE_ZH="${QT_TRANSLATION_DIR}/qtbase_zh_CN.qm"
+if [[ ! -f "${QTBASE_ZH}" ]]; then
+    echo "Required Qt translation was not found: ${QTBASE_ZH}" >&2
+    exit 3
+fi
+cmake -E make_directory "${STAGED_APP}/Contents/Resources/translations"
+ditto "${QTBASE_ZH}" \
+    "${STAGED_APP}/Contents/Resources/translations/qtbase_zh_CN.qm"
 
 # macdeployqt follows Qt's dependency graph but can miss non-Qt @rpath
 # dependencies of bundled libraries. LibRaw's optional LittleCMS dependency is

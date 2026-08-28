@@ -23,7 +23,7 @@
 
 1. 以 Release、macOS 14 deployment target 配置并编译。
 2. 运行全部 CTest。
-3. 用 `macdeployqt` 复制 Qt、LibRaw 和 libtiff，仅保留 Cocoa 平台、macOS 样式与 JPEG 三个实际使用的 Qt 插件。
+3. 用 `macdeployqt` 复制 Qt、LibRaw 和 libtiff，仅保留 Cocoa 平台、macOS 样式与 JPEG 三个实际使用的 Qt 插件；另复制 `qtbase_zh_CN.qm`，让非原生 Qt 文件对话框跟随应用语言。
 4. 递归扫描所有 Mach-O 的 `@rpath` 依赖，从 vcpkg/Homebrew 运行库目录补齐非 Qt 传递依赖；随后逐项解析 `@rpath`、`@loader_path` 和 `@executable_path`，禁止缺失文件及残留 Homebrew 或用户目录依赖。
 5. 扫描 bundle 内全部 Mach-O，读取依赖真实的最低系统版本并回写 `Info.plist`。
 6. 在路径改写全部结束后进行 ad-hoc 深度签名并验证 bundle seal。

@@ -1,5 +1,6 @@
 #include "MasterFrameIO.h"
 
+#include <QCoreApplication>
 #include <QCryptographicHash>
 #include <QDataStream>
 #include <QFile>
@@ -41,7 +42,7 @@ bool readHeader(QFile& file, RawCalibrationEngine::MasterFrame& master,
     char magic[sizeof(kMagic)] = {};
     if (file.read(magic, sizeof(magic)) != sizeof(magic) ||
         std::memcmp(magic, kMagic, sizeof(kMagic)) != 0) {
-        error = QString::fromUtf8("不是有效的 Nebulens Master 文件");
+        error = QCoreApplication::translate("Nebulens", "不是有效的 Nebulens Master 文件");
         return false;
     }
 
@@ -83,32 +84,32 @@ bool readHeader(QFile& file, RawCalibrationEngine::MasterFrame& master,
         !std::isfinite(exposure) || exposure <= 0.0 || saturation == 0 ||
         width > std::numeric_limits<int>::max() / height ||
         !validPattern({cfa0, cfa1, cfa2, cfa3})) {
-        error = QString::fromUtf8("Master 文件头损坏或版本不受支持");
+        error = QCoreApplication::translate("Nebulens", "Master 文件头损坏或版本不受支持");
         return false;
     }
     QByteArray camera;
     camera.resize(static_cast<qsizetype>(cameraLength));
     if (stream.readRawData(camera.data(), static_cast<qint64>(cameraLength)) !=
             static_cast<qint64>(cameraLength)) {
-        error = QString::fromUtf8("Master 相机元数据不完整");
+        error = QCoreApplication::translate("Nebulens", "Master 相机元数据不完整");
         return false;
     }
     stream >> pixelCount;
     if (stream.status() != QDataStream::Ok ||
         pixelCount != static_cast<quint64>(width) * height ||
         pixelCount > std::numeric_limits<size_t>::max() / sizeof(float)) {
-        error = QString::fromUtf8("Master 文件头损坏或版本不受支持");
+        error = QCoreApplication::translate("Nebulens", "Master 文件头损坏或版本不受支持");
         return false;
     }
     const qint64 headerEnd = file.pos();
     if (headerEnd < headerStart || !file.seek(headerStart)) {
-        error = QString::fromUtf8("无法校验 Master 元数据");
+        error = QCoreApplication::translate("Nebulens", "无法校验 Master 元数据");
         return false;
     }
     const QByteArray serializedHeader = file.read(headerEnd - headerStart);
     if (serializedHeader.size() != headerEnd - headerStart ||
         !file.seek(headerEnd)) {
-        error = QString::fromUtf8("Master 元数据不完整");
+        error = QCoreApplication::translate("Nebulens", "Master 元数据不完整");
         return false;
     }
     authenticatedHeader = QByteArray(kMagic, sizeof(kMagic)) +
@@ -117,7 +118,7 @@ bool readHeader(QFile& file, RawCalibrationEngine::MasterFrame& master,
     if (storedHeaderDigest.size() != kDigestSize ||
         storedHeaderDigest != QCryptographicHash::hash(
             authenticatedHeader, QCryptographicHash::Sha256)) {
-        error = QString::fromUtf8(
+        error = QCoreApplication::translate("Nebulens",
             "Master 元数据校验失败，文件可能已损坏");
         return false;
     }
@@ -125,7 +126,7 @@ bool readHeader(QFile& file, RawCalibrationEngine::MasterFrame& master,
         static_cast<quint64>(std::numeric_limits<qint64>::max() / 4) ||
         file.size() - file.pos() !=
             static_cast<qint64>(pixelCount * 4 + kDigestSize)) {
-        error = QString::fromUtf8("Master 文件长度与声明的图像尺寸不一致");
+        error = QCoreApplication::translate("Nebulens", "Master 文件长度与声明的图像尺寸不一致");
         return false;
     }
 
@@ -153,7 +154,7 @@ bool readFile(const QString& path, RawCalibrationEngine::MasterFrame& master,
     error.clear();
     QFile file(path);
     if (!file.open(QIODevice::ReadOnly)) {
-        error = QString::fromUtf8("无法打开 Master 文件：%1")
+        error = QCoreApplication::translate("Nebulens", "无法打开 Master 文件：%1")
                     .arg(file.errorString());
         return false;
     }
@@ -165,7 +166,7 @@ bool readFile(const QString& path, RawCalibrationEngine::MasterFrame& master,
     if (!includePixels) {
         if (candidate.role == RawCalibrationEngine::MasterRole::Flat &&
             !candidate.normalizedFlat) {
-            error = QString::fromUtf8(
+            error = QCoreApplication::translate("Nebulens",
                 "Master Flat 尚未完成偏移校准和 CFA 分相归一化");
             return false;
         }
@@ -176,7 +177,7 @@ bool readFile(const QString& path, RawCalibrationEngine::MasterFrame& master,
     try {
         candidate.data.resize(static_cast<size_t>(pixelCount));
     } catch (const std::bad_alloc&) {
-        error = QString::fromUtf8("内存不足，无法加载 Master 像素");
+        error = QCoreApplication::translate("Nebulens", "内存不足，无法加载 Master 像素");
         return false;
     }
     QCryptographicHash fileHash(QCryptographicHash::Sha256);
@@ -188,7 +189,7 @@ bool readFile(const QString& path, RawCalibrationEngine::MasterFrame& master,
         const qint64 bytes = static_cast<qint64>(count * sizeof(quint32));
         const QByteArray chunk = file.read(bytes);
         if (chunk.size() != bytes) {
-            error = QString::fromUtf8("Master 像素数据不完整");
+            error = QCoreApplication::translate("Nebulens", "Master 像素数据不完整");
             return false;
         }
         fileHash.addData(chunk);
@@ -203,13 +204,13 @@ bool readFile(const QString& path, RawCalibrationEngine::MasterFrame& master,
     const QByteArray storedDigest = file.read(kDigestSize);
     if (storedDigest.size() != kDigestSize ||
         storedDigest != fileHash.result()) {
-        error = QString::fromUtf8("Master 完整性校验失败，文件可能已损坏");
+        error = QCoreApplication::translate("Nebulens", "Master 完整性校验失败，文件可能已损坏");
         return false;
     }
     if (!candidate.complete() ||
         (candidate.role == RawCalibrationEngine::MasterRole::Flat &&
          !candidate.normalizedFlat)) {
-        error = QString::fromUtf8("Master 元数据或像素值无效");
+        error = QCoreApplication::translate("Nebulens", "Master 元数据或像素值无效");
         return false;
     }
     master = std::move(candidate);
@@ -225,12 +226,12 @@ bool MasterFrameIO::save(
     if (!master.complete() ||
         (master.role == RawCalibrationEngine::MasterRole::Flat &&
          !master.normalizedFlat)) {
-        error = QString::fromUtf8("Master 数据不完整，无法保存");
+        error = QCoreApplication::translate("Nebulens", "Master 数据不完整，无法保存");
         return false;
     }
     QSaveFile file(path);
     if (!file.open(QIODevice::WriteOnly)) {
-        error = QString::fromUtf8("无法创建 Master 文件：%1")
+        error = QCoreApplication::translate("Nebulens", "无法创建 Master 文件：%1")
                     .arg(file.errorString());
         return false;
     }
@@ -244,7 +245,7 @@ bool MasterFrameIO::save(
         (master.darkIncludesBiasPedestal ? 0x02U : 0U));
     const QByteArray camera = QByteArray::fromStdString(master.cameraModel);
     if (camera.isEmpty() || camera.size() > 4096) {
-        error = QString::fromUtf8("Master 相机名称长度无效");
+        error = QCoreApplication::translate("Nebulens", "Master 相机名称长度无效");
         return false;
     }
     stream << kSchemaVersion
@@ -264,12 +265,12 @@ bool MasterFrameIO::save(
            << static_cast<quint32>(camera.size());
     if (stream.writeRawData(camera.constData(), camera.size()) !=
             camera.size()) {
-        error = QString::fromUtf8("写入 Master 相机元数据失败");
+        error = QCoreApplication::translate("Nebulens", "写入 Master 相机元数据失败");
         return false;
     }
     stream << static_cast<quint64>(master.data.size());
     if (stream.status() != QDataStream::Ok) {
-        error = QString::fromUtf8("写入 Master 元数据失败");
+        error = QCoreApplication::translate("Nebulens", "写入 Master 元数据失败");
         return false;
     }
 
@@ -279,7 +280,7 @@ bool MasterFrameIO::save(
         authenticatedHeader, QCryptographicHash::Sha256);
     if (file.write(authenticatedHeader) != authenticatedHeader.size() ||
         file.write(headerDigest) != headerDigest.size()) {
-        error = QString::fromUtf8("写入 Master 文件头失败");
+        error = QCoreApplication::translate("Nebulens", "写入 Master 文件头失败");
         return false;
     }
 
@@ -301,14 +302,14 @@ bool MasterFrameIO::save(
         }
         fileHash.addData(chunk);
         if (file.write(chunk) != chunk.size()) {
-            error = QString::fromUtf8("写入 Master 像素失败");
+            error = QCoreApplication::translate("Nebulens", "写入 Master 像素失败");
             return false;
         }
         offset += count;
     }
     const QByteArray digest = fileHash.result();
     if (file.write(digest) != digest.size() || !file.commit()) {
-        error = QString::fromUtf8("提交 Master 文件失败：%1")
+        error = QCoreApplication::translate("Nebulens", "提交 Master 文件失败：%1")
                     .arg(file.errorString());
         return false;
     }
