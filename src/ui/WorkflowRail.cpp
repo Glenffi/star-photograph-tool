@@ -5,6 +5,7 @@
 #include <QAbstractButton>
 #include <QCoreApplication>
 #include <QEnterEvent>
+#include <QFocusEvent>
 #include <QFont>
 #include <QLabel>
 #include <QLinearGradient>
@@ -66,6 +67,23 @@ public:
     }
 
 protected:
+    void focusInEvent(QFocusEvent* event) override {
+        m_keyboardFocus =
+            event->reason() == Qt::TabFocusReason ||
+            event->reason() == Qt::BacktabFocusReason ||
+            event->reason() == Qt::ShortcutFocusReason;
+        setProperty("keyboardFocusVisible", m_keyboardFocus);
+        update();
+        QAbstractButton::focusInEvent(event);
+    }
+
+    void focusOutEvent(QFocusEvent* event) override {
+        m_keyboardFocus = false;
+        setProperty("keyboardFocusVisible", false);
+        update();
+        QAbstractButton::focusOutEvent(event);
+    }
+
     void enterEvent(QEnterEvent* event) override {
         m_hovered = true;
         update();
@@ -162,7 +180,7 @@ protected:
         painter.setBrush(dot);
         painter.drawEllipse(QRectF(width() - 10.0, 7.0, 4.0, 4.0));
 
-        if (hasFocus()) {
+        if (hasFocus() && m_keyboardFocus) {
             QColor focus = StyleTokens::Colors::fromHex(
                 StyleTokens::Colors::kAccentStrong);
             focus.setAlpha(180);
@@ -178,6 +196,7 @@ private:
     bool m_hovered = false;
     bool m_complete = false;
     bool m_warning = false;
+    bool m_keyboardFocus = false;
 };
 
 WorkflowRail::WorkflowRail(QWidget* parent) : QWidget(parent) {

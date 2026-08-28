@@ -5,6 +5,7 @@
 #include "ui/WorkflowRail.h"
 
 #include <QApplication>
+#include <QAbstractButton>
 #include <QColor>
 #include <QLabel>
 #include <QProgressBar>
@@ -123,10 +124,33 @@ int main(int argc, char* argv[]) {
                        "Task progress line should span the status bar");
 
     WorkflowRail rail;
+    rail.show();
+    QApplication::processEvents();
     success &= require(
         rail.width() == StyleTokens::Layout::kWorkflowRailWidth &&
             rail.currentStage() == WorkflowStage::Adjustment,
         "Workflow rail should use the instrument layout and default stage");
+    const auto workflowButtons = rail.findChildren<QAbstractButton*>();
+    success &= require(
+        std::count_if(workflowButtons.begin(), workflowButtons.end(),
+                      [](QAbstractButton* button) {
+                          return button->isChecked();
+                      }) == 1,
+        "Workflow rail should expose exactly one selected stage");
+    if (!workflowButtons.isEmpty()) {
+        auto* firstButton = workflowButtons.first();
+        firstButton->setFocus(Qt::ActiveWindowFocusReason);
+        QApplication::processEvents();
+        success &= require(
+            !firstButton->property("keyboardFocusVisible").toBool(),
+            "Window activation must not draw a second workflow outline");
+        firstButton->clearFocus();
+        firstButton->setFocus(Qt::TabFocusReason);
+        QApplication::processEvents();
+        success &= require(
+            firstButton->property("keyboardFocusVisible").toBool(),
+            "Keyboard navigation should retain an accessible focus outline");
+    }
     int stageChanges = 0;
     QObject::connect(&rail, &WorkflowRail::stageChanged,
                      [&](WorkflowStage) { ++stageChanges; });

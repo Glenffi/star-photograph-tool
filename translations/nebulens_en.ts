@@ -24,6 +24,11 @@
             <translation>, </translation>
         </message>
         <message>
+            <location filename='../src/core/DeepSkyCalibrationPreflight.cpp' line='96'/>
+            <source>校准素材预检%1。 Light %2 张 · Dark %3 张 · Flat %4 张 · Bias %5 张</source>
+            <translation>Calibration preflight %1. Light %2 · Dark %3 · Flat %4 · Bias %5</translation>
+        </message>
+        <message>
             <location filename='../src/core/DeepSkyCalibrationPreflight.cpp' line='99'/>
             <source>未通过</source>
             <translation>Failed</translation>
@@ -32,6 +37,48 @@
             <location filename='../src/core/DeepSkyCalibrationPreflight.cpp' line='100'/>
             <source>通过</source>
             <translation>Passed</translation>
+        </message>
+        <message>
+            <location filename='../src/core/DeepSkyCalibrationPreflight.cpp' line='106'/>
+            <source> 基准 Light：%1 · ISO %2 · %3 秒 · %4×%5</source>
+            <translation> Reference Light: %1 · ISO %2 · %3 s · %4×%5</translation>
+        </message>
+        <message>
+            <location filename='../src/core/DeepSkyCalibrationPreflight.cpp' line='116'/>
+            <source> Dark Flat %1 张 · Master Dark/Flat/Bias/Dark Flat %2/%3/%4/%5</source>
+            <translation> Dark Flat %1 · Master Dark/Flat/Bias/Dark Flat %2/%3/%4/%5</translation>
+        </message>
+        <message>
+            <location filename='../src/core/DeepSkyCalibrationPreflight.cpp' line='128'/>
+            <source> 元数据规则均符合，可以继续解包 Bayer 并检查 Flat 亮度。</source>
+            <translation>
+                 Metadata checks passed. Bayer unpacking and Flat brightness
+                checks can continue.
+            </translation>
+        </message>
+        <message>
+            <location filename='../src/core/DeepSkyCalibrationPreflight.cpp' line='131'/>
+            <source> 检查结果：</source>
+            <translation> Findings:</translation>
+        </message>
+        <message>
+            <location filename='../src/core/DeepSkyCalibrationPreflight.cpp' line='134'/>
+            <location filename='../src/main.cpp' line='2009'/>
+            <source> • </source>
+            <translation> • </translation>
+        </message>
+        <message>
+            <location filename='../src/core/DeepSkyCalibrationPreflight.cpp' line='138'/>
+            <source> • 另有 %1 类问题未展开</source>
+            <translation> • %1 more issue categories not shown</translation>
+        </message>
+        <message>
+            <location filename='../src/core/DeepSkyCalibrationPreflight.cpp' line='141'/>
+            <source> 预检只读取 RAW 头信息；CFA 布局和 Flat 实际亮度会在正式校准时继续检查。</source>
+            <translation>
+                 Preflight reads RAW headers only. CFA layout and actual Flat
+                brightness are checked during calibration.
+            </translation>
         </message>
         <message>
             <location filename='../src/core/DeepSkyCalibrationPreflight.cpp' line='157'/>
@@ -63,7 +110,7 @@
             <source>%1 当前为 %2 张；可以处理，但建议 10–20 张以降低 Master 自身噪声。</source>
             <translation>
                  %1 currently has %2 frames. Processing is possible, but 10–20
-                frames are recommended to reduce Master noise. 
+                frames are recommended to reduce Master noise.
             </translation>
         </message>
         <message>
@@ -87,53 +134,6 @@
             <translation>Creating a Master Flat requires either Bias or exposure-matched Dark Flats.</translation>
         </message>
         <message>
-            <location filename='../src/core/DeepSkyCalibrationPreflight.cpp' line='96'/>
-            <source>校准素材预检%1。 Light %2 张 · Dark %3 张 · Flat %4 张 · Bias %5 张</source>
-            <translation>Calibration preflight %1. Light %2 · Dark %3 · Flat %4 · Bias %5</translation>
-        </message>
-        <message>
-            <location filename='../src/core/DeepSkyCalibrationPreflight.cpp' line='106'/>
-            <source> 基准 Light：%1 · ISO %2 · %3 秒 · %4×%5</source>
-            <translation> Reference Light: %1 · ISO %2 · %3 s · %4×%5</translation>
-        </message>
-        <message>
-            <location filename='../src/core/DeepSkyCalibrationPreflight.cpp' line='116'/>
-            <source> Dark Flat %1 张 · Master Dark/Flat/Bias/Dark Flat %2/%3/%4/%5</source>
-            <translation> Dark Flat %1 · Master Dark/Flat/Bias/Dark Flat %2/%3/%4/%5</translation>
-        </message>
-        <message>
-            <location filename='../src/core/DeepSkyCalibrationPreflight.cpp' line='128'/>
-            <source> 元数据规则均符合，可以继续解包 Bayer 并检查 Flat 亮度。</source>
-            <translation>
-                 Metadata checks passed. Bayer unpacking and Flat brightness
-                checks can continue.
-            </translation>
-        </message>
-        <message>
-            <location filename='../src/core/DeepSkyCalibrationPreflight.cpp' line='131'/>
-            <source> 检查结果：</source>
-            <translation> Findings:</translation>
-        </message>
-        <message>
-            <location filename='../src/core/DeepSkyCalibrationPreflight.cpp' line='134'/>
-            <location filename='../src/main.cpp' line='1999'/>
-            <source> • </source>
-            <translation> • </translation>
-        </message>
-        <message>
-            <location filename='../src/core/DeepSkyCalibrationPreflight.cpp' line='138'/>
-            <source> • 另有 %1 类问题未展开</source>
-            <translation> • %1 more issue categories not shown</translation>
-        </message>
-        <message>
-            <location filename='../src/core/DeepSkyCalibrationPreflight.cpp' line='141'/>
-            <source> 预检只读取 RAW 头信息；CFA 布局和 Flat 实际亮度会在正式校准时继续检查。</source>
-            <translation>
-                 Preflight reads RAW headers only. CFA layout and actual Flat
-                brightness are checked during calibration.
-            </translation>
-        </message>
-        <message>
             <location filename='../src/core/DeepSkyCalibrationPreflight.cpp' line='384'/>
             <source>
                 Flat 校准同时提供了 Bias 与 Dark Flat；请选择其中一种偏移校准方式。只有已减 Bias 的 Master
@@ -150,7 +150,7 @@
             <source>Master Flat 已完成偏移校准和归一化，不应再导入 Bias 或 Dark Flat。</source>
             <translation>
                  The Master Flat is already offset-calibrated and normalized; do
-                not add Bias or Dark Flat. 
+                not add Bias or Dark Flat.
             </translation>
         </message>
         <message>
@@ -158,7 +158,7 @@
             <source>已减 Bias 的 Master Dark 必须同时提供 Bias 或 Master Bias，才能完整校准 Light。</source>
             <translation>
                  A bias-subtracted Master Dark also requires Bias or Master Bias
-                to calibrate the Lights completely. 
+                to calibrate the Lights completely.
             </translation>
         </message>
         <message>
@@ -171,7 +171,7 @@
             <source>基准 Light 缺少相机、ISO、尺寸或曝光信息，无法可靠匹配校准帧。</source>
             <translation>
                  The reference Light lacks camera, ISO, dimensions, or exposure
-                metadata, so calibration frames cannot be matched reliably. 
+                metadata, so calibration frames cannot be matched reliably.
             </translation>
         </message>
         <message>
@@ -214,7 +214,7 @@
             <source>%1 曝光过长：当前 %2 秒，本组必须不超过 %3 秒并使用相机最短曝光。</source>
             <translation>
                  %1 exposure is too long: current %2 s; this group must be no
-                longer than %3 s and use the camera&apos;s shortest exposure. 
+                longer than %3 s and use the camera&apos;s shortest exposure.
             </translation>
         </message>
         <message>
@@ -227,7 +227,7 @@
             <source>Dark Flat 模式要求所有 Flat 曝光一致：当前 %1 秒，基准为 %2 秒。</source>
             <translation>
                  Dark Flat mode requires consistent Flat exposures: current %1
-                s; reference %2 s. 
+                s; reference %2 s.
             </translation>
         </message>
         <message>
@@ -235,7 +235,7 @@
             <source>Flat 曝光为 %1 秒；当前选择 Bias 校准，长曝光平场建议改用匹配曝光的 Dark Flat。</source>
             <translation>
                  Flat exposure is %1 s. Bias calibration is selected; for
-                long-exposure Flats, use matching Dark Flats instead. 
+                long-exposure Flats, use matching Dark Flats instead.
             </translation>
         </message>
         <message>
@@ -289,7 +289,7 @@
             <source>Master Flat 尚未完成偏移校准和 CFA 分相归一化</source>
             <translation>
                  Master Flat has not completed offset calibration and
-                per-CFA-phase normalization 
+                per-CFA-phase normalization
             </translation>
         </message>
         <message>
@@ -457,7 +457,7 @@
         </message>
         <message>
             <location filename='../src/main.cpp' line='192'/>
-            <location filename='../src/main.cpp' line='835'/>
+            <location filename='../src/main.cpp' line='845'/>
             <source>拖放导入 %1 个文件</source>
             <translation>Imported %1 files by drag and drop</translation>
         </message>
@@ -564,7 +564,7 @@
             <source>请补齐 Dark、Flat，以及 Bias 或同曝光 Dark Flat；也可导入 Master</source>
             <translation>
                  Add Dark, Flat, and either Bias or exposure-matched Dark Flats;
-                Masters are also supported 
+                Masters are also supported
             </translation>
         </message>
         <message>
@@ -589,7 +589,7 @@
         </message>
         <message>
             <location filename='../src/main.cpp' line='500'/>
-            <location filename='../src/main.cpp' line='698'/>
+            <location filename='../src/main.cpp' line='708'/>
             <source>项目已清空</source>
             <translation>Project cleared</translation>
         </message>
@@ -614,413 +614,309 @@
             <translation>View</translation>
         </message>
         <message>
-            <location filename='../src/main.cpp' line='565'/>
+            <location filename='../src/main.cpp' line='530'/>
+            <source>循环对比</source>
+            <translation>Cycle Comparison</translation>
+        </message>
+        <message>
+            <location filename='../src/main.cpp' line='537'/>
+            <source>处理前后分屏</source>
+            <translation>Before/After Split</translation>
+        </message>
+        <message>
+            <location filename='../src/main.cpp' line='549'/>
+            <source>适应视图</source>
+            <translation>Fit to View</translation>
+        </message>
+        <message>
+            <location filename='../src/main.cpp' line='555'/>
+            <source>实际像素 (1:1)</source>
+            <translation>Actual Pixels (1:1)</translation>
+        </message>
+        <message>
+            <location filename='../src/main.cpp' line='561'/>
+            <source>蒙版叠加</source>
+            <translation>Mask Overlay</translation>
+        </message>
+        <message>
+            <location filename='../src/main.cpp' line='567'/>
+            <source>返回当前结果</source>
+            <translation>Return to Current Result</translation>
+        </message>
+        <message>
+            <location filename='../src/main.cpp' line='575'/>
             <source>处理</source>
             <translation>Process</translation>
         </message>
         <message>
-            <location filename='../src/main.cpp' line='568'/>
+            <location filename='../src/main.cpp' line='578'/>
             <source>开始处理</source>
             <translation>Start Processing</translation>
         </message>
         <message>
-            <location filename='../src/main.cpp' line='574'/>
+            <location filename='../src/main.cpp' line='584'/>
             <source>导出结果</source>
             <translation>Export Result</translation>
         </message>
         <message>
-            <location filename='../src/main.cpp' line='581'/>
+            <location filename='../src/main.cpp' line='591'/>
             <source>帮助</source>
             <translation>Help</translation>
         </message>
         <message>
-            <location filename='../src/main.cpp' line='584'/>
+            <location filename='../src/main.cpp' line='594'/>
             <source>检查更新...</source>
             <translation>Check for Updates...</translation>
         </message>
         <message>
-            <location filename='../src/main.cpp' line='589'/>
+            <location filename='../src/main.cpp' line='599'/>
             <source>快捷键...</source>
             <translation>Keyboard Shortcuts...</translation>
         </message>
         <message>
-            <location filename='../src/main.cpp' line='596'/>
+            <location filename='../src/main.cpp' line='606'/>
             <source>关于</source>
             <translation>About</translation>
         </message>
         <message>
-            <location filename='../src/main.cpp' line='608'/>
+            <location filename='../src/main.cpp' line='618'/>
             <source>撤销移除素材</source>
             <translation>Undo Asset Removal</translation>
         </message>
         <message>
-            <location filename='../src/main.cpp' line='614'/>
+            <location filename='../src/main.cpp' line='624'/>
             <source>RGB —</source>
             <translation>RGB —</translation>
         </message>
         <message>
-            <location filename='../src/main.cpp' line='725'/>
+            <location filename='../src/main.cpp' line='735'/>
             <source>撤销移除 · %1</source>
             <translation>Undo Removal · %1</translation>
         </message>
         <message>
-            <location filename='../src/main.cpp' line='748'/>
+            <location filename='../src/main.cpp' line='758'/>
             <source>正在加载：%1</source>
             <translation>Loading: %1</translation>
         </message>
         <message>
-            <location filename='../src/main.cpp' line='769'/>
+            <location filename='../src/main.cpp' line='779'/>
             <source>%1×%2 · RGB —</source>
             <translation>%1×%2 · RGB —</translation>
         </message>
         <message>
-            <location filename='../src/main.cpp' line='772'/>
+            <location filename='../src/main.cpp' line='782'/>
             <source>已加载：%1</source>
             <translation>Loaded: %1</translation>
         </message>
         <message>
-            <location filename='../src/main.cpp' line='780'/>
+            <location filename='../src/main.cpp' line='790'/>
             <source>%1,%2 · RGB %3,%4,%5</source>
             <translation>%1,%2 · RGB %3,%4,%5</translation>
         </message>
         <message>
-            <location filename='../src/main.cpp' line='788'/>
+            <location filename='../src/main.cpp' line='798'/>
             <source>预览加载失败：%1</source>
             <translation>Preview failed: %1</translation>
         </message>
         <message>
-            <location filename='../src/main.cpp' line='809'/>
+            <location filename='../src/main.cpp' line='819'/>
             <location filename='../src/ui/ParamsPanel.cpp' line='965'/>
             <location filename='../src/workers/ProcessingWorker.cpp' line='2755'/>
             <source>手动灰点</source>
             <translation>Manual Gray Point</translation>
         </message>
         <message>
-            <location filename='../src/main.cpp' line='810'/>
+            <location filename='../src/main.cpp' line='820'/>
             <source>请先完成一次正式处理。之后可在结果预览中采样，并立即通过快速预览检查色彩。</source>
             <translation>
                  Complete a full processing run first. You can then sample the
-                result and check the color immediately in Quick Preview. 
+                result and check the color immediately in Quick Preview.
             </translation>
         </message>
         <message>
-            <location filename='../src/main.cpp' line='819'/>
+            <location filename='../src/main.cpp' line='829'/>
             <source>请在结果中点击应为灰色的天空区域</source>
             <translation>Click a sky area that should be neutral gray</translation>
         </message>
         <message>
-            <location filename='../src/main.cpp' line='828'/>
+            <location filename='../src/main.cpp' line='838'/>
             <source>灰点已采样，正在更新快速预览</source>
             <translation>Gray point sampled; updating Quick Preview</translation>
         </message>
         <message>
-            <location filename='../src/main.cpp' line='857'/>
+            <location filename='../src/main.cpp' line='867'/>
             <source>素材已修改 · 这是上次处理的成片</source>
             <translation>Assets changed · showing the previous result</translation>
         </message>
         <message>
-            <location filename='../src/main.cpp' line='881'/>
+            <location filename='../src/main.cpp' line='891'/>
             <source>参考帧已更新，请为新参考帧重新检测和修补地景</source>
             <translation>
                  Reference frame changed. Detect and repair the ground mask
-                again for the new reference. 
+                again for the new reference.
             </translation>
         </message>
         <message>
-            <location filename='../src/main.cpp' line='883'/>
+            <location filename='../src/main.cpp' line='893'/>
             <source>参考帧已更新</source>
             <translation>Reference frame updated</translation>
         </message>
         <message>
-            <location filename='../src/main.cpp' line='920'/>
+            <location filename='../src/main.cpp' line='930'/>
             <source>地景蒙版已绑定参考帧：%1</source>
             <translation>Ground mask bound to reference frame: %1</translation>
         </message>
         <message>
-            <location filename='../src/main.cpp' line='939'/>
+            <location filename='../src/main.cpp' line='949'/>
             <location filename='../src/ui/PreviewPanel.cpp' line='1855'/>
             <source>正在根据笔迹贴合地景边缘...</source>
             <translation>Fitting the ground boundary to your strokes...</translation>
         </message>
         <message>
-            <location filename='../src/main.cpp' line='945'/>
+            <location filename='../src/main.cpp' line='955'/>
             <source>蒙版已贴合边缘，可继续修补或开始处理</source>
             <translation>Mask fitted to the boundary; continue repairing or start processing</translation>
         </message>
         <message>
-            <location filename='../src/main.cpp' line='946'/>
+            <location filename='../src/main.cpp' line='956'/>
             <source>蒙版精修失败，已保留上一次结果</source>
             <translation>Mask refinement failed; the previous result was kept</translation>
         </message>
         <message>
-            <location filename='../src/main.cpp' line='961'/>
+            <location filename='../src/main.cpp' line='971'/>
             <source>提示</source>
             <translation>Notice</translation>
         </message>
         <message>
-            <location filename='../src/main.cpp' line='962'/>
+            <location filename='../src/main.cpp' line='972'/>
             <source>请先选择一张图像用于检测</source>
             <translation>Select an image before running detection</translation>
         </message>
         <message>
-            <location filename='../src/main.cpp' line='972'/>
+            <location filename='../src/main.cpp' line='982'/>
             <source>上一个检测任务仍在运行，请稍后再试</source>
             <translation>The previous detection task is still running. Try again shortly.</translation>
         </message>
         <message>
-            <location filename='../src/main.cpp' line='995'/>
+            <location filename='../src/main.cpp' line='1005'/>
             <source>地景检测完成，蓝色=天空，绿色=地景</source>
             <translation>Ground detection complete: blue = sky, green = ground</translation>
         </message>
         <message>
-            <location filename='../src/main.cpp' line='1001'/>
+            <location filename='../src/main.cpp' line='1011'/>
             <source>错误</source>
             <translation>Error</translation>
         </message>
         <message>
-            <location filename='../src/main.cpp' line='1020'/>
+            <location filename='../src/main.cpp' line='1030'/>
             <source>—</source>
             <translation>—</translation>
         </message>
         <message>
-            <location filename='../src/main.cpp' line='1115'/>
+            <location filename='../src/main.cpp' line='1125'/>
             <source>当前结果 · %1 帧 · %2×%3</source>
             <translation>Current result · %1 frames · %2×%3</translation>
         </message>
         <message>
-            <location filename='../src/main.cpp' line='1124'/>
-            <location filename='../src/main.cpp' line='1136'/>
-            <location filename='../src/main.cpp' line='1257'/>
+            <location filename='../src/main.cpp' line='1134'/>
+            <location filename='../src/main.cpp' line='1146'/>
+            <location filename='../src/main.cpp' line='1267'/>
             <source>参数已修改 · 这是上次处理的成片</source>
             <translation>Parameters changed · showing the previous result</translation>
         </message>
         <message>
-            <location filename='../src/main.cpp' line='1127'/>
-            <location filename='../src/main.cpp' line='1333'/>
+            <location filename='../src/main.cpp' line='1137'/>
+            <location filename='../src/main.cpp' line='1343'/>
             <source>快速预览已更新 · 完整导出需重新处理</source>
             <translation>Quick Preview updated · full export requires reprocessing</translation>
         </message>
         <message>
-            <location filename='../src/main.cpp' line='1139'/>
+            <location filename='../src/main.cpp' line='1149'/>
             <source>参数已修改，重新处理后生效</source>
             <translation>Parameters changed; reprocess to apply them</translation>
         </message>
         <message>
-            <location filename='../src/main.cpp' line='1213'/>
+            <location filename='../src/main.cpp' line='1223'/>
             <source>快速预览 %1×%2 · 完整导出需重新处理</source>
             <translation>Quick Preview %1×%2 · full export requires reprocessing</translation>
         </message>
         <message>
-            <location filename='../src/main.cpp' line='1234'/>
+            <location filename='../src/main.cpp' line='1244'/>
             <source>上次有效结果 · 只读</source>
             <translation>Last valid result · read only</translation>
         </message>
         <message>
-            <location filename='../src/main.cpp' line='1292'/>
+            <location filename='../src/main.cpp' line='1302'/>
             <source>参数已修改 · 准备快速预览</source>
             <translation>Parameters changed · preparing Quick Preview</translation>
         </message>
         <message>
-            <location filename='../src/main.cpp' line='1339'/>
+            <location filename='../src/main.cpp' line='1349'/>
             <source>快速预览已更新 · 缩星处理 %1 颗，请在 100% 下检查</source>
             <translation>Quick Preview updated · reduced %1 stars; inspect at 100%</translation>
         </message>
         <message>
-            <location filename='../src/main.cpp' line='1346'/>
+            <location filename='../src/main.cpp' line='1356'/>
             <source>快速预览已更新 · 去紫边修正 %1 个星缘像素</source>
             <translation>Quick Preview updated · corrected %1 star-fringe pixels</translation>
         </message>
         <message>
-            <location filename='../src/main.cpp' line='1353'/>
+            <location filename='../src/main.cpp' line='1363'/>
             <source>快速预览已更新</source>
             <translation>Quick Preview updated</translation>
         </message>
         <message>
-            <location filename='../src/main.cpp' line='1358'/>
+            <location filename='../src/main.cpp' line='1368'/>
             <source>快速预览失败：%1</source>
             <translation>Quick Preview failed: %1</translation>
         </message>
         <message>
-            <location filename='../src/main.cpp' line='1424'/>
+            <location filename='../src/main.cpp' line='1434'/>
             <source>上次有效结果 · 本次处理未完成</source>
             <translation>Last valid result · current processing did not finish</translation>
         </message>
         <message>
-            <location filename='../src/main.cpp' line='1435'/>
+            <location filename='../src/main.cpp' line='1445'/>
             <source>处理完成后再添加照片</source>
             <translation>Finish processing before adding photos</translation>
         </message>
         <message>
-            <location filename='../src/main.cpp' line='1440'/>
+            <location filename='../src/main.cpp' line='1450'/>
             <source>选择 RAW 文件</source>
             <translation>Select RAW Files</translation>
         </message>
         <message>
-            <location filename='../src/main.cpp' line='1452'/>
+            <location filename='../src/main.cpp' line='1462'/>
             <source>已导入 %1 个文件</source>
             <translation>Imported %1 files</translation>
         </message>
         <message>
-            <location filename='../src/main.cpp' line='1460'/>
+            <location filename='../src/main.cpp' line='1470'/>
             <source>处理完成后再添加文件夹</source>
             <translation>Finish processing before adding a folder</translation>
         </message>
         <message>
-            <location filename='../src/main.cpp' line='1465'/>
+            <location filename='../src/main.cpp' line='1475'/>
             <source>选择包含 RAW 文件的文件夹</source>
             <translation>Select a Folder Containing RAW Files</translation>
         </message>
         <message>
-            <location filename='../src/main.cpp' line='1484'/>
+            <location filename='../src/main.cpp' line='1494'/>
             <source>从文件夹导入 %1 个文件</source>
             <translation>Imported %1 files from the folder</translation>
         </message>
         <message>
-            <location filename='../src/main.cpp' line='1496'/>
+            <location filename='../src/main.cpp' line='1506'/>
             <source>元数据</source>
             <translation>Metadata</translation>
         </message>
         <message>
-            <location filename='../src/main.cpp' line='1497'/>
+            <location filename='../src/main.cpp' line='1507'/>
             <source>无法加载文件元数据</source>
             <translation>Unable to load file metadata</translation>
         </message>
         <message>
-            <location filename='../src/main.cpp' line='1518'/>
-            <source>图像元数据</source>
-            <translation>Image Metadata</translation>
-        </message>
-        <message>
-            <location filename='../src/main.cpp' line='1524'/>
-            <source>关于 Nebulens</source>
-            <translation>About Nebulens</translation>
-        </message>
-        <message>
-            <location filename='../src/main.cpp' line='1535'/>
-            <source>正在安全停止...</source>
-            <translation>Stopping safely...</translation>
-        </message>
-        <message>
-            <location filename='../src/main.cpp' line='1540'/>
-            <source>正在取消导出...</source>
-            <translation>Canceling export...</translation>
-        </message>
-        <message>
-            <location filename='../src/main.cpp' line='1545'/>
-            <source>请等待地景蒙版精修完成</source>
-            <translation>Wait for ground-mask refinement to finish</translation>
-        </message>
-        <message>
-            <location filename='../src/main.cpp' line='1555'/>
-            <source>请先导入 1 张 RAW 图像</source>
-            <translation>Import one RAW image first</translation>
-        </message>
-        <message>
-            <location filename='../src/main.cpp' line='1558'/>
-            <source>星轨合成需要至少 3 张未排除的固定机位 RAW 图像</source>
-            <translation>Star Trails requires at least 3 included fixed-camera RAW images</translation>
-        </message>
-        <message>
-            <location filename='../src/main.cpp' line='1559'/>
-            <source>延时降噪需要至少 3 张未排除的 RAW 图像</source>
-            <translation>Timelapse denoising requires at least 3 included RAW images</translation>
-        </message>
-        <message>
-            <location filename='../src/main.cpp' line='1560'/>
-            <source>需要至少 2 张未排除的图像才能开始处理</source>
-            <translation>At least 2 included images are required to start processing</translation>
-        </message>
-        <message>
-            <location filename='../src/main.cpp' line='1570'/>
-            <source>深空校准来源不完整</source>
-            <translation>Deep-sky calibration sources are incomplete</translation>
-        </message>
-        <message>
-            <location filename='../src/main.cpp' line='1604'/>
-            <source>校准素材重复</source>
-            <translation>Duplicate calibration assets</translation>
-        </message>
-        <message>
-            <location filename='../src/main.cpp' line='1632'/>
-            <source>地景蒙版参考帧已变化</source>
-            <translation>Ground-mask reference frame changed</translation>
-        </message>
-        <message>
-            <location filename='../src/main.cpp' line='1633'/>
-            <source>当前修补蒙版来自 %1，但处理参考帧为 %2。请重新检测并修补地景。</source>
-            <translation>
-                 The repaired mask belongs to %1, but the processing reference
-                is %2. Detect and repair the ground mask again. 
-            </translation>
-        </message>
-        <message>
-            <location filename='../src/main.cpp' line='1739'/>
-            <source>正在准备 Bayer 校准</source>
-            <translation>Preparing Bayer calibration</translation>
-        </message>
-        <message>
-            <location filename='../src/main.cpp' line='1740'/>
-            <source>正在准备处理</source>
-            <translation>Preparing processing</translation>
-        </message>
-        <message>
-            <location filename='../src/ui/PreviewPanel.cpp' line='303'/>
-            <source>蒙版</source>
-            <translation>Mask</translation>
-        </message>
-        <message>
-            <location filename='../src/main.cpp' line='2039'/>
-            <source>导出</source>
-            <translation>Export</translation>
-        </message>
-        <message>
-            <location filename='../src/ui/ParamsPanel.cpp' line='212'/>
-            <location filename='../src/ui/WorkflowRail.cpp' line='30'/>
-            <source>输出</source>
-            <translation>Output</translation>
-        </message>
-        <message>
-            <location filename='../src/ui/WorkflowRail.cpp' line='26'/>
-            <source>校准</source>
-            <translation>Calibration</translation>
-        </message>
-        <message>
-            <location filename='../src/ui/ParamsPanel.cpp' line='210'/>
-            <source>堆栈</source>
-            <translation>Stacking</translation>
-        </message>
-        <message>
-            <location filename='../src/main.cpp' line='530'/>
-            <source>循环对比 B</source>
-            <translation>Cycle Comparison B</translation>
-        </message>
-        <message>
-            <location filename='../src/main.cpp' line='536'/>
-            <source>处理前后分屏 Shift+B</source>
-            <translation>Before/After Split Shift+B</translation>
-        </message>
-        <message>
-            <location filename='../src/main.cpp' line='545'/>
-            <source>适应视图 F</source>
-            <translation>Fit to View F</translation>
-        </message>
-        <message>
-            <location filename='../src/main.cpp' line='550'/>
-            <source>实际像素 (1:1) 1</source>
-            <translation>Actual Pixels (1:1) 1</translation>
-        </message>
-        <message>
-            <location filename='../src/main.cpp' line='554'/>
-            <source>蒙版叠加 M</source>
-            <translation>Mask Overlay M</translation>
-        </message>
-        <message>
-            <location filename='../src/main.cpp' line='558'/>
-            <source>返回当前结果 R</source>
-            <translation>Return to Current Result R</translation>
-        </message>
-        <message>
-            <location filename='../src/main.cpp' line='1500'/>
+            <location filename='../src/main.cpp' line='1510'/>
             <source>
                 &lt;b&gt;文件路径：&lt;/b&gt;%1&lt;br&gt;&lt;b&gt;相机型号：&lt;/b&gt;%2&lt;br&gt;&lt;b&gt;ISO：&lt;/b&gt;%3&lt;br&gt;&lt;b&gt;曝光时间：&lt;/b&gt;%4&lt;br&gt;&lt;b&gt;光圈：&lt;/b&gt;%5&lt;br&gt;&lt;b&gt;焦距：&lt;/b&gt;%6 mm&lt;br&gt;&lt;b&gt;尺寸：&lt;/b&gt;%7×%8&lt;br&gt;&lt;b&gt;时间戳：&lt;/b&gt;%9
             </source>
@@ -1036,7 +932,57 @@
             </translation>
         </message>
         <message>
-            <location filename='../src/main.cpp' line='1571'/>
+            <location filename='../src/main.cpp' line='1528'/>
+            <source>图像元数据</source>
+            <translation>Image Metadata</translation>
+        </message>
+        <message>
+            <location filename='../src/main.cpp' line='1534'/>
+            <source>关于 Nebulens</source>
+            <translation>About Nebulens</translation>
+        </message>
+        <message>
+            <location filename='../src/main.cpp' line='1545'/>
+            <source>正在安全停止...</source>
+            <translation>Stopping safely...</translation>
+        </message>
+        <message>
+            <location filename='../src/main.cpp' line='1550'/>
+            <source>正在取消导出...</source>
+            <translation>Canceling export...</translation>
+        </message>
+        <message>
+            <location filename='../src/main.cpp' line='1555'/>
+            <source>请等待地景蒙版精修完成</source>
+            <translation>Wait for ground-mask refinement to finish</translation>
+        </message>
+        <message>
+            <location filename='../src/main.cpp' line='1565'/>
+            <source>请先导入 1 张 RAW 图像</source>
+            <translation>Import one RAW image first</translation>
+        </message>
+        <message>
+            <location filename='../src/main.cpp' line='1568'/>
+            <source>星轨合成需要至少 3 张未排除的固定机位 RAW 图像</source>
+            <translation>Star Trails requires at least 3 included fixed-camera RAW images</translation>
+        </message>
+        <message>
+            <location filename='../src/main.cpp' line='1569'/>
+            <source>延时降噪需要至少 3 张未排除的 RAW 图像</source>
+            <translation>Timelapse denoising requires at least 3 included RAW images</translation>
+        </message>
+        <message>
+            <location filename='../src/main.cpp' line='1570'/>
+            <source>需要至少 2 张未排除的图像才能开始处理</source>
+            <translation>At least 2 included images are required to start processing</translation>
+        </message>
+        <message>
+            <location filename='../src/main.cpp' line='1580'/>
+            <source>深空校准来源不完整</source>
+            <translation>Deep-sky calibration sources are incomplete</translation>
+        </message>
+        <message>
+            <location filename='../src/main.cpp' line='1581'/>
             <source>
                 Dark 与 Flat 各需要至少 3 张 RAW 或一个 Master；生成 Master Flat 时还需 Bias
                 或同曝光 Dark Flat 二选一。
@@ -1048,298 +994,40 @@
             </translation>
         </message>
         <message>
-            <location filename='../src/main.cpp' line='1605'/>
+            <location filename='../src/main.cpp' line='1614'/>
+            <source>校准素材重复</source>
+            <translation>Duplicate calibration assets</translation>
+        </message>
+        <message>
+            <location filename='../src/main.cpp' line='1615'/>
             <source>同一个文件不能同时作为 Light 或多个校准角色： %1</source>
             <translation>The same file cannot be assigned to Light and another calibration role: %1</translation>
         </message>
         <message>
-            <location filename='../src/main.cpp' line='1820'/>
-            <source>处理已取消，可调整参数后重试</source>
-            <translation>Processing canceled; adjust the parameters and try again</translation>
+            <location filename='../src/main.cpp' line='1642'/>
+            <source>地景蒙版参考帧已变化</source>
+            <translation>Ground-mask reference frame changed</translation>
         </message>
         <message>
-            <location filename='../src/main.cpp' line='1821'/>
-            <source>处理已取消</source>
-            <translation>Processing canceled</translation>
-        </message>
-        <message>
-            <location filename='../src/main.cpp' line='1874'/>
-            <source>输出：%1×%2，%3 帧</source>
-            <translation>Output: %1×%2, %3 frames</translation>
-        </message>
-        <message>
-            <location filename='../src/main.cpp' line='1880'/>
-            <source>对齐：RMS %1 px，P95 %2 px，最低网格覆盖 %3%</source>
-            <translation>Alignment: RMS %1 px, P95 %2 px, minimum grid coverage %3%</translation>
-        </message>
-        <message>
-            <location filename='../src/main.cpp' line='1886'/>
-            <source>模型：Affine %1 帧，Homography %2 帧</source>
-            <translation>Models: Affine %1 frames, Homography %2 frames</translation>
-        </message>
-        <message>
-            <location filename='../src/main.cpp' line='1891'/>
-            <source>帧筛选：质量排除 %1，处理跳过 %2</source>
-            <translation>Frame filtering: quality rejected %1, processing skipped %2</translation>
-        </message>
-        <message>
-            <location filename='../src/main.cpp' line='1895'/>
-            <source>光度归一化：%1 帧，平均增益 %2，范围 %3–%4</source>
-            <translation>Photometric normalization: %1 frames, mean gain %2, range %3–%4</translation>
-        </message>
-        <message>
-            <location filename='../src/main.cpp' line='1903'/>
-            <source>天地蒙版：天空占比 %1%，来源 %2</source>
-            <translation>Sky/ground mask: sky coverage %1%, source %2</translation>
-        </message>
-        <message>
-            <location filename='../src/main.cpp' line='1908'/>
-            <source>堆栈耗时：%1 s</source>
-            <translation>Stacking time: %1 s</translation>
-        </message>
-        <message>
-            <location filename='../src/main.cpp' line='1912'/>
-            <source>文件：%1</source>
-            <translation>File: %1</translation>
-        </message>
-        <message>
-            <location filename='../src/main.cpp' line='1926'/>
-            <source>处理完成 · %1 帧 · %2×%3</source>
-            <translation>Processing complete · %1 frames · %2×%3</translation>
-        </message>
-        <message>
-            <location filename='../src/main.cpp' line='1929'/>
-            <source> · 星点偏长，请检查曝光拖线/像差</source>
-            <translation> · elongated stars detected; check tracking or lens aberrations</translation>
-        </message>
-        <message>
-            <location filename='../src/main.cpp' line='1943'/>
-            <source>%1×%2 · %3 帧 · %4</source>
-            <translation>%1×%2 · %3 frames · %4</translation>
-        </message>
-        <message>
-            <location filename='../src/main.cpp' line='1949'/>
-            <source>处理完成，但参数已变化，请重新处理</source>
-            <translation>Processing finished, but parameters changed; process again</translation>
-        </message>
-        <message>
-            <location filename='../src/main.cpp' line='1953'/>
-            <source>单张精修完成 — %1×%2 | %3</source>
-            <translation>Single Frame complete — %1×%2 | %3</translation>
-        </message>
-        <message>
-            <location filename='../src/main.cpp' line='1957'/>
-            <source>延时降噪完成 — 已输出 %1 张 · %2×%3 | %4</source>
-            <translation>Timelapse denoising complete — exported %1 frames · %2×%3 | %4</translation>
-        </message>
-        <message>
-            <location filename='../src/main.cpp' line='1962'/>
-            <source>星轨合成完成 — %1×%2 · %3 帧 | %4</source>
-            <translation>Star Trails complete — %1×%2 · %3 frames | %4</translation>
-        </message>
-        <message>
-            <location filename='../src/main.cpp' line='1966'/>
-            <source>处理完成 — %1×%2 已堆栈 %3 帧 | 参考 %4 | 质量排除 %5 帧 | 跳过 %6 帧</source>
+            <location filename='../src/main.cpp' line='1643'/>
+            <source>当前修补蒙版来自 %1，但处理参考帧为 %2。请重新检测并修补地景。</source>
             <translation>
-                 Processing complete — %1×%2, stacked %3 frames | reference %4 |
-                quality rejected %5 | skipped %6 
+                 The repaired mask belongs to %1, but the processing reference
+                is %2. Detect and repair the ground mask again.
             </translation>
         </message>
         <message>
-            <location filename='../src/main.cpp' line='1972'/>
-            <source> | 星点偏长，检查曝光拖线/像差</source>
-            <translation> | elongated stars detected; check tracking or lens aberrations</translation>
+            <location filename='../src/main.cpp' line='1749'/>
+            <source>正在准备 Bayer 校准</source>
+            <translation>Preparing Bayer calibration</translation>
         </message>
         <message>
-            <location filename='../src/main.cpp' line='1982'/>
-            <source>处理完成，已保存 %1 个 Master 到 %2</source>
-            <translation>Processing complete; saved %1 Masters to %2</translation>
+            <location filename='../src/main.cpp' line='1750'/>
+            <source>正在准备处理</source>
+            <translation>Preparing processing</translation>
         </message>
         <message>
-            <location filename='../src/main.cpp' line='1993'/>
-            <source>校准素材建议</source>
-            <translation>Calibration Recommendations</translation>
-        </message>
-        <message>
-            <location filename='../src/main.cpp' line='1994'/>
-            <source>处理已经完成，但校准素材还有可改进之处。</source>
-            <translation>Processing is complete, but the calibration assets can still be improved.</translation>
-        </message>
-        <message>
-            <location filename='../src/main.cpp' line='1998'/>
-            <source>• </source>
-            <translation>• </translation>
-        </message>
-        <message>
-            <location filename='../src/main.cpp' line='2007'/>
-            <location filename='../src/main.cpp' line='2010'/>
-            <source>处理失败</source>
-            <translation>Processing Failed</translation>
-        </message>
-        <message>
-            <location filename='../src/main.cpp' line='2009'/>
-            <source>处理失败，请检查素材或参数</source>
-            <translation>Processing failed; check the assets or parameters</translation>
-        </message>
-        <message>
-            <location filename='../src/main.cpp' line='2021'/>
-            <source>处理完成后再导出</source>
-            <translation>Finish processing before exporting</translation>
-        </message>
-        <message>
-            <location filename='../src/main.cpp' line='2026'/>
-            <source>延时图片序列</source>
-            <translation>Timelapse Image Sequence</translation>
-        </message>
-        <message>
-            <location filename='../src/main.cpp' line='2027'/>
-            <source>处理完成时已经逐张输出整个序列，无需再次导出。</source>
-            <translation>
-                 The complete sequence was exported frame by frame during
-                processing; no additional export is needed. 
-            </translation>
-        </message>
-        <message>
-            <location filename='../src/main.cpp' line='2032'/>
-            <source>历史结果只读</source>
-            <translation>Historical Result Is Read Only</translation>
-        </message>
-        <message>
-            <location filename='../src/main.cpp' line='2033'/>
-            <source>历史结果仅用于查看。按 R 返回当前会话结果后再导出。</source>
-            <translation>
-                 Historical results are for viewing only. Press R to return to
-                the current session result before exporting. 
-            </translation>
-        </message>
-        <message>
-            <location filename='../src/main.cpp' line='2040'/>
-            <source>没有可用的堆栈结果，请先完成处理</source>
-            <translation>No stacked result is available. Complete processing first.</translation>
-        </message>
-        <message>
-            <location filename='../src/main.cpp' line='2046'/>
-            <source>结果需要更新</source>
-            <translation>Result Needs Updating</translation>
-        </message>
-        <message>
-            <location filename='../src/main.cpp' line='2047'/>
-            <source>处理参数已经改变。请重新处理后再导出，避免把旧结果误认为当前参数的结果。</source>
-            <translation>
-                 Processing parameters changed. Process again before exporting
-                so the old result is not mistaken for the current settings. 
-            </translation>
-        </message>
-        <message>
-            <location filename='../src/main.cpp' line='2079'/>
-            <source>正在导出 %1...</source>
-            <translation>Exporting %1...</translation>
-        </message>
-        <message>
-            <location filename='../src/main.cpp' line='2093'/>
-            <source>导出成功</source>
-            <translation>Export Complete</translation>
-        </message>
-        <message>
-            <location filename='../src/main.cpp' line='2094'/>
-            <source>已导出到：%1</source>
-            <translation>Exported to: %1</translation>
-        </message>
-        <message>
-            <location filename='../src/main.cpp' line='2097'/>
-            <source>已导出：%1</source>
-            <translation>Exported: %1</translation>
-        </message>
-        <message>
-            <location filename='../src/main.cpp' line='2099'/>
-            <source>导出已取消</source>
-            <translation>Export canceled</translation>
-        </message>
-        <message>
-            <location filename='../src/main.cpp' line='2102'/>
-            <location filename='../src/workers/ProcessingWorker.cpp' line='2800'/>
-            <source>导出失败</source>
-            <translation>Export Failed</translation>
-        </message>
-        <message>
-            <location filename='../src/main.cpp' line='2103'/>
-            <source>无法写入文件，请检查输出目录权限</source>
-            <translation>Unable to write the file. Check the output-folder permissions.</translation>
-        </message>
-        <message>
-            <location filename='../src/main.cpp' line='2121'/>
-            <source>应用设置</source>
-            <translation>Application Settings</translation>
-        </message>
-        <message>
-            <location filename='../src/main.cpp' line='2131'/>
-            <source>界面语言:</source>
-            <translation>Interface language:</translation>
-        </message>
-        <message>
-            <location filename='../src/main.cpp' line='2135'/>
-            <source>简体中文</source>
-            <translation>Simplified Chinese</translation>
-        </message>
-        <message>
-            <location filename='../src/main.cpp' line='2147'/>
-            <source>语言切换将在重启应用后完整生效。</source>
-            <translation>The language change will apply completely after restarting the application.</translation>
-        </message>
-        <message>
-            <location filename='../src/main.cpp' line='2157'/>
-            <source>输出目录:</source>
-            <translation>Output folder:</translation>
-        </message>
-        <message>
-            <location filename='../src/main.cpp' line='2169'/>
-            <location filename='../src/main.cpp' line='2177'/>
-            <location filename='../src/ui/ParamsPanel.cpp' line='1173'/>
-            <location filename='../src/ui/ParamsPanel.cpp' line='1178'/>
-            <source>选择输出目录</source>
-            <translation>Choose Output Folder</translation>
-        </message>
-        <message>
-            <location filename='../src/main.cpp' line='2198'/>
-            <source>确定</source>
-            <translation>OK</translation>
-        </message>
-        <message>
-            <location filename='../src/main.cpp' line='2221'/>
-            <source>切换界面语言</source>
-            <translation>Change Interface Language</translation>
-        </message>
-        <message>
-            <location filename='../src/main.cpp' line='2223'/>
-            <source>需要重启 Nebulens 才能统一更新全部界面和文件对话框。当前项目不会自动保存。</source>
-            <translation>
-                 Restart Nebulens to update the entire interface and file
-                dialogs consistently. The current project is not saved
-                automatically. 
-            </translation>
-        </message>
-        <message>
-            <location filename='../src/main.cpp' line='2228'/>
-            <source>立即重启</source>
-            <translation>Restart Now</translation>
-        </message>
-        <message>
-            <location filename='../src/main.cpp' line='2240'/>
-            <source>无法重启应用</source>
-            <translation>Unable to Restart</translation>
-        </message>
-        <message>
-            <location filename='../src/main.cpp' line='2242'/>
-            <source>请手动退出并重新打开 Nebulens。</source>
-            <translation>Quit and reopen Nebulens manually.</translation>
-        </message>
-        <message>
-            <location filename='../src/main.cpp' line='2256'/>
-            <source>快捷键</source>
-            <translation>Keyboard Shortcuts</translation>
-        </message>
-        <message>
-            <location filename='../src/main.cpp' line='2257'/>
+            <location filename='../src/main.cpp' line='2267'/>
             <source>
                 导入文件 Cmd/Ctrl+O 导入目录 Shift+Cmd/Ctrl+O 处理/取消 Cmd/Ctrl+Return 导出结果
                 Cmd/Ctrl+E 适应视图 F 实际像素 1 缩放 + / - 循环对比 B 直接分屏 Shift+B 蒙版叠加 M
@@ -1354,22 +1042,334 @@
             </translation>
         </message>
         <message>
-            <location filename='../src/main.cpp' line='2279'/>
+            <location filename='../src/ui/PreviewPanel.cpp' line='303'/>
+            <source>蒙版</source>
+            <translation>Mask</translation>
+        </message>
+        <message>
+            <location filename='../src/main.cpp' line='2049'/>
+            <source>导出</source>
+            <translation>Export</translation>
+        </message>
+        <message>
+            <location filename='../src/ui/ParamsPanel.cpp' line='212'/>
+            <location filename='../src/ui/WorkflowRail.cpp' line='31'/>
+            <source>输出</source>
+            <translation>Output</translation>
+        </message>
+        <message>
+            <location filename='../src/ui/WorkflowRail.cpp' line='27'/>
+            <source>校准</source>
+            <translation>Calibration</translation>
+        </message>
+        <message>
+            <location filename='../src/ui/ParamsPanel.cpp' line='210'/>
+            <source>堆栈</source>
+            <translation>Stacking</translation>
+        </message>
+        <message>
+            <location filename='../src/main.cpp' line='1830'/>
+            <source>处理已取消，可调整参数后重试</source>
+            <translation>Processing canceled; adjust the parameters and try again</translation>
+        </message>
+        <message>
+            <location filename='../src/main.cpp' line='1831'/>
+            <source>处理已取消</source>
+            <translation>Processing canceled</translation>
+        </message>
+        <message>
+            <location filename='../src/main.cpp' line='1884'/>
+            <source>输出：%1×%2，%3 帧</source>
+            <translation>Output: %1×%2, %3 frames</translation>
+        </message>
+        <message>
+            <location filename='../src/main.cpp' line='1890'/>
+            <source>对齐：RMS %1 px，P95 %2 px，最低网格覆盖 %3%</source>
+            <translation>Alignment: RMS %1 px, P95 %2 px, minimum grid coverage %3%</translation>
+        </message>
+        <message>
+            <location filename='../src/main.cpp' line='1896'/>
+            <source>模型：Affine %1 帧，Homography %2 帧</source>
+            <translation>Models: Affine %1 frames, Homography %2 frames</translation>
+        </message>
+        <message>
+            <location filename='../src/main.cpp' line='1901'/>
+            <source>帧筛选：质量排除 %1，处理跳过 %2</source>
+            <translation>Frame filtering: quality rejected %1, processing skipped %2</translation>
+        </message>
+        <message>
+            <location filename='../src/main.cpp' line='1905'/>
+            <source>光度归一化：%1 帧，平均增益 %2，范围 %3–%4</source>
+            <translation>Photometric normalization: %1 frames, mean gain %2, range %3–%4</translation>
+        </message>
+        <message>
+            <location filename='../src/main.cpp' line='1913'/>
+            <source>天地蒙版：天空占比 %1%，来源 %2</source>
+            <translation>Sky/ground mask: sky coverage %1%, source %2</translation>
+        </message>
+        <message>
+            <location filename='../src/main.cpp' line='1918'/>
+            <source>堆栈耗时：%1 s</source>
+            <translation>Stacking time: %1 s</translation>
+        </message>
+        <message>
+            <location filename='../src/main.cpp' line='1922'/>
+            <source>文件：%1</source>
+            <translation>File: %1</translation>
+        </message>
+        <message>
+            <location filename='../src/main.cpp' line='1936'/>
+            <source>处理完成 · %1 帧 · %2×%3</source>
+            <translation>Processing complete · %1 frames · %2×%3</translation>
+        </message>
+        <message>
+            <location filename='../src/main.cpp' line='1939'/>
+            <source> · 星点偏长，请检查曝光拖线/像差</source>
+            <translation> · elongated stars detected; check tracking or lens aberrations</translation>
+        </message>
+        <message>
+            <location filename='../src/main.cpp' line='1953'/>
+            <source>%1×%2 · %3 帧 · %4</source>
+            <translation>%1×%2 · %3 frames · %4</translation>
+        </message>
+        <message>
+            <location filename='../src/main.cpp' line='1959'/>
+            <source>处理完成，但参数已变化，请重新处理</source>
+            <translation>Processing finished, but parameters changed; process again</translation>
+        </message>
+        <message>
+            <location filename='../src/main.cpp' line='1963'/>
+            <source>单张精修完成 — %1×%2 | %3</source>
+            <translation>Single Frame complete — %1×%2 | %3</translation>
+        </message>
+        <message>
+            <location filename='../src/main.cpp' line='1967'/>
+            <source>延时降噪完成 — 已输出 %1 张 · %2×%3 | %4</source>
+            <translation>Timelapse denoising complete — exported %1 frames · %2×%3 | %4</translation>
+        </message>
+        <message>
+            <location filename='../src/main.cpp' line='1972'/>
+            <source>星轨合成完成 — %1×%2 · %3 帧 | %4</source>
+            <translation>Star Trails complete — %1×%2 · %3 frames | %4</translation>
+        </message>
+        <message>
+            <location filename='../src/main.cpp' line='1976'/>
+            <source>处理完成 — %1×%2 已堆栈 %3 帧 | 参考 %4 | 质量排除 %5 帧 | 跳过 %6 帧</source>
+            <translation>
+                 Processing complete — %1×%2, stacked %3 frames | reference %4 |
+                quality rejected %5 | skipped %6
+            </translation>
+        </message>
+        <message>
+            <location filename='../src/main.cpp' line='1982'/>
+            <source> | 星点偏长，检查曝光拖线/像差</source>
+            <translation> | elongated stars detected; check tracking or lens aberrations</translation>
+        </message>
+        <message>
+            <location filename='../src/main.cpp' line='1992'/>
+            <source>处理完成，已保存 %1 个 Master 到 %2</source>
+            <translation>Processing complete; saved %1 Masters to %2</translation>
+        </message>
+        <message>
+            <location filename='../src/main.cpp' line='2003'/>
+            <source>校准素材建议</source>
+            <translation>Calibration Recommendations</translation>
+        </message>
+        <message>
+            <location filename='../src/main.cpp' line='2004'/>
+            <source>处理已经完成，但校准素材还有可改进之处。</source>
+            <translation>Processing is complete, but the calibration assets can still be improved.</translation>
+        </message>
+        <message>
+            <location filename='../src/main.cpp' line='2008'/>
+            <source>• </source>
+            <translation>• </translation>
+        </message>
+        <message>
+            <location filename='../src/main.cpp' line='2017'/>
+            <location filename='../src/main.cpp' line='2020'/>
+            <source>处理失败</source>
+            <translation>Processing Failed</translation>
+        </message>
+        <message>
+            <location filename='../src/main.cpp' line='2019'/>
+            <source>处理失败，请检查素材或参数</source>
+            <translation>Processing failed; check the assets or parameters</translation>
+        </message>
+        <message>
+            <location filename='../src/main.cpp' line='2031'/>
+            <source>处理完成后再导出</source>
+            <translation>Finish processing before exporting</translation>
+        </message>
+        <message>
+            <location filename='../src/main.cpp' line='2036'/>
+            <source>延时图片序列</source>
+            <translation>Timelapse Image Sequence</translation>
+        </message>
+        <message>
+            <location filename='../src/main.cpp' line='2037'/>
+            <source>处理完成时已经逐张输出整个序列，无需再次导出。</source>
+            <translation>
+                 The complete sequence was exported frame by frame during
+                processing; no additional export is needed.
+            </translation>
+        </message>
+        <message>
+            <location filename='../src/main.cpp' line='2042'/>
+            <source>历史结果只读</source>
+            <translation>Historical Result Is Read Only</translation>
+        </message>
+        <message>
+            <location filename='../src/main.cpp' line='2043'/>
+            <source>历史结果仅用于查看。按 R 返回当前会话结果后再导出。</source>
+            <translation>
+                 Historical results are for viewing only. Press R to return to
+                the current session result before exporting.
+            </translation>
+        </message>
+        <message>
+            <location filename='../src/main.cpp' line='2050'/>
+            <source>没有可用的堆栈结果，请先完成处理</source>
+            <translation>No stacked result is available. Complete processing first.</translation>
+        </message>
+        <message>
+            <location filename='../src/main.cpp' line='2056'/>
+            <source>结果需要更新</source>
+            <translation>Result Needs Updating</translation>
+        </message>
+        <message>
+            <location filename='../src/main.cpp' line='2057'/>
+            <source>处理参数已经改变。请重新处理后再导出，避免把旧结果误认为当前参数的结果。</source>
+            <translation>
+                 Processing parameters changed. Process again before exporting
+                so the old result is not mistaken for the current settings.
+            </translation>
+        </message>
+        <message>
+            <location filename='../src/main.cpp' line='2089'/>
+            <source>正在导出 %1...</source>
+            <translation>Exporting %1...</translation>
+        </message>
+        <message>
+            <location filename='../src/main.cpp' line='2103'/>
+            <source>导出成功</source>
+            <translation>Export Complete</translation>
+        </message>
+        <message>
+            <location filename='../src/main.cpp' line='2104'/>
+            <source>已导出到：%1</source>
+            <translation>Exported to: %1</translation>
+        </message>
+        <message>
+            <location filename='../src/main.cpp' line='2107'/>
+            <source>已导出：%1</source>
+            <translation>Exported: %1</translation>
+        </message>
+        <message>
+            <location filename='../src/main.cpp' line='2109'/>
+            <source>导出已取消</source>
+            <translation>Export canceled</translation>
+        </message>
+        <message>
+            <location filename='../src/main.cpp' line='2112'/>
+            <location filename='../src/workers/ProcessingWorker.cpp' line='2800'/>
+            <source>导出失败</source>
+            <translation>Export Failed</translation>
+        </message>
+        <message>
+            <location filename='../src/main.cpp' line='2113'/>
+            <source>无法写入文件，请检查输出目录权限</source>
+            <translation>Unable to write the file. Check the output-folder permissions.</translation>
+        </message>
+        <message>
+            <location filename='../src/main.cpp' line='2131'/>
+            <source>应用设置</source>
+            <translation>Application Settings</translation>
+        </message>
+        <message>
+            <location filename='../src/main.cpp' line='2141'/>
+            <source>界面语言:</source>
+            <translation>Interface language:</translation>
+        </message>
+        <message>
+            <location filename='../src/main.cpp' line='2145'/>
+            <source>简体中文</source>
+            <translation>Simplified Chinese</translation>
+        </message>
+        <message>
+            <location filename='../src/main.cpp' line='2157'/>
+            <source>语言切换将在重启应用后完整生效。</source>
+            <translation>The language change will apply completely after restarting the application.</translation>
+        </message>
+        <message>
+            <location filename='../src/main.cpp' line='2167'/>
+            <source>输出目录:</source>
+            <translation>Output folder:</translation>
+        </message>
+        <message>
+            <location filename='../src/main.cpp' line='2179'/>
+            <location filename='../src/main.cpp' line='2187'/>
+            <location filename='../src/ui/ParamsPanel.cpp' line='1173'/>
+            <location filename='../src/ui/ParamsPanel.cpp' line='1178'/>
+            <source>选择输出目录</source>
+            <translation>Choose Output Folder</translation>
+        </message>
+        <message>
+            <location filename='../src/main.cpp' line='2208'/>
+            <source>确定</source>
+            <translation>OK</translation>
+        </message>
+        <message>
+            <location filename='../src/main.cpp' line='2231'/>
+            <source>切换界面语言</source>
+            <translation>Change Interface Language</translation>
+        </message>
+        <message>
+            <location filename='../src/main.cpp' line='2233'/>
+            <source>需要重启 Nebulens 才能统一更新全部界面和文件对话框。当前项目不会自动保存。</source>
+            <translation>
+                 Restart Nebulens to update the entire interface and file
+                dialogs consistently. The current project is not saved
+                automatically.
+            </translation>
+        </message>
+        <message>
+            <location filename='../src/main.cpp' line='2238'/>
+            <source>立即重启</source>
+            <translation>Restart Now</translation>
+        </message>
+        <message>
+            <location filename='../src/main.cpp' line='2250'/>
+            <source>无法重启应用</source>
+            <translation>Unable to Restart</translation>
+        </message>
+        <message>
+            <location filename='../src/main.cpp' line='2252'/>
+            <source>请手动退出并重新打开 Nebulens。</source>
+            <translation>Quit and reopen Nebulens manually.</translation>
+        </message>
+        <message>
+            <location filename='../src/main.cpp' line='2266'/>
+            <source>快捷键</source>
+            <translation>Keyboard Shortcuts</translation>
+        </message>
+        <message>
+            <location filename='../src/main.cpp' line='2289'/>
             <source>正在载入另一张历史结果，请稍候</source>
             <translation>Another historical result is loading. Please wait.</translation>
         </message>
         <message>
-            <location filename='../src/main.cpp' line='2285'/>
+            <location filename='../src/main.cpp' line='2295'/>
             <source>正在载入历史结果：%1</source>
             <translation>Loading historical result: %1</translation>
         </message>
         <message>
-            <location filename='../src/main.cpp' line='2299'/>
+            <location filename='../src/main.cpp' line='2309'/>
             <source>历史结果只读预览 · %1</source>
             <translation>Historical result preview · read only · %1</translation>
         </message>
         <message>
-            <location filename='../src/main.cpp' line='2307'/>
+            <location filename='../src/main.cpp' line='2317'/>
             <source>历史结果载入失败：%1 · %2</source>
             <translation>Failed to load historical result: %1 · %2</translation>
         </message>
@@ -1442,7 +1442,7 @@
         </message>
         <message>
             <location filename='../src/ui/ParamsPanel.cpp' line='211'/>
-            <location filename='../src/ui/WorkflowRail.cpp' line='29'/>
+            <location filename='../src/ui/WorkflowRail.cpp' line='30'/>
             <source>调整</source>
             <translation>Adjust</translation>
         </message>
@@ -1458,7 +1458,7 @@
             <translation>
                  The bottom filmstrip manages Light frames. Click a thumbnail to
                 inspect it, press Space to exclude or restore it, and
-                right-click to set the reference frame. 
+                right-click to set the reference frame.
             </translation>
         </message>
         <message>
@@ -1484,10 +1484,37 @@
             <translation>Lens &amp; Sensor</translation>
         </message>
         <message>
+            <location filename='../src/ui/ParamsPanel.cpp' line='253'/>
+            <source>
+                当前场景使用 LibRaw 线性 16-bit 解码，并在处理阶段完成黑电平、白平衡和星点色差校正。深空模式可在此设置
+                Dark、Flat、Bias 与 Dark Flat。
+            </source>
+            <translation>
+                This scene uses LibRaw linear 16-bit decoding. Black level,
+                white balance, and stellar chromatic aberration are corrected
+                during processing. Deep Sky also supports Dark, Flat, Bias, and
+                Dark Flat sources here.
+            </translation>
+        </message>
+        <message>
             <location filename='../src/ui/ParamsPanel.cpp' line='267'/>
             <location filename='../src/ui/ProjectPanel.cpp' line='564'/>
             <source>校准帧</source>
             <translation>Calibration Frames</translation>
+        </message>
+        <message>
+            <location filename='../src/ui/ParamsPanel.cpp' line='273'/>
+            <source>
+                Light 主帧在底部素材胶片带导入。 每类可使用一组 RAW 原片，或一个由 Nebulens 生成的
+                .spmaster，二者自动互斥。 生成 Master Flat 时，Bias 与 Dark Flat 选择一种；每组 RAW
+                至少 3 张，建议 10–20 张。
+            </source>
+            <translation>
+                Import Light frames in the bottom filmstrip. Each calibration
+                role accepts either a RAW group or a Nebulens .spmaster, never
+                both. Choose Bias or Dark Flat when creating a Master Flat; each
+                RAW group requires at least 3 frames, with 10–20 recommended.
+            </translation>
         </message>
         <message>
             <location filename='../src/ui/ParamsPanel.cpp' line='304'/>
@@ -1572,7 +1599,7 @@
         </message>
         <message>
             <location filename='../src/ui/ParamsPanel.cpp' line='410'/>
-            <location filename='../src/ui/WorkflowRail.cpp' line='27'/>
+            <location filename='../src/ui/WorkflowRail.cpp' line='28'/>
             <source>对齐</source>
             <translation>Align</translation>
         </message>
@@ -1608,38 +1635,6 @@
             <translation>Mean</translation>
         </message>
         <message>
-            <location filename='../src/ui/ParamsPanel.cpp' line='466'/>
-            <source>κ值:</source>
-            <translation>κ value:</translation>
-        </message>
-        <message>
-            <location filename='../src/ui/ParamsPanel.cpp' line='253'/>
-            <source>
-                当前场景使用 LibRaw 线性 16-bit 解码，并在处理阶段完成黑电平、白平衡和星点色差校正。深空模式可在此设置
-                Dark、Flat、Bias 与 Dark Flat。
-            </source>
-            <translation>
-                This scene uses LibRaw linear 16-bit decoding. Black level,
-                white balance, and stellar chromatic aberration are corrected
-                during processing. Deep Sky also supports Dark, Flat, Bias, and
-                Dark Flat sources here.
-            </translation>
-        </message>
-        <message>
-            <location filename='../src/ui/ParamsPanel.cpp' line='273'/>
-            <source>
-                Light 主帧在底部素材胶片带导入。 每类可使用一组 RAW 原片，或一个由 Nebulens 生成的
-                .spmaster，二者自动互斥。 生成 Master Flat 时，Bias 与 Dark Flat 选择一种；每组 RAW
-                至少 3 张，建议 10–20 张。
-            </source>
-            <translation>
-                Import Light frames in the bottom filmstrip. Each calibration
-                role accepts either a RAW group or a Nebulens .spmaster, never
-                both. Choose Bias or Dark Flat when creating a Master Flat; each
-                RAW group requires at least 3 frames, with 10–20 recommended.
-            </translation>
-        </message>
-        <message>
             <location filename='../src/ui/ParamsPanel.cpp' line='444'/>
             <source>
                 选择堆栈降噪算法： • Median：取中位数，简单鲁棒，适合 ≤5 帧 • Mean：取平均值，信噪比最高但抗异常差 •
@@ -1653,6 +1648,11 @@
                 Winsorized: uses MAD instead of standard deviation for &gt;15
                 frames
             </translation>
+        </message>
+        <message>
+            <location filename='../src/ui/ParamsPanel.cpp' line='466'/>
+            <source>κ值:</source>
+            <translation>κ value:</translation>
         </message>
         <message>
             <location filename='../src/ui/ParamsPanel.cpp' line='470'/>
@@ -1683,7 +1683,7 @@
             <translation>
                  Use lightweight previews to identify clearly defocused,
                 trailed, or cloud-obscured outliers; normal variation is not
-                removed automatically 
+                removed automatically
             </translation>
         </message>
         <message>
@@ -1697,7 +1697,7 @@
             <translation>
                  Match each frame&apos;s exposure and background color to the
                 reference to reduce stacking patches caused by thin cloud or
-                changing light pollution 
+                changing light pollution
             </translation>
         </message>
         <message>
@@ -1705,7 +1705,7 @@
             <source>不带赤道仪时，天空对齐星点，地景保持固定，避免地景拖影</source>
             <translation>
                  Without a tracking mount, align stars in the sky while keeping
-                the ground fixed to prevent foreground blur 
+                the ground fixed to prevent foreground blur
             </translation>
         </message>
         <message>
@@ -1759,7 +1759,7 @@
             <translation>
                  Average denoising suits static ground; a reference frame is
                 sharper but may differ in noise and lighting; Median suppresses
-                transient people or vehicle lights 
+                transient people or vehicle lights
             </translation>
         </message>
         <message>
@@ -1772,7 +1772,7 @@
             <source>恢复山体和建筑的纹理与中尺度清晰度；值过高会同时增强地景噪声</source>
             <translation>
                  Restore mountain and building texture plus mid-scale clarity;
-                high values also amplify ground noise 
+                high values also amplify ground noise
             </translation>
         </message>
         <message>
@@ -1787,7 +1787,7 @@
                  Keep fixed-camera sequences in their original coordinates
                 without star alignment. The sky uses frame-by-frame Lighten;
                 with ground protection enabled, mountains and buildings use
-                original-coordinate averaging. 
+                original-coordinate averaging.
             </translation>
         </message>
         <message>
@@ -1801,7 +1801,7 @@
             <translation>
                  0% produces continuous trails with equal frame brightness.
                 Higher values progressively dim earlier frames for a
-                bright-to-faint comet effect. 
+                bright-to-faint comet effect.
             </translation>
         </message>
         <message>
@@ -1814,7 +1814,7 @@
             <source>交换星轨亮端和暗端；连续星轨（0%）不受影响</source>
             <translation>
                  Swap the bright and faint ends of the trails; continuous trails
-                (0%) are unchanged 
+                (0%) are unchanged
             </translation>
         </message>
         <message>
@@ -1828,7 +1828,7 @@
             <translation>
                  Detect the horizon automatically; compose trails in the sky and
                 average the ground in camera coordinates to avoid
-                Lighten-blended lights and blurred foregrounds 
+                Lighten-blended lights and blurred foregrounds
             </translation>
         </message>
         <message>
@@ -1857,7 +1857,7 @@
             <translation>
                  Center each output on its source frame and align neighboring
                 RAW files for denoising; the window shrinks automatically at
-                sequence boundaries 
+                sequence boundaries
             </translation>
         </message>
         <message>
@@ -1870,7 +1870,7 @@
             <source>控制邻近帧对当前帧的贡献；值越高降噪越强，动态云层应适当降低</source>
             <translation>
                  Control how much neighboring frames contribute; higher values
-                denoise more strongly, but should be reduced for dynamic clouds 
+                denoise more strongly, but should be reduced for dynamic clouds
             </translation>
         </message>
         <message>
@@ -1884,7 +1884,7 @@
             <translation>
                  Reduce neighboring-frame contribution around changing clouds,
                 vegetation, and lights while favoring the target frame; higher
-                values protect more strongly 
+                values protect more strongly
             </translation>
         </message>
         <message>
@@ -1892,7 +1892,7 @@
             <source>变化区域会自动减少邻帧混合，优先保留当前目标帧。</source>
             <translation>
                  Changing regions automatically receive less neighbor blending,
-                preserving the current target frame 
+                preserving the current target frame
             </translation>
         </message>
         <message>
@@ -1905,7 +1905,7 @@
             <source>天空按星点对齐，山体和建筑在相机坐标中降噪，再沿地平线融合</source>
             <translation>
                  Align the sky by stars, denoise mountains and buildings in
-                camera coordinates, then blend along the horizon 
+                camera coordinates, then blend along the horizon
             </translation>
         </message>
         <message>
@@ -1933,7 +1933,7 @@
             <source>向左冷却画面，向右增加暖色；这是相对偏移，不代表绝对 Kelvin</source>
             <translation>
                  Move left to cool the image and right to warm it; this is a
-                relative shift, not an absolute Kelvin value 
+                relative shift, not an absolute Kelvin value
             </translation>
         </message>
         <message>
@@ -2070,6 +2070,16 @@
             </translation>
         </message>
         <message>
+            <location filename='../src/ui/ParamsPanel.cpp' line='913'/>
+            <source>降噪强度：0 为保留全部细节，70 为最强</source>
+            <translation>Denoise strength: 0 preserves all detail; 70 is strongest</translation>
+        </message>
+        <message>
+            <location filename='../src/ui/ParamsPanel.cpp' line='924'/>
+            <source>BCF 改机色彩还原</source>
+            <translation>BCF Modified-Camera Color Recovery</translation>
+        </message>
+        <message>
             <location filename='../src/ui/ParamsPanel.cpp' line='925'/>
             <source>适用于 BCF 或天文改机造成的整体红偏 自动采样中性天空并校正通道响应；普通相机请关闭</source>
             <translation>
@@ -2077,6 +2087,43 @@
                 modification Samples neutral sky automatically and corrects
                 channel response; keep off for standard cameras
             </translation>
+        </message>
+        <message>
+            <location filename='../src/ui/ParamsPanel.cpp' line='937'/>
+            <source>校正强度</source>
+            <translation>Correction Strength</translation>
+        </message>
+        <message>
+            <location filename='../src/ui/ParamsPanel.cpp' line='944'/>
+            <source>0 为保留原始改机色偏，100 为完整回归中性色彩</source>
+            <translation>
+                 0 preserves the modified-camera cast; 100 fully restores a
+                neutral color response
+            </translation>
+        </message>
+        <message>
+            <location filename='../src/ui/ParamsPanel.cpp' line='964'/>
+            <location filename='../src/workers/ProcessingWorker.cpp' line='2756'/>
+            <source>自动灰点</source>
+            <translation>Auto Gray Point</translation>
+        </message>
+        <message>
+            <location filename='../src/ui/ParamsPanel.cpp' line='966'/>
+            <source>自动模式从中性天空估计；手动模式从预览中选择应为灰色的区域</source>
+            <translation>
+                 Auto estimates from neutral sky; Manual lets you select an area
+                in the preview that should be gray
+            </translation>
+        </message>
+        <message>
+            <location filename='../src/ui/ParamsPanel.cpp' line='994'/>
+            <source>在结果预览中重新采样手动灰点</source>
+            <translation>Resample the manual gray point in the result preview</translation>
+        </message>
+        <message>
+            <location filename='../src/ui/ParamsPanel.cpp' line='1009'/>
+            <source>去雾</source>
+            <translation>Dehaze</translation>
         </message>
         <message>
             <location filename='../src/ui/ParamsPanel.cpp' line='1012'/>
@@ -2087,12 +2134,27 @@
             </translation>
         </message>
         <message>
+            <location filename='../src/ui/ParamsPanel.cpp' line='1032'/>
+            <source>曲线拉伸</source>
+            <translation>Curve Stretch</translation>
+        </message>
+        <message>
             <location filename='../src/ui/ParamsPanel.cpp' line='1034'/>
             <source>背景色偏中和 + RGB 联动 Arcsinh 拉伸 增强暗部并保留星点颜色</source>
             <translation>
                 Neutralize background cast, then apply an RGB-linked Arcsinh
                 stretch Lift shadows while preserving star color
             </translation>
+        </message>
+        <message>
+            <location filename='../src/ui/ParamsPanel.cpp' line='1044'/>
+            <source>星点修饰</source>
+            <translation>Star Treatment</translation>
+        </message>
+        <message>
+            <location filename='../src/ui/ParamsPanel.cpp' line='1050'/>
+            <source>去除星点紫边</source>
+            <translation>Remove Purple Star Fringes</translation>
         </message>
         <message>
             <location filename='../src/ui/ParamsPanel.cpp' line='1051'/>
@@ -2104,6 +2166,11 @@
             </translation>
         </message>
         <message>
+            <location filename='../src/ui/ParamsPanel.cpp' line='1061'/>
+            <source>去边强度:</source>
+            <translation>Defringe strength:</translation>
+        </message>
+        <message>
             <location filename='../src/ui/ParamsPanel.cpp' line='1074'/>
             <source>40-60 适合普通镜头色差；更高强度用于明显的蓝紫星翼 建议在 100% 预览下确认真实蓝星仍保留颜色</source>
             <translation>
@@ -2113,6 +2180,11 @@
             </translation>
         </message>
         <message>
+            <location filename='../src/ui/ParamsPanel.cpp' line='1089'/>
+            <source>启用缩星</source>
+            <translation>Enable Star Reduction</translation>
+        </message>
+        <message>
             <location filename='../src/ui/ParamsPanel.cpp' line='1091'/>
             <source>自动建立无星层，仅对星层应用亚像素圆形 Minimum 饱和大星保持原样，避免宽光晕形成暗环</source>
             <translation>
@@ -2120,6 +2192,11 @@
                 circular Minimum only to the star layer Saturated large stars
                 are preserved to avoid dark rings around broad halos
             </translation>
+        </message>
+        <message>
+            <location filename='../src/ui/ParamsPanel.cpp' line='1099'/>
+            <source>强度:</source>
+            <translation>Strength:</translation>
         </message>
         <message>
             <location filename='../src/ui/ParamsPanel.cpp' line='1103'/>
@@ -2138,109 +2215,6 @@
             </translation>
         </message>
         <message>
-            <location filename='../src/ui/ParamsPanel.cpp' line='1144'/>
-            <source>TIFF 16-bit：最高质量，保留完整动态范围（推荐） PNG 8-bit：无损压缩，预览/分享首选</source>
-            <translation>
-                TIFF 16-bit: highest quality with full dynamic range
-                (recommended) PNG 8-bit: lossless compression for preview and
-                sharing
-            </translation>
-        </message>
-        <message>
-            <location filename='../src/ui/ParamsPanel.cpp' line='2433'/>
-            <source>%1 %2 · %3 MB</source>
-            <translation>%1 %2 · %3 MB</translation>
-        </message>
-        <message>
-            <location filename='../src/ui/ParamsPanel.cpp' line='2925'/>
-            <source>
-                Nebulens 会读取 .spmaster 内的处理状态。只有已经完成偏移校准并按 CFA phase 分相归一化的
-                Master Flat 才能通过正式预检。
-            </source>
-            <translation>
-                Nebulens reads the processing state stored in .spmaster. Only a
-                Master Flat that has completed offset calibration and
-                per-CFA-phase normalization can pass formal preflight.
-            </translation>
-        </message>
-        <message>
-            <location filename='../src/ui/ParamsPanel.cpp' line='913'/>
-            <source>降噪强度：0 为保留全部细节，70 为最强</source>
-            <translation>Denoise strength: 0 preserves all detail; 70 is strongest</translation>
-        </message>
-        <message>
-            <location filename='../src/ui/ParamsPanel.cpp' line='924'/>
-            <source>BCF 改机色彩还原</source>
-            <translation>BCF Modified-Camera Color Recovery</translation>
-        </message>
-        <message>
-            <location filename='../src/ui/ParamsPanel.cpp' line='937'/>
-            <source>校正强度</source>
-            <translation>Correction Strength</translation>
-        </message>
-        <message>
-            <location filename='../src/ui/ParamsPanel.cpp' line='944'/>
-            <source>0 为保留原始改机色偏，100 为完整回归中性色彩</source>
-            <translation>
-                 0 preserves the modified-camera cast; 100 fully restores a
-                neutral color response 
-            </translation>
-        </message>
-        <message>
-            <location filename='../src/ui/ParamsPanel.cpp' line='964'/>
-            <location filename='../src/workers/ProcessingWorker.cpp' line='2756'/>
-            <source>自动灰点</source>
-            <translation>Auto Gray Point</translation>
-        </message>
-        <message>
-            <location filename='../src/ui/ParamsPanel.cpp' line='966'/>
-            <source>自动模式从中性天空估计；手动模式从预览中选择应为灰色的区域</source>
-            <translation>
-                 Auto estimates from neutral sky; Manual lets you select an area
-                in the preview that should be gray 
-            </translation>
-        </message>
-        <message>
-            <location filename='../src/ui/ParamsPanel.cpp' line='994'/>
-            <source>在结果预览中重新采样手动灰点</source>
-            <translation>Resample the manual gray point in the result preview</translation>
-        </message>
-        <message>
-            <location filename='../src/ui/ParamsPanel.cpp' line='1009'/>
-            <source>去雾</source>
-            <translation>Dehaze</translation>
-        </message>
-        <message>
-            <location filename='../src/ui/ParamsPanel.cpp' line='1032'/>
-            <source>曲线拉伸</source>
-            <translation>Curve Stretch</translation>
-        </message>
-        <message>
-            <location filename='../src/ui/ParamsPanel.cpp' line='1044'/>
-            <source>星点修饰</source>
-            <translation>Star Treatment</translation>
-        </message>
-        <message>
-            <location filename='../src/ui/ParamsPanel.cpp' line='1050'/>
-            <source>去除星点紫边</source>
-            <translation>Remove Purple Star Fringes</translation>
-        </message>
-        <message>
-            <location filename='../src/ui/ParamsPanel.cpp' line='1061'/>
-            <source>去边强度:</source>
-            <translation>Defringe strength:</translation>
-        </message>
-        <message>
-            <location filename='../src/ui/ParamsPanel.cpp' line='1089'/>
-            <source>启用缩星</source>
-            <translation>Enable Star Reduction</translation>
-        </message>
-        <message>
-            <location filename='../src/ui/ParamsPanel.cpp' line='1099'/>
-            <source>强度:</source>
-            <translation>Strength:</translation>
-        </message>
-        <message>
             <location filename='../src/ui/ParamsPanel.cpp' line='1130'/>
             <source>文件设置</source>
             <translation>File Settings</translation>
@@ -2249,6 +2223,15 @@
             <location filename='../src/ui/ParamsPanel.cpp' line='1140'/>
             <source>文件格式</source>
             <translation>File Format</translation>
+        </message>
+        <message>
+            <location filename='../src/ui/ParamsPanel.cpp' line='1144'/>
+            <source>TIFF 16-bit：最高质量，保留完整动态范围（推荐） PNG 8-bit：无损压缩，预览/分享首选</source>
+            <translation>
+                TIFF 16-bit: highest quality with full dynamic range
+                (recommended) PNG 8-bit: lossless compression for preview and
+                sharing
+            </translation>
         </message>
         <message>
             <location filename='../src/ui/ParamsPanel.cpp' line='1148'/>
@@ -2414,12 +2397,17 @@
             <translation>Auto</translation>
         </message>
         <message>
+            <location filename='../src/ui/ParamsPanel.cpp' line='2433'/>
+            <source>%1 %2 · %3 MB</source>
+            <translation>%1 %2 · %3 MB</translation>
+        </message>
+        <message>
             <location filename='../src/ui/ParamsPanel.cpp' line='2461'/>
             <source>&lt;b&gt;少帧稳健&lt;/b&gt;&lt;br&gt;逐像素取中位数，能压制飞机轨迹和热像素；信噪比提升低于平均值。</source>
             <translation>
                  &lt;b&gt;Robust for Few Frames&lt;/b&gt;&lt;br&gt;Uses the
                 per-pixel median to suppress aircraft trails and hot pixels; SNR
-                improves less than with Mean. 
+                improves less than with Mean.
             </translation>
         </message>
         <message>
@@ -2428,7 +2416,7 @@
             <translation>
                  &lt;b&gt;Detail First&lt;/b&gt;&lt;br&gt;Uses every pixel in
                 the mean for maximum SNR efficiency; trails, bad pixels, and
-                thin clouds are more likely to remain. 
+                thin clouds are more likely to remain.
             </translation>
         </message>
         <message>
@@ -2437,7 +2425,7 @@
             <translation>
                  &lt;b&gt;Balanced Recommendation&lt;/b&gt;&lt;br&gt;Iteratively
                 rejects pixels outside the κ threshold and suits 6–15 frames;
-                lower κ rejects more aggressively. 
+                lower κ rejects more aggressively.
             </translation>
         </message>
         <message>
@@ -2446,16 +2434,16 @@
             <translation>
                  &lt;b&gt;Robust for Long Sequences&lt;/b&gt;&lt;br&gt;Limits
                 extreme values before averaging, balancing SNR and outlier
-                rejection; stability improves with more frames. 
+                rejection; stability improves with more frames.
             </translation>
         </message>
         <message>
-            <location filename='../src/main.cpp' line='1442'/>
+            <location filename='../src/main.cpp' line='1452'/>
             <location filename='../src/ui/ParamsPanel.cpp' line='2822'/>
             <source>RAW 文件 (*.nef *.cr2 *.arw *.dng *.raw *.orf *.raf *.pef *.cr3);;所有文件 (*)</source>
             <translation>
                  RAW Files (*.nef *.cr2 *.arw *.dng *.raw *.orf *.raf *.pef
-                *.cr3);;All Files (*) 
+                *.cr3);;All Files (*)
             </translation>
         </message>
         <message>
@@ -2468,7 +2456,7 @@
             <source>%1 张 RAW 已属于另一类校准帧，未重复导入。</source>
             <translation>
                  %1 RAW frames already belong to another calibration role and
-                were not imported again. 
+                were not imported again.
             </translation>
         </message>
         <message>
@@ -2507,6 +2495,18 @@
             <translation>Master Flat Validation</translation>
         </message>
         <message>
+            <location filename='../src/ui/ParamsPanel.cpp' line='2925'/>
+            <source>
+                Nebulens 会读取 .spmaster 内的处理状态。只有已经完成偏移校准并按 CFA phase 分相归一化的
+                Master Flat 才能通过正式预检。
+            </source>
+            <translation>
+                Nebulens reads the processing state stored in .spmaster. Only a
+                Master Flat that has completed offset calibration and
+                per-CFA-phase normalization can pass formal preflight.
+            </translation>
+        </message>
+        <message>
             <location filename='../src/ui/ParamsPanel.cpp' line='2958'/>
             <source>RAW %1 张</source>
             <translation>%1 RAW frames</translation>
@@ -2517,7 +2517,7 @@
             <translation>
                  Calibration sources are ready. Camera, dimensions, ISO,
                 exposure, CFA, and Master metadata will still be checked before
-                processing. 
+                processing.
             </translation>
         </message>
         <message>
@@ -2611,7 +2611,7 @@
             <source>粗略涂过漏检地景，松手后自动贴合真实边缘</source>
             <translation>
                  Paint roughly over missed ground; on release, the mask snaps to
-                the real boundary 
+                the real boundary
             </translation>
         </message>
         <message>
@@ -2713,7 +2713,7 @@
             <source>可选择其他素材，正式处理不会使用浏览预览</source>
             <translation>
                  You can inspect other assets; browsing previews are never used
-                for final processing 
+                for final processing
             </translation>
         </message>
         <message>
@@ -2923,7 +2923,7 @@
             <translation>Space to exclude</translation>
         </message>
         <message>
-            <location filename='../src/main.cpp' line='2114'/>
+            <location filename='../src/main.cpp' line='2124'/>
             <location filename='../src/ui/ProjectPanel.cpp' line='575'/>
             <source>设置</source>
             <translation>Settings</translation>
@@ -3059,11 +3059,6 @@
             <translation>Nebulens %1 is available</translation>
         </message>
         <message>
-            <location filename='../src/update/UpdateManager.cpp' line='236'/>
-            <source>安装包大小：%1 %2</source>
-            <translation>Package size: %1 %2</translation>
-        </message>
-        <message>
             <location filename='../src/update/UpdateManager.cpp' line='239'/>
             <source>此版本包含功能改进和问题修复。</source>
             <translation>This release includes feature improvements and bug fixes.</translation>
@@ -3079,15 +3074,7 @@
             <translation>Download Update</translation>
         </message>
         <message>
-            <location filename='../src/update/UpdateManager.cpp' line='440'/>
-            <source>Nebulens %1 已下载并通过 SHA-256 校验。 是否现在打开安装包？ %2</source>
-            <translation>
-                Nebulens %1 was downloaded and passed SHA-256 verification. Open
-                the package now? %2
-            </translation>
-        </message>
-        <message>
-            <location filename='../src/main.cpp' line='2231'/>
+            <location filename='../src/main.cpp' line='2241'/>
             <location filename='../src/update/UpdateManager.cpp' line='243'/>
             <source>稍后</source>
             <translation>Later</translation>
@@ -3118,10 +3105,15 @@
             <translation>Downloading Nebulens %1...</translation>
         </message>
         <message>
-            <location filename='../src/main.cpp' line='2193'/>
+            <location filename='../src/main.cpp' line='2203'/>
             <location filename='../src/update/UpdateManager.cpp' line='300'/>
             <source>取消</source>
             <translation>Cancel</translation>
+        </message>
+        <message>
+            <location filename='../src/update/UpdateManager.cpp' line='236'/>
+            <source>安装包大小：%1 %2</source>
+            <translation>Package size: %1 %2</translation>
         </message>
         <message>
             <location filename='../src/update/UpdateManager.cpp' line='330'/>
@@ -3178,6 +3170,14 @@
             <location filename='../src/update/UpdateManager.cpp' line='439'/>
             <source>更新已就绪</source>
             <translation>Update Ready</translation>
+        </message>
+        <message>
+            <location filename='../src/update/UpdateManager.cpp' line='440'/>
+            <source>Nebulens %1 已下载并通过 SHA-256 校验。 是否现在打开安装包？ %2</source>
+            <translation>
+                Nebulens %1 was downloaded and passed SHA-256 verification. Open
+                the package now? %2
+            </translation>
         </message>
         <message>
             <location filename='../src/update/UpdateManager.cpp' line='450'/>
@@ -3379,7 +3379,7 @@
             <location filename='../src/workers/ProcessingWorker.cpp' line='845'/>
             <source>单张、延时、星轨和深空校准模式不能同时启用</source>
             <translation>
-                Single Frame, Timelapse, Star Trails, and Deep-Sky calibration
+                 Single Frame, Timelapse, Star Trails, and Deep-Sky calibration
                 modes cannot be enabled together
             </translation>
         </message>
@@ -3425,7 +3425,7 @@
             <location filename='../src/workers/ProcessingWorker.cpp' line='983'/>
             <source>修补后的天地蒙版不属于最终参考帧，请重新检测并修补</source>
             <translation>
-                The repaired sky/ground mask does not belong to the final
+                 The repaired sky/ground mask does not belong to the final
                 reference frame. Detect and repair it again.
             </translation>
         </message>
@@ -3447,7 +3447,7 @@
                  Estimated memory required: %1; safe budget: %2 (currently about
                 %3 available). Reduce the frame count or disable
                 memory-intensive options such as Sky &amp; Ground, dehaze,
-                denoising, or star reduction. 
+                denoising, or star reduction.
             </translation>
         </message>
         <message>
@@ -3526,7 +3526,7 @@
             <location filename='../src/workers/ProcessingWorker.cpp' line='2622'/>
             <source>未发现可靠的镜头径向色差，保持原图</source>
             <translation>
-                No reliable radial lens chromatic aberration detected; keeping
+                 No reliable radial lens chromatic aberration detected; keeping
                 the original image
             </translation>
         </message>
@@ -3605,7 +3605,7 @@
             <location filename='../src/workers/ProcessingWorker.cpp' line='1472'/>
             <source>原位地景镜头径向色差校正失败</source>
             <translation>
-                Radial chromatic-aberration correction failed for the
+                 Radial chromatic-aberration correction failed for the
                 original-coordinate ground frame
             </translation>
         </message>
@@ -3690,7 +3690,7 @@
             <translation>
                  Star Trails requires about %1 of memory; safe budget is %2
                 (currently about %3 available). Disable dehaze or denoising and
-                try again. 
+                try again.
             </translation>
         </message>
         <message>
@@ -3784,7 +3784,7 @@
             <translation>
                  A %1-frame timelapse window requires about %2 of memory; safe
                 budget is %3. Use a 3-frame window or disable fixed-ground
-                protection. 
+                protection.
             </translation>
         </message>
         <message>
@@ -3899,7 +3899,7 @@
             <translation>
                  Single-frame processing requires about %1 of memory; safe
                 budget is %2. Disable dehaze, denoising, or star reduction and
-                try again. 
+                try again.
             </translation>
         </message>
         <message>
@@ -3982,7 +3982,7 @@
             <source>缩星完成：处理 %1 颗星，其中 %2 颗弱小星被清除或显著缩小</source>
             <translation>
                  Star reduction complete: processed %1 stars; %2 faint stars
-                were removed or substantially reduced 
+                were removed or substantially reduced
             </translation>
         </message>
         <message>
@@ -3990,7 +3990,7 @@
             <source>缩星完成：处理 %1 颗星，其中 %2 颗弱小星被清除或显著缩小，%3 个星缘像素去色边</source>
             <translation>
                  Star reduction complete: processed %1 stars; %2 faint stars
-                were removed or substantially reduced; %3 halo pixels defringed 
+                were removed or substantially reduced; %3 halo pixels defringed
             </translation>
         </message>
         <message>
@@ -4059,17 +4059,17 @@
             <translation>Quick Preview source cache is missing</translation>
         </message>
         <message>
-            <location filename='../src/ui/WorkflowRail.cpp' line='25'/>
+            <location filename='../src/ui/WorkflowRail.cpp' line='26'/>
             <source>素材</source>
             <translation>Assets</translation>
         </message>
         <message>
-            <location filename='../src/ui/WorkflowRail.cpp' line='28'/>
+            <location filename='../src/ui/WorkflowRail.cpp' line='29'/>
             <source>合成</source>
             <translation>Stack</translation>
         </message>
         <message>
-            <location filename='../src/ui/WorkflowRail.cpp' line='196'/>
+            <location filename='../src/ui/WorkflowRail.cpp' line='215'/>
             <source>工作流</source>
             <translation>Workflow</translation>
         </message>

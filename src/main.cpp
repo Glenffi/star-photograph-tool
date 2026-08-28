@@ -527,13 +527,16 @@ private:
             QCoreApplication::translate("Nebulens", "视图"));
 
         auto* cycleCompareAction = new QAction(
-            QCoreApplication::translate("Nebulens", "循环对比\tB"), this);
+            QCoreApplication::translate("Nebulens", "循环对比"), this);
+        cycleCompareAction->setShortcut(QKeySequence(QStringLiteral("B")));
         connect(cycleCompareAction, &QAction::triggered,
                 m_previewPanel, &PreviewPanel::cycleComparisonMode);
         viewMenu->addAction(cycleCompareAction);
 
         m_beforeAfterAction = new QAction(
-            QCoreApplication::translate("Nebulens", "处理前后分屏\tShift+B"), this);
+            QCoreApplication::translate("Nebulens", "处理前后分屏"), this);
+        m_beforeAfterAction->setShortcut(
+            QKeySequence(QStringLiteral("Shift+B")));
         m_beforeAfterAction->setCheckable(true);
         m_beforeAfterAction->setEnabled(false);
         connect(m_beforeAfterAction, &QAction::toggled,
@@ -542,20 +545,27 @@ private:
 
         viewMenu->addSeparator();
 
-        auto* fitViewAction = new QAction(QCoreApplication::translate("Nebulens", "适应视图\tF"), this);
+        auto* fitViewAction = new QAction(
+            QCoreApplication::translate("Nebulens", "适应视图"), this);
+        fitViewAction->setShortcut(QKeySequence(QStringLiteral("F")));
         connect(fitViewAction, &QAction::triggered, m_previewPanel, &PreviewPanel::fitToView);
         viewMenu->addAction(fitViewAction);
 
         auto* actualPixelsAction = new QAction(
-            QCoreApplication::translate("Nebulens", "实际像素 (1:1)\t1"), this);
+            QCoreApplication::translate("Nebulens", "实际像素 (1:1)"), this);
+        actualPixelsAction->setShortcut(QKeySequence(QStringLiteral("1")));
         connect(actualPixelsAction, &QAction::triggered, m_previewPanel, &PreviewPanel::resetZoom);
         viewMenu->addAction(actualPixelsAction);
 
-        auto* maskAction = new QAction(QCoreApplication::translate("Nebulens", "蒙版叠加\tM"), this);
+        auto* maskAction = new QAction(
+            QCoreApplication::translate("Nebulens", "蒙版叠加"), this);
+        maskAction->setShortcut(QKeySequence(QStringLiteral("M")));
         connect(maskAction, &QAction::triggered,
                 m_previewPanel, &PreviewPanel::toggleMaskOverlay);
         viewMenu->addAction(maskAction);
-        auto* resultAction = new QAction(QCoreApplication::translate("Nebulens", "返回当前结果\tR"), this);
+        auto* resultAction = new QAction(
+            QCoreApplication::translate("Nebulens", "返回当前结果"), this);
+        resultAction->setShortcut(QKeySequence(QStringLiteral("R")));
         connect(resultAction, &QAction::triggered,
                 this, &MainWindow::showBestAvailableResult);
         viewMenu->addAction(resultAction);

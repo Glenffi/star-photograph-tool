@@ -109,6 +109,12 @@ int main(int argc, char* argv[]) {
               QStringLiteral("Assets") &&
           QCoreApplication::translate("Nebulens", "界面语言:") ==
               QStringLiteral("Interface language:") &&
+          QCoreApplication::translate("Nebulens", "视图") ==
+              QStringLiteral("View") &&
+          QCoreApplication::translate("Nebulens", "循环对比") ==
+              QStringLiteral("Cycle Comparison") &&
+          QCoreApplication::translate("Nebulens", "处理前后分屏") ==
+              QStringLiteral("Before/After Split") &&
           QCoreApplication::translate(
               "Nebulens", "正在下载 Nebulens %1...") ==
               QStringLiteral("Downloading Nebulens %1..."),
