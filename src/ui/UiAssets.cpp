@@ -245,7 +245,7 @@ QIcon UiAssets::icon(Glyph glyph, const QColor& color, int logicalSize) {
 }
 
 QPixmap UiAssets::logoMark(int logicalSize) {
-    QPixmap brand(QStringLiteral(":/branding/XingLian.png"));
+    QPixmap brand(QStringLiteral(":/branding/Nebulens.png"));
     if (!brand.isNull()) {
         const int pixels = qMax(1, qRound(logicalSize * kDeviceScale));
         QPixmap scaled = brand.scaled(
@@ -271,7 +271,7 @@ QPixmap UiAssets::logoMark(int logicalSize) {
     painter.drawRoundedRect(QRectF(2.5, 2.5, 27.0, 27.0), 6.0, 6.0);
 
     // Offset registration frames describe alignment and stacking. The open
-    // amber frame and cool registration point form the new XingLian mark
+    // amber frame and cool registration point form the Nebulens mark
     // without relying on a camera, magic wand or decorative star icon.
     painter.setBrush(Qt::NoBrush);
     painter.setPen(iconPen(QColor("#59605F"), 1.2));

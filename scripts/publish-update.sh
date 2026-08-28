@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-# Publish exactly one StarProcessor release to the small update server.
+# Publish exactly one Nebulens release to the small update server.
 # Authentication is intentionally delegated to ssh-agent or the interactive
 # SSH prompt. Do not put a password in this file or in shell history.
 
@@ -73,7 +73,7 @@ done
 ssh "${UPDATE_SERVER}" \
     "chmod 0644 '${UPDATE_ROOT}/update.json.uploading' && mv -f '${UPDATE_ROOT}/update.json.uploading' '${UPDATE_ROOT}/update.json'"
 
-# The host has deliberately limited storage. Remove prior StarProcessor
+# The host has deliberately limited storage. Remove prior Nebulens
 # packages only after the new manifest and packages are active.
 keep_expression=""
 for package_name in "${keep_files[@]}"; do
@@ -82,4 +82,4 @@ done
 ssh "${UPDATE_SERVER}" \
     "find '${UPDATE_ROOT}/downloads' -maxdepth 1 -type f \\( -name 'StarProcessor*.zip' -o -name 'StarProcessor*.dmg' \\)${keep_expression} -delete"
 
-echo "Published StarProcessor ${version} to ${UPDATE_BASE_URL}"
+echo "Published Nebulens ${version} to ${UPDATE_BASE_URL}"

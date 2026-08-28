@@ -3,7 +3,7 @@
 #include <QColor>
 #include <QString>
 
-// Central design tokens for the XingLian desktop UI. Components should
+// Central design tokens for the Nebulens desktop UI. Components should
 // consume these values instead of introducing local colors or dimensions.
 namespace StyleTokens {
 

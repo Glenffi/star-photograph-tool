@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate StarProcessor's signed-transport update manifest.
+"""Generate Nebulens' signed-transport update manifest.
 
 The manifest intentionally contains only public metadata. Server credentials
 belong in SSH configuration or the caller's interactive session, never here.

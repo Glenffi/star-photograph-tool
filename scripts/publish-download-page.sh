@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-# Publish the static StarProcessor download page without touching packages or
+# Publish the static Nebulens download page without touching packages or
 # update.json. Authentication is delegated to ssh-agent or the SSH prompt.
 
 set -euo pipefail

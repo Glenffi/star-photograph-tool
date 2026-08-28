@@ -106,7 +106,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          app="$(find dist -path '*/dmg/StarProcessor.app' -print -quit)"
+          app="$(find dist -path '*/dmg/Nebulens.app' -print -quit)"
           test -n "${app}"
           test -f "${app}/Contents/Frameworks/liblcms2.2.dylib"
           version="$(sed -nE 's/project\(StarProcessor VERSION ([0-9.]+).*/\1/p' CMakeLists.txt)"
@@ -148,7 +148,7 @@ jobs:
           fi
           if ! gh release view "${tag}" >/dev/null 2>&1; then
             gh release create "${tag}" \
-              --title "星炼 ${tag}" \
+              --title "Nebulens ${tag}" \
               --generate-notes || gh release view "${tag}" >/dev/null
           fi
           gh release upload "${tag}" \

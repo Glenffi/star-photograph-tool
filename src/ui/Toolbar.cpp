@@ -74,7 +74,7 @@ void Toolbar::setupUI() {
     auto* brandLayout = new QVBoxLayout(brand);
     brandLayout->setContentsMargins(0, 8, 0, 7);
     brandLayout->setSpacing(1);
-    auto* brandName = new QLabel(QString::fromUtf8("星炼"), brand);
+    auto* brandName = new QLabel(QStringLiteral("Nebulens"), brand);
     brandName->setObjectName(QStringLiteral("brandName"));
     brandLayout->addWidget(brandName);
     auto* brandTag = new QLabel(QStringLiteral("ASTRO IMAGING STUDIO"), brand);

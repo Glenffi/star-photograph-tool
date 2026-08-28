@@ -88,16 +88,24 @@ QString exposureText(int tenths) {
 }
 
 QString defaultOutputPath() {
+    return QDir::homePath() + QStringLiteral("/Nebulens/Output");
+}
+
+QString legacyXingLianOutputPath() {
     return QDir::homePath() + QString::fromUtf8("/星炼/Output");
 }
 
-QString legacyDefaultOutputPath() {
+QString legacyTechnicalOutputPath() {
     return QDir::homePath() + QStringLiteral("/StarProcessor/Output");
 }
 
 QString migrateDefaultOutputPath(const QString& path) {
-    return QDir::cleanPath(path) == QDir::cleanPath(legacyDefaultOutputPath())
-        ? defaultOutputPath() : path;
+    const QString cleanPath = QDir::cleanPath(path);
+    if (cleanPath == QDir::cleanPath(legacyXingLianOutputPath()) ||
+        cleanPath == QDir::cleanPath(legacyTechnicalOutputPath())) {
+        return defaultOutputPath();
+    }
+    return path;
 }
 
 } // namespace
@@ -257,7 +265,7 @@ void ParamsPanel::setupUI() {
     auto* calibrationNote = new QLabel(
         QString::fromUtf8(
             "Light 主帧在底部素材胶片带导入。\n"
-            "每类可使用一组 RAW 原片，或一个由星炼生成的 "
+            "每类可使用一组 RAW 原片，或一个由 Nebulens 生成的 "
             ".spmaster，二者自动互斥。\n"
             "生成 Master Flat 时，Bias 与 Dark Flat 选择一种；"
             "每组 RAW 至少 3 张，建议 10–20 张。"),
@@ -310,7 +318,7 @@ void ParamsPanel::setupUI() {
                                   "compactText");
         masterButton->setFixedSize(54, 28);
         masterButton->setToolTip(QString::fromUtf8(
-            "导入星炼 %1（仅支持 .spmaster）").arg(name));
+            "导入 Nebulens %1（仅支持 .spmaster）").arg(name));
         masterButton->setAccessibleName(masterButton->toolTip());
         row->addWidget(masterButton);
 
@@ -2384,7 +2392,8 @@ void ParamsPanel::refreshRecentResults() {
     QFileInfoList files;
     QSet<QString> seenPaths;
     const QStringList directories = {
-        outputPath(), legacyDefaultOutputPath()
+        outputPath(), legacyXingLianOutputPath(),
+        legacyTechnicalOutputPath()
     };
     for (const QString& path : directories) {
         QDir directory(path);
@@ -2868,7 +2877,7 @@ void ParamsPanel::importCalibrationMaster(QString& masterPath,
                                           bool confirmNormalizedFlat) {
     const QString selected = QFileDialog::getOpenFileName(
         this, QString::fromUtf8("选择 Master %1").arg(roleName), QString(),
-        QString::fromUtf8("星炼 Master (*.spmaster)"));
+        QString::fromUtf8("Nebulens Master (*.spmaster)"));
     if (selected.isEmpty()) return;
 
     const QFileInfo selectedInfo(selected);
@@ -2877,7 +2886,7 @@ void ParamsPanel::importCalibrationMaster(QString& masterPath,
         QMessageBox::warning(
             this, QString::fromUtf8("不支持的 Master 文件"),
             QString::fromUtf8(
-                "Master 只能导入由星炼生成的 .spmaster 文件。"));
+                "Master 只能导入由 Nebulens 生成的 .spmaster 文件。"));
         return;
     }
     const QString absolutePath = QDir::cleanPath(selectedInfo.absoluteFilePath());
@@ -2894,7 +2903,7 @@ void ParamsPanel::importCalibrationMaster(QString& masterPath,
         QMessageBox::information(
             this, QString::fromUtf8("Master Flat 校验"),
             QString::fromUtf8(
-                "星炼会读取 .spmaster 内的处理状态。只有已经"
+                "Nebulens 会读取 .spmaster 内的处理状态。只有已经"
                 "完成偏移校准并按 CFA phase 分相归一化的 Master Flat "
                 "才能通过正式预检。"));
     }

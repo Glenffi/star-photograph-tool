@@ -42,4 +42,4 @@ if [[ -d "$(dirname "${PROTOTYPE_ICON}")" ]]; then
     cp "${SOURCE_PNG}" "${PROTOTYPE_ICON}"
 fi
 
-echo "Generated XingLian PNG, ICNS and ICO assets."
+echo "Generated Nebulens PNG, ICNS and ICO assets."

@@ -6,7 +6,7 @@ if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Darwin" AND
         "Minimum supported macOS version")
 endif()
 
-project(StarProcessor VERSION 0.12.0 LANGUAGES CXX)
+project(StarProcessor VERSION 0.13.0 LANGUAGES CXX)
 
 include(CTest)
 option(BUILD_SAMPLE_TOOLS "Build local RAW sample regression tools" ON)
@@ -370,7 +370,7 @@ if(APPLE)
     set_target_properties(${PROJECT_NAME} PROPERTIES
         MACOSX_BUNDLE TRUE
         MACOSX_BUNDLE_INFO_PLIST "${CMAKE_SOURCE_DIR}/cmake/Info.plist.in"
-        MACOSX_BUNDLE_BUNDLE_NAME "星炼"
+        MACOSX_BUNDLE_BUNDLE_NAME "Nebulens"
         MACOSX_BUNDLE_ICON_FILE "StarProcessor.icns"
         MACOSX_BUNDLE_BUNDLE_VERSION "${PROJECT_VERSION}"
         MACOSX_BUNDLE_SHORT_VERSION_STRING "${PROJECT_VERSION}"

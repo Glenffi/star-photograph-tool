@@ -52,7 +52,7 @@ int main(int argc, char* argv[]) {
               panel.basicAdjustmentOptions().exposureTenths == 13 &&
               panel.starReduceEnabled() &&
               panel.starReduceStrength() == 63 &&
-              panel.outputPath() == QDir::homePath() + "/星炼/Output",
+              panel.outputPath() == QDir::homePath() + "/Nebulens/Output",
           "ParamsPanel should load persisted processing settings");
 
     panel.applySceneProfile(ProcessingScene::Nightscape, false);
@@ -111,6 +111,16 @@ int main(int argc, char* argv[]) {
     QApplication::processEvents();
     check(!disabledDependentSlider->isEnabled(),
           "Collapsing a section must preserve dependent control state");
+    {
+        QSettings settings("StarProcessor", "App");
+        settings.setValue("outputPath",
+                          QDir::homePath() + QString::fromUtf8("/星炼/Output"));
+        settings.sync();
+    }
+    ParamsPanel previousBrandPanel;
+    check(previousBrandPanel.outputPath() ==
+              QDir::homePath() + "/Nebulens/Output",
+          "Previous display-brand output path should migrate to Nebulens");
 
     std::cout << "Params panel tests passed\n";
     return 0;

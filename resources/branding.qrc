@@ -1,5 +1,5 @@
 <RCC>
     <qresource prefix="/branding">
-        <file alias="XingLian.png">StarProcessor.png</file>
+        <file alias="Nebulens.png">StarProcessor.png</file>
     </qresource>
 </RCC>

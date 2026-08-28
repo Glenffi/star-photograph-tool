@@ -464,7 +464,7 @@ bool ProcessingWorker::buildDeepSkyCalibration(
 
     QString outputRoot = m_params.outputPath;
     if (outputRoot.isEmpty()) {
-        outputRoot = QDir::homePath() + "/星炼/Output";
+        outputRoot = QDir::homePath() + "/Nebulens/Output";
     }
     std::unique_ptr<QTemporaryDir> pendingMasters;
     std::vector<QString> pendingMasterNames;
@@ -2241,7 +2241,7 @@ void ProcessingWorker::runTimelapse() {
 
     QString rootOutput = m_params.outputPath;
     if (rootOutput.isEmpty()) {
-        rootOutput = QDir::homePath() + "/星炼/Output";
+        rootOutput = QDir::homePath() + "/Nebulens/Output";
     }
     const QString outputDirectory = QDir(rootOutput).filePath(
         QDateTime::currentDateTime().toString("yyyyMMdd_hhmmss_zzz") +
@@ -2794,7 +2794,7 @@ bool ProcessingWorker::finishResult(std::vector<uint16_t>& resultRgb,
 
     emit stageMessage("导出结果...");
     QString outputPath = m_params.outputPath;
-    if (outputPath.isEmpty()) outputPath = QDir::homePath() + "/星炼/Output";
+    if (outputPath.isEmpty()) outputPath = QDir::homePath() + "/Nebulens/Output";
     QDir().mkpath(outputPath);
     const bool png = m_params.outputFormat == "png8";
     const QString extension = png ? ".png" : ".tiff";

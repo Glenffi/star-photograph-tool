@@ -41,7 +41,7 @@ bool readHeader(QFile& file, RawCalibrationEngine::MasterFrame& master,
     char magic[sizeof(kMagic)] = {};
     if (file.read(magic, sizeof(magic)) != sizeof(magic) ||
         std::memcmp(magic, kMagic, sizeof(kMagic)) != 0) {
-        error = QString::fromUtf8("不是有效的星炼 Master 文件");
+        error = QString::fromUtf8("不是有效的 Nebulens Master 文件");
         return false;
     }
 

@@ -1,4 +1,4 @@
-# 星炼 v0.12.0 界面重设计实现说明
+# Nebulens v0.13.0 品牌与界面实现说明
 
 > 状态：Qt 实现完成，等待最终用户验收
 > 原型：`star-photograph-tool-design/web-prototype-v2`
@@ -6,7 +6,7 @@
 
 ## 产品名称
 
-用户可见名称改为 **星炼**，含义是把校准、对齐、堆栈和调色后的星空素材炼成最终成片。
+用户可见名称改为 **Nebulens**，由 *nebula* 与 *lens* 组合而成，覆盖银河星景、深空校准、星轨和延时序列等完整星空影像工作流。
 
 为保证已有用户升级和数据兼容，以下技术身份暂时保留：
 
@@ -16,13 +16,13 @@
 - `.spmaster` 扩展名、文件魔数和校验结构；
 - macOS Bundle ID `com.starprocessor.StarProcessor`。
 
-macOS `CFBundleDisplayName`、窗口标题、About、更新对话框、Master 文案和默认输出目录均显示“星炼”。旧默认输出路径会迁移到 `~/星炼/Output`，历史列表仍同时扫描旧目录。
+macOS `CFBundleDisplayName`、窗口标题、About、更新对话框、Master 文案和默认输出目录均显示 `Nebulens`。旧默认输出路径 `~/星炼/Output` 与 `~/StarProcessor/Output` 会迁移到 `~/Nebulens/Output`，历史列表仍同时扫描两个旧目录。
 
 ## 工作台结构
 
 ```text
 64px 顶部工具带
-├── 新 Logo 与“星炼”字标
+├── 新 Logo 与 Nebulens 字标
 ├── MODE 场景选择
 ├── 当前项目摘要
 └── 导出 / 开始处理 / 更多

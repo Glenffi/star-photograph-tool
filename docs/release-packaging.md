@@ -1,6 +1,6 @@
-# 星炼客户端打包
+# Nebulens 客户端打包
 
-本文说明星炼 macOS 和 Windows 客户端的可重复构建、验证与发布流程。为兼容 v0.11.0 更新协议，发行文件名暂时保留 `StarProcessor` 前缀；安装后的显示名称、DMG 卷名和 Release 标题使用“星炼”。
+本文说明 Nebulens macOS 和 Windows 客户端的可重复构建、验证与发布流程。为兼容 v0.11.0 更新协议，发行文件名暂时保留 `StarProcessor` 前缀；安装后的显示名称、DMG 卷名和 Release 标题使用 `Nebulens`。
 
 ## 发行物
 
@@ -53,7 +53,7 @@ Windows 包必须由 Windows runner 验证，macOS 上不使用 MinGW 交叉编�
 确认主分支干净、Release 构建通过后：
 
 ```bash
-git tag -a v0.9.1 -m "StarProcessor v0.9.1"
+git tag -a v0.13.0 -m "发布：Nebulens v0.13.0"
 git push origin v0.9.1
 ```
 

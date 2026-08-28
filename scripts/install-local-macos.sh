@@ -2,7 +2,7 @@
 
 # Build a self-contained local app bundle, install it in /Applications, and
 # refresh Launch Services. The bundle keeps its technical executable identity
-# for settings/update compatibility while Finder presents the 星炼 name.
+# for settings/update compatibility while Finder presents the Nebulens name.
 
 set -euo pipefail
 
@@ -10,8 +10,11 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BUILD_DIR="${BUILD_DIR:-${ROOT_DIR}/build-package-macos}"
 DIST_DIR="${DIST_DIR:-${ROOT_DIR}/dist}"
 INSTALL_ROOT="${INSTALL_ROOT:-/Applications}"
-INSTALLED_APP="${INSTALL_ROOT}/星炼.app"
-LEGACY_APP="${INSTALL_ROOT}/StarProcessor.app"
+INSTALLED_APP="${INSTALL_ROOT}/Nebulens.app"
+LEGACY_APPS=(
+    "${INSTALL_ROOT}/星炼.app"
+    "${INSTALL_ROOT}/StarProcessor.app"
+)
 LSREGISTER="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
 
 if [[ "$(uname -s)" != "Darwin" ]]; then
@@ -34,14 +37,14 @@ fi
 VERSION="$(/usr/libexec/PlistBuddy -c \
     'Print :CFBundleShortVersionString' "${BUILT_APP}/Contents/Info.plist")"
 ARCH="$(uname -m)"
-SOURCE_APP="${DIST_DIR}/.StarProcessor-v${VERSION}-macOS-${ARCH}-staging/dmg/StarProcessor.app"
+SOURCE_APP="${DIST_DIR}/.StarProcessor-v${VERSION}-macOS-${ARCH}-staging/dmg/Nebulens.app"
 if [[ ! -d "${SOURCE_APP}" ]]; then
     echo "Packaged app bundle was not found: ${SOURCE_APP}" >&2
     exit 3
 fi
 
 pkill -x StarProcessor 2>/dev/null || true
-for app in "${INSTALLED_APP}" "${LEGACY_APP}"; do
+for app in "${INSTALLED_APP}" "${LEGACY_APPS[@]}"; do
     if [[ -d "${app}" ]]; then
         "${LSREGISTER}" -u "${app}" 2>/dev/null || true
         rm -rf "${app}"

@@ -65,7 +65,7 @@ class MainWindow : public QMainWindow {
 
 public:
     MainWindow(QWidget* parent = nullptr) : QMainWindow(parent) {
-        setWindowTitle(QString::fromUtf8("星炼 — 星空影像工作台"));
+        setWindowTitle(QString::fromUtf8("Nebulens — 星空影像工作台"));
         resize(1400, 900);
         setMinimumSize(920, 540);
         setAcceptDrops(true);
@@ -1483,8 +1483,8 @@ private slots:
     void onAboutClicked() {
         QMessageBox::about(
             this,
-            QString::fromUtf8("关于星炼"),
-            QString::fromUtf8("星炼\n"
+            QString::fromUtf8("关于 Nebulens"),
+            QString::fromUtf8("Nebulens\n"
             "版本 " STARPROCESSOR_VERSION "\n"
             "星空影像工作台\n"
             "MIT License")
@@ -1998,7 +1998,7 @@ private slots:
         }
 
         QString outPath = m_paramsPanel->outputPath();
-        if (outPath.isEmpty()) outPath = QDir::homePath() + "/星炼/Output";
+        if (outPath.isEmpty()) outPath = QDir::homePath() + "/Nebulens/Output";
         QDir().mkpath(outPath);
 
         ImageExporter::Format fmt = ImageExporter::Tiff16;
@@ -2077,7 +2077,7 @@ private slots:
         auto* outDirLabel = new QLabel("输出目录:", dialog);
         QSettings settings("StarProcessor", "App");
         QString defaultOutDir = settings.value(
-            "outputPath", QDir::homePath() + "/星炼/Output").toString();
+            "outputPath", QDir::homePath() + "/Nebulens/Output").toString();
         auto* outDirEdit = new QLineEdit(defaultOutDir, dialog);
         outDirEdit->setReadOnly(true);
         auto* outDirBtn = new QPushButton(dialog);
@@ -2272,7 +2272,7 @@ int main(int argc, char* argv[]) {
     // Keep the technical application identity for settings/update migration;
     // all user-facing surfaces use the new product name.
     app.setApplicationName("StarProcessor");
-    app.setApplicationDisplayName(QString::fromUtf8("星炼"));
+    app.setApplicationDisplayName(QStringLiteral("Nebulens"));
     app.setApplicationVersion(STARPROCESSOR_VERSION);
     app.setOrganizationName("StarProcessor");
     app.setWindowIcon(UiAssets::appIcon());

@@ -190,7 +190,7 @@ ARCH="$(uname -m)"
 PACKAGE_NAME="StarProcessor-v${VERSION}-macOS-${ARCH}"
 STAGING_DIR="${DIST_DIR}/.${PACKAGE_NAME}-staging"
 DMG_ROOT="${STAGING_DIR}/dmg"
-STAGED_APP="${DMG_ROOT}/StarProcessor.app"
+STAGED_APP="${DMG_ROOT}/Nebulens.app"
 DMG_PATH="${DIST_DIR}/${PACKAGE_NAME}.dmg"
 
 cmake -E make_directory "${DIST_DIR}"
@@ -200,7 +200,7 @@ ditto "${BUILT_APP}" "${STAGED_APP}"
 
 # macdeployqt otherwise copies every image/input plugin associated with QtGui,
 # including QML and virtual-keyboard stacks this Widgets application never
-# loads. Keep only the runtime surface StarProcessor actually uses.
+# loads. Keep only the runtime surface Nebulens actually uses.
 declare -a qt_plugins=(
     "platforms/libqcocoa.dylib"
     "styles/libqmacstyle.dylib"
@@ -334,7 +334,7 @@ ditto "${ROOT_DIR}/LICENSE" "${DMG_ROOT}/LICENSE.txt"
 ditto "${ROOT_DIR}/THIRD_PARTY_NOTICES.md" \
     "${DMG_ROOT}/THIRD_PARTY_NOTICES.md"
 printf '%s\n' \
-    "星炼 ${VERSION}" \
+    "Nebulens ${VERSION}" \
     "Platform: macOS ${ARCH}" \
     "Requested deployment target: macOS ${DEPLOYMENT_TARGET}" \
     "Actual bundled minimum: macOS ${actual_deployment_target}" \
@@ -349,7 +349,7 @@ if [[ "${SKIP_DMG_CREATE:-0}" == "1" ]]; then
 fi
 
 hdiutil create \
-    -volname "星炼 ${VERSION}" \
+    -volname "Nebulens ${VERSION}" \
     -srcfolder "${DMG_ROOT}" \
     -format UDZO \
     -ov "${DMG_PATH}"
