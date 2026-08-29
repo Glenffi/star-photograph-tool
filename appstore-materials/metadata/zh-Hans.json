@@ -1,0 +1,12 @@
+{
+  "locale": "zh-Hans",
+  "name": "Nebulens 星空影像工作台",
+  "subtitle": "银河、深空与星轨 RAW 处理",
+  "promotionalText": "从 RAW 导入、校准、对齐到堆栈与收尾，在一个桌面工作台中完成银河、深空、天地分离、星轨和延时序列处理。",
+  "description": "Nebulens 是面向星空摄影的本地 RAW 影像工作台。它将素材管理、校准、星点对齐、稳健堆栈、色彩调整与导出组织在清晰的六阶段流程中。\n\n主要工作流\n• 单张精修：对单张 RAW 进行降噪、曲线、色彩、锐化、去紫边与缩星。\n• 银河星景：自动选择参考帧，完成星空对齐、异常帧控制与多帧降噪。\n• 深空天体：支持 Light、Dark、Flat、Bias 与 Dark Flat，并可生成和复用 Master。\n• 天地分离：天空按星点对齐，地景保持相机坐标，再沿地平线自然融合。\n• 星轨合成：支持连续 Lighten 与可调方向的彗星拖尾。\n• 延时序列：使用 3 或 5 帧滑动窗口逐帧输出降噪图片序列。\n\n为星空数据设计\n• Average、Median、Kappa-Sigma 与 Winsorized 四种堆栈算法。\n• 帧质量评分、自动参考帧、光度匹配和共同有效区域裁切。\n• BCF/天文改机色彩还原、多尺度降噪、Arcsinh 拉伸与传统 CV 缩星。\n• 16-bit TIFF（线性 sRGB ICC）和 8-bit PNG 导出。\n• 简体中文与英文界面。\n\n隐私\nMac App Store 版本不需要账号，不包含广告、分析或追踪。用户选择的照片只在设备本地读取、处理和导出，不会上传到服务器。",
+  "keywords": "星空摄影,银河,深空,RAW,堆栈,降噪,星轨,校准帧,缩星",
+  "supportUrl": "https://di.nexusgen.net/starprocessor/support/",
+  "marketingUrl": "https://di.nexusgen.net/starprocessor/",
+  "privacyPolicyUrl": "https://di.nexusgen.net/starprocessor/privacy/",
+  "whatsNew": ""
+}

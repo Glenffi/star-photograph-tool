@@ -192,9 +192,15 @@ set(APP_HEADERS
 if(APPLE)
     set(STARPROCESSOR_MAC_ICON
         "${CMAKE_SOURCE_DIR}/resources/StarProcessor.icns")
+    set(NEBULENS_PRIVACY_MANIFEST
+        "${CMAKE_SOURCE_DIR}/resources/PrivacyInfo.xcprivacy")
     set_source_files_properties(${STARPROCESSOR_MAC_ICON} PROPERTIES
         MACOSX_PACKAGE_LOCATION "Resources")
-    list(APPEND APP_SOURCES ${STARPROCESSOR_MAC_ICON})
+    set_source_files_properties(${NEBULENS_PRIVACY_MANIFEST} PROPERTIES
+        MACOSX_PACKAGE_LOCATION "Resources")
+    list(APPEND APP_SOURCES
+        ${STARPROCESSOR_MAC_ICON}
+        ${NEBULENS_PRIVACY_MANIFEST})
 elseif(WIN32)
     configure_file(
         "${CMAKE_SOURCE_DIR}/cmake/StarProcessor.rc.in"

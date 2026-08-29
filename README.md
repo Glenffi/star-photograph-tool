@@ -248,6 +248,15 @@ Windows Server 2022 上使用 MSVC 原生构建。推送与 CMake 版本一致�
 客户端打包流程见 [`docs/release-packaging.md`](docs/release-packaging.md)，更新服务器发布流程见 [`docs/update-distribution.md`](docs/update-distribution.md)。
 双语文本规范、翻译更新命令和视觉检查方法见 [`docs/localization.md`](docs/localization.md)。
 
+## Mac App Store
+
+账号注册、明确 Bundle ID、证书、App Store Connect、沙盒整改、物料上传、TestFlight
+和提交审核的逐步操作见
+[`docs/APPSTORE_SUBMISSION_RUNBOOK.md`](docs/APPSTORE_SUBMISSION_RUNBOOK.md)。
+中英文元数据、隐私政策、审核备注、截图和发布清单位于
+[`appstore-materials`](appstore-materials)。当前直装 DMG 不是 App Store 二进制，
+完成沙盒文件授权、security-scoped bookmark 和商店版更新策略前不要上传。
+
 ## 真实 RAW 样片回归
 
 样片默认放在代码目录旁的 `star-photograph-tool-samples`。工具优先识别约定的五类目录，也会自动发现其他包含 RAW 的一级目录。完整模式会逐张执行正式 AHD 解码、星点检测和同目录序列对齐，并在 `build/sample-regression-output` 写入 `report.json` 与检查预览。对齐使用独立于拟合星点的评估星点集，报告 Affine 与 Homography 两个候选模型的 RMS、P95、外圈 P95、匹配覆盖率和 3×3 网格指标。局部网格同时保留原始 P95 与去除一个最坏样本后的稳健 P95：前者用于诊断，后者用于避免三颗星网格被一个误匹配直接否决；局部 RMS 和全局门限仍会拒绝成组残差。

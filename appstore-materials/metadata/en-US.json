@@ -1,0 +1,12 @@
+{
+  "locale": "en-US",
+  "name": "Nebulens: Astro RAW Studio",
+  "subtitle": "Stack, Calibrate, Refine RAW",
+  "promotionalText": "Import, calibrate, align, stack, and finish Milky Way, deep-sky, sky-and-ground, star-trail, and timelapse RAW projects in one desktop workspace.",
+  "description": "Nebulens is a local RAW imaging workspace built for astrophotography. It organizes asset review, calibration, stellar alignment, robust stacking, color work, and export into a clear six-stage workflow.\n\nPurpose-built workflows\n• Single Frame: denoise, stretch, color, sharpen, defringe, and reduce stars in one RAW exposure.\n• Nightscape: choose a reference automatically, align stars, control outliers, and reduce noise across multiple frames.\n• Deep Sky: combine Light, Dark, Flat, Bias, and Dark Flat frames, then generate and reuse Masters.\n• Sky & Ground: align the sky while keeping the foreground in camera coordinates, then blend along the horizon.\n• Star Trails: create continuous Lighten trails or directional comet tails.\n• Timelapse: export a denoised image sequence with a 3- or 5-frame sliding window.\n\nDesigned for stellar data\n• Average, Median, Kappa-Sigma, and Winsorized stacking.\n• Frame-quality scoring, automatic reference selection, photometric matching, and common-valid-region cropping.\n• Modified-camera color recovery, multiscale denoising, Arcsinh stretching, star defringe, and traditional-CV star reduction.\n• 16-bit TIFF with a linear-sRGB ICC profile and 8-bit PNG export.\n• Complete Simplified Chinese and English interfaces.\n\nPrivacy\nThe Mac App Store build requires no account and contains no advertising, analytics, or tracking. Photos selected by the user are read, processed, and exported locally on the Mac and are never uploaded to a server.",
+  "keywords": "astrophotography,milkyway,deepsky,RAW,stacking,denoise,startrails,calibration,starreduction",
+  "supportUrl": "https://di.nexusgen.net/starprocessor/support/",
+  "marketingUrl": "https://di.nexusgen.net/starprocessor/",
+  "privacyPolicyUrl": "https://di.nexusgen.net/starprocessor/privacy/en/",
+  "whatsNew": ""
+}
