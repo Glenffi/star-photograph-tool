@@ -97,6 +97,7 @@ set(CORE_SOURCES
     src/core/BasicAdjustmentEngine.cpp
     src/core/ChromaticAberrationCorrector.cpp
     src/core/DeepSkyCalibrationPreflight.cpp
+    src/core/FrameSequenceOrder.cpp
     src/core/ImageBufferUtils.cpp
     src/core/MasterFrameIO.cpp
     src/core/MinimumFilter.cpp
@@ -147,6 +148,7 @@ set(CORE_HEADERS
     src/core/BasicAdjustmentEngine.h
     src/core/ChromaticAberrationCorrector.h
     src/core/DeepSkyCalibrationPreflight.h
+    src/core/FrameSequenceOrder.h
     src/core/ImageBufferUtils.h
     src/core/MasterFrameIO.h
     src/core/MinimumFilter.h

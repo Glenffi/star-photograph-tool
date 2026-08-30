@@ -3685,6 +3685,11 @@
             <translation>Star-trail sequence dimensions differ: %1</translation>
         </message>
         <message>
+            <location filename='../src/workers/ProcessingWorker.cpp' line='1710'/>
+            <source>无法确定星轨序列的时间顺序</source>
+            <translation>Unable to determine the chronological order of the Star Trails sequence</translation>
+        </message>
+        <message>
             <location filename='../src/workers/ProcessingWorker.cpp' line='1755'/>
             <source>星轨合成预计需要约 %1 内存，当前安全预算为 %2（系统当前可用约 %3）。请关闭去雾或降噪后重试。</source>
             <translation>
@@ -3772,6 +3777,11 @@
             <location filename='../src/workers/ProcessingWorker.cpp' line='1974'/>
             <source>延时序列尺寸不一致: %1</source>
             <translation>Timelapse sequence dimensions differ: %1</translation>
+        </message>
+        <message>
+            <location filename='../src/workers/ProcessingWorker.cpp' line='1991'/>
+            <source>无法确定延时序列的时间顺序</source>
+            <translation>Unable to determine the chronological order of the timelapse sequence</translation>
         </message>
         <message>
             <location filename='../src/workers/ProcessingWorker.cpp' line='1989'/>

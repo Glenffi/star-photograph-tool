@@ -7,6 +7,7 @@
 #include "core/AutoOptimizeEngine.h"
 #include "core/DeepSkyCalibrationPreflight.h"
 #include "core/FrameQualityEvaluator.h"
+#include "core/FrameSequenceOrder.h"
 #include "core/NoiseReductionEngine.h"
 #include "core/PhotometricNormalizer.h"
 #include "core/PresetManager.h"
@@ -843,6 +844,38 @@ void testDeepSkyCalibrationPreflight() {
               unreadableReport.userMessage().contains(
                   QString::fromUtf8("无法读取 RAW 头信息")),
           "Unreadable RAW headers should be listed before CFA decoding");
+}
+
+void testFrameSequenceOrdering() {
+    const QStringList reverseSelection = {
+        QStringLiteral("/capture/IMG_10.RAW"),
+        QStringLiteral("/capture/IMG_2.RAW"),
+        QStringLiteral("/capture/IMG_1.RAW")};
+    const std::vector<std::string> reverseCaptureTimes = {
+        "2026-08-31 21:00:10",
+        "2026-08-31 21:00:02",
+        "2026-08-31 21:00:01"};
+
+    check(FrameSequenceOrder::chronologicalIndices(
+              reverseSelection, reverseCaptureTimes) ==
+              std::vector<size_t>({2, 1, 0}),
+          "Capture timestamps should reverse a reverse-selected sequence");
+
+    check(FrameSequenceOrder::chronologicalIndices(
+              reverseSelection, {"", "", ""}) ==
+              std::vector<size_t>({2, 1, 0}),
+          "Missing timestamps should fall back to natural file-name order");
+
+    check(FrameSequenceOrder::chronologicalIndices(
+              reverseSelection,
+              {"2026-08-31 21:00:00", "2026-08-31 21:00:00",
+               "2026-08-31 21:00:00"}) ==
+              std::vector<size_t>({2, 1, 0}),
+          "Equal timestamps should use natural file-name order");
+
+    check(FrameSequenceOrder::chronologicalIndices(
+              reverseSelection, {"", ""}).empty(),
+          "Mismatched ordering inputs should be rejected");
 }
 
 void testTimelapseDenoise() {
@@ -3425,6 +3458,7 @@ int main(int argc, char* argv[]) {
     testRawCalibration();
     testMasterFrameIO();
     testDeepSkyCalibrationPreflight();
+    testFrameSequenceOrdering();
     testTimelapseDenoise();
     testTemporalPhotometricSmoothing();
     testImageBufferUtils();

@@ -4,6 +4,7 @@
 #include "core/DeepSkyCalibrationPreflight.h"
 #include "core/FinishingPipeline.h"
 #include "core/FrameQualityEvaluator.h"
+#include "core/FrameSequenceOrder.h"
 #include "core/ImageAligner.h"
 #include "core/ImageBufferUtils.h"
 #include "core/ImageExporter.h"
@@ -47,6 +48,30 @@
 #endif
 
 namespace {
+
+bool reorderChronologically(
+    QStringList& files,
+    std::vector<RawImageLoader::Metadata>& metadata) {
+    std::vector<std::string> captureTimes;
+    captureTimes.reserve(metadata.size());
+    for (const auto& item : metadata) captureTimes.push_back(item.timestamp);
+
+    const std::vector<size_t> order =
+        FrameSequenceOrder::chronologicalIndices(files, captureTimes);
+    if (order.size() != metadata.size()) return false;
+
+    QStringList orderedFiles;
+    orderedFiles.reserve(files.size());
+    std::vector<RawImageLoader::Metadata> orderedMetadata;
+    orderedMetadata.reserve(metadata.size());
+    for (size_t index : order) {
+        orderedFiles.append(files.at(static_cast<qsizetype>(index)));
+        orderedMetadata.push_back(std::move(metadata[index]));
+    }
+    files = std::move(orderedFiles);
+    metadata = std::move(orderedMetadata);
+    return true;
+}
 
 bool loadMaskPreview(const QString& path, QImage& image) {
     RawImageLoader loader;
@@ -1698,35 +1723,11 @@ void ProcessingWorker::runStarTrail() {
         metadata.push_back(std::move(item));
     }
 
-    std::vector<int> chronologicalOrder(static_cast<size_t>(m_files.size()));
-    std::iota(chronologicalOrder.begin(), chronologicalOrder.end(), 0);
-    const bool allHaveTimestamps = std::all_of(
-        metadata.begin(), metadata.end(),
-        [](const RawImageLoader::Metadata& item) {
-            return !item.timestamp.empty();
-        });
-    std::stable_sort(
-        chronologicalOrder.begin(), chronologicalOrder.end(),
-        [this, &metadata, allHaveTimestamps](int left, int right) {
-            const std::string& leftTime = metadata[static_cast<size_t>(left)].timestamp;
-            const std::string& rightTime = metadata[static_cast<size_t>(right)].timestamp;
-            if (allHaveTimestamps && leftTime != rightTime) {
-                return leftTime < rightTime;
-            }
-            return QFileInfo(m_files[left]).fileName().compare(
-                       QFileInfo(m_files[right]).fileName(),
-                       Qt::CaseInsensitive) < 0;
-        });
-    QStringList orderedFiles;
-    orderedFiles.reserve(m_files.size());
-    std::vector<RawImageLoader::Metadata> orderedMetadata;
-    orderedMetadata.reserve(metadata.size());
-    for (int index : chronologicalOrder) {
-        orderedFiles.append(m_files[index]);
-        orderedMetadata.push_back(std::move(metadata[static_cast<size_t>(index)]));
+    if (!reorderChronologically(m_files, metadata)) {
+        m_errorString = QCoreApplication::translate(
+            "Nebulens", "无法确定星轨序列的时间顺序");
+        return;
     }
-    m_files = std::move(orderedFiles);
-    metadata = std::move(orderedMetadata);
 
     const int width = metadata.front().width;
     const int height = metadata.front().height;
@@ -1978,6 +1979,16 @@ void ProcessingWorker::runTimelapse() {
         metadata.push_back(std::move(item));
         emit progress(1 + static_cast<int>(
             (index + 1) * 4.0 / m_files.size()));
+    }
+
+    // Multi-file dialogs do not guarantee visual or chronological selection
+    // order. Sort before building index-based temporal windows so 0001 always
+    // represents the earliest captured RAW, including after importing into an
+    // editor that orders an image sequence by file name.
+    if (!reorderChronologically(m_files, metadata)) {
+        m_errorString = QCoreApplication::translate(
+            "Nebulens", "无法确定延时序列的时间顺序");
+        return;
     }
 
     const int metadataWidth = metadata.front().width;
@@ -2261,6 +2272,8 @@ void ProcessingWorker::runTimelapse() {
 
     emit stageMessage(QCoreApplication::translate("Nebulens", "逐帧滑动窗口降噪..."));
     int writtenFrames = 0;
+    const int outputIndexWidth = std::max(
+        4, static_cast<int>(QString::number(m_files.size()).size()));
     enum class NormalizationState {
         NotAttempted,
         Failed,
@@ -2475,7 +2488,7 @@ void ProcessingWorker::runTimelapse() {
         const QString extension = png ? ".png" : ".tiff";
         const QString baseName = QFileInfo(m_files[targetIndex]).completeBaseName();
         const QString outputName = QString("%1_%2_denoised%3")
-            .arg(targetIndex + 1, 4, 10, QLatin1Char('0'))
+            .arg(targetIndex + 1, outputIndexWidth, 10, QLatin1Char('0'))
             .arg(baseName, extension);
         const QString outputPath = QDir(outputDirectory).filePath(outputName);
         emit stageMessage(QCoreApplication::translate("Nebulens", "输出第 %1/%2 张...")
