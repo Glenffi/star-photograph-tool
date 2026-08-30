@@ -33,6 +33,11 @@ enum class Glyph {
     Undo,
     Reset,
     Done,
+    ChevronLeft,
+    ArrowUp,
+    NewFolder,
+    ListView,
+    DetailView,
     ChevronRight
 };
 

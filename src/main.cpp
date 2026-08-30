@@ -6,7 +6,6 @@
 #include <QHBoxLayout>
 #include <QSplitter>
 #include <QPushButton>
-#include <QFileDialog>
 #include <QMessageBox>
 #include <QStatusBar>
 #include <QMenuBar>
@@ -50,6 +49,7 @@
 #include "ui/StyleTokens.h"
 #include "ui/TaskStatusBar.h"
 #include "ui/WorkflowRail.h"
+#include "ui/FileDialogUtils.h"
 #include "i18n/AppLocalization.h"
 #include "update/UpdateManager.h"
 
@@ -1445,16 +1445,13 @@ private slots:
             statusBar()->showMessage(QCoreApplication::translate("Nebulens", "处理完成后再添加照片"), 3000);
             return;
         }
-        QStringList fileNames = QFileDialog::getOpenFileNames(
+        QStringList fileNames = FileDialogUtils::getOpenFileNames(
             this,
             QCoreApplication::translate("Nebulens", "选择 RAW 文件"),
             QString(),
             QCoreApplication::translate(
                 "Nebulens",
-                "RAW 文件 (*.nef *.cr2 *.arw *.dng *.raw *.orf *.raf *.pef *.cr3);;所有文件 (*)"),
-            nullptr,
-            QFileDialog::DontUseNativeDialog
-        );
+                "RAW 文件 (*.nef *.cr2 *.arw *.dng *.raw *.orf *.raf *.pef *.cr3);;所有文件 (*)"));
 
         if (!fileNames.isEmpty()) {
             importFiles(fileNames);
@@ -1470,12 +1467,11 @@ private slots:
             statusBar()->showMessage(QCoreApplication::translate("Nebulens", "处理完成后再添加文件夹"), 3000);
             return;
         }
-        QString dir = QFileDialog::getExistingDirectory(
+        QString dir = FileDialogUtils::getExistingDirectory(
             this,
             QCoreApplication::translate(
                 "Nebulens", "选择包含 RAW 文件的文件夹"),
-            QString(),
-            QFileDialog::ShowDirsOnly | QFileDialog::DontUseNativeDialog);
+            QString());
         if (!dir.isEmpty()) {
             QDir directory(dir);
             QStringList filters;
@@ -2182,11 +2178,10 @@ private slots:
             StyleTokens::Properties::kVariant,
             StyleTokens::Properties::kIcon);
         connect(outDirBtn, &QPushButton::clicked, this, [this, outDirEdit]() {
-            QString dir = QFileDialog::getExistingDirectory(
+            QString dir = FileDialogUtils::getExistingDirectory(
                 this,
                 QCoreApplication::translate("Nebulens", "选择输出目录"),
-                outDirEdit->text(),
-                QFileDialog::ShowDirsOnly | QFileDialog::DontUseNativeDialog);
+                outDirEdit->text());
             if (!dir.isEmpty()) outDirEdit->setText(dir);
         });
         outDirRow->addWidget(outDirLabel);

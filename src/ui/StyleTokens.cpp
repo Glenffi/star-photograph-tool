@@ -461,6 +461,11 @@ QPushButton[sizeRole="compactText"],
 QToolButton[sizeRole="compactText"] {
     padding: 0 6px;
 }
+QFileDialog QToolButton[dialogToolbarIcon="true"] {
+    min-width: {{CONTROL_HEIGHT}}px;
+    max-width: {{CONTROL_HEIGHT}}px;
+    padding: 0;
+}
 )QSS");
 
     styleSheet += QStringLiteral(R"QSS(

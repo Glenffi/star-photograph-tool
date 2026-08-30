@@ -1,4 +1,6 @@
 #include "i18n/AppLocalization.h"
+#include "ui/FileDialogUtils.h"
+#include "ui/StyleTokens.h"
 
 #include <QApplication>
 #include <QCoreApplication>
@@ -7,7 +9,9 @@
 #include <QPushButton>
 #include <QSettings>
 #include <QTemporaryDir>
+#include <QToolButton>
 
+#include <array>
 #include <cstdlib>
 #include <iostream>
 #include <memory>
@@ -37,6 +41,7 @@ std::unique_ptr<QFileDialog> localizedOpenDialog() {
     dialog->setNameFilter(QCoreApplication::translate(
         "Nebulens",
         "RAW 文件 (*.nef *.cr2 *.arw *.dng *.raw *.orf *.raf *.pef *.cr3);;所有文件 (*)"));
+    FileDialogUtils::applyToolbarIcons(*dialog);
     dialog->ensurePolished();
     return dialog;
 }
@@ -45,6 +50,7 @@ std::unique_ptr<QFileDialog> localizedOpenDialog() {
 
 int main(int argc, char* argv[]) {
     QApplication app(argc, argv);
+    app.setStyleSheet(StyleTokens::appStyleSheet());
     QTemporaryDir settingsDirectory;
     check(settingsDirectory.isValid(),
           "Temporary settings directory should be available");
@@ -59,6 +65,32 @@ int main(int argc, char* argv[]) {
     auto chineseDialog = localizedOpenDialog();
     check(chineseDialog->testOption(QFileDialog::DontUseNativeDialog),
           "Localized file dialogs should use the Qt implementation");
+    constexpr std::array<const char*, 6> iconButtonNames{{
+        "backButton", "forwardButton", "toParentButton",
+        "newFolderButton", "listModeButton", "detailModeButton"
+    }};
+    for (const char* objectName : iconButtonNames) {
+        auto* button = chineseDialog->findChild<QToolButton*>(
+            QString::fromLatin1(objectName));
+        check(button && button->property("nebDialogIcon").toBool() &&
+                  button->property("dialogToolbarIcon").toBool() &&
+                  button->iconSize().width() >= 20 &&
+                  !button->icon().isNull() &&
+                  !button->icon().pixmap(18, 18).isNull(),
+              "Every file-dialog toolbar button should use a visible custom icon");
+    }
+    const QString screenshotPath = qEnvironmentVariable(
+        "NEBULENS_DIALOG_SCREENSHOT");
+    if (!screenshotPath.isEmpty()) {
+        chineseDialog->resize(900, 620);
+        chineseDialog->show();
+        QApplication::processEvents();
+        FileDialogUtils::applyToolbarIcons(*chineseDialog);
+        QApplication::processEvents();
+        check(chineseDialog->grab().save(screenshotPath),
+              "File-dialog visual regression screenshot should save");
+        chineseDialog->hide();
+    }
     check(chineseDialog->windowTitle() == QString::fromUtf8("选择 RAW 文件") &&
               standardButtonText(*chineseDialog, QDialogButtonBox::Cancel)
                   .contains(QString::fromUtf8("取消")),

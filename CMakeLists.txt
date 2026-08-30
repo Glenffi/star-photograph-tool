@@ -131,6 +131,7 @@ set(APP_SOURCES
     src/core/ThumbnailGenerator.cpp
     src/ui/ProjectPanel.cpp
     src/ui/PreviewPanel.cpp
+    src/ui/FileDialogUtils.cpp
     src/ui/Toolbar.cpp
     src/ui/ParamsPanel.cpp
     src/ui/UiAssets.cpp
@@ -177,6 +178,7 @@ set(APP_HEADERS
     src/core/ThumbnailGenerator.h
     src/ui/ProjectPanel.h
     src/ui/PreviewPanel.h
+    src/ui/FileDialogUtils.h
     src/ui/Toolbar.h
     src/ui/ParamsPanel.h
     src/ui/UiAssets.h
@@ -272,6 +274,12 @@ if(BUILD_TESTING)
         tests/LocalizationDialogTests.cpp
         src/i18n/AppLocalization.cpp
         src/i18n/AppLocalization.h
+        src/ui/FileDialogUtils.cpp
+        src/ui/FileDialogUtils.h
+        src/ui/StyleTokens.cpp
+        src/ui/StyleTokens.h
+        src/ui/UiAssets.cpp
+        src/ui/UiAssets.h
         resources/translations.qrc)
     target_include_directories(NebulensLocalizationDialogTests PRIVATE
         ${CMAKE_SOURCE_DIR}/src)
@@ -371,6 +379,8 @@ if(BUILD_TESTING)
         tests/ParamsPanelTests.cpp
         src/ui/ParamsPanel.cpp
         src/ui/ParamsPanel.h
+        src/ui/FileDialogUtils.cpp
+        src/ui/FileDialogUtils.h
         src/ui/UiAssets.cpp
         src/ui/UiAssets.h
         src/ui/StyleTokens.cpp

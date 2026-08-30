@@ -219,6 +219,44 @@ void paintGlyph(QPainter& painter, UiAssets::Glyph glyph,
             painter.drawLine(QPointF(4.0, 12.5), QPointF(9.5, 18.0));
             painter.drawLine(QPointF(9.5, 18.0), QPointF(20.0, 6.0));
             break;
+        case UiAssets::Glyph::ChevronLeft:
+            painter.drawLine(QPointF(16.0, 5.0), QPointF(9.0, 12.0));
+            painter.drawLine(QPointF(9.0, 12.0), QPointF(16.0, 19.0));
+            break;
+        case UiAssets::Glyph::ArrowUp:
+            painter.drawLine(QPointF(12.0, 19.0), QPointF(12.0, 5.0));
+            painter.drawLine(QPointF(12.0, 5.0), QPointF(6.5, 10.5));
+            painter.drawLine(QPointF(12.0, 5.0), QPointF(17.5, 10.5));
+            break;
+        case UiAssets::Glyph::NewFolder: {
+            QPainterPath folder;
+            folder.moveTo(2.5, 8.0);
+            folder.lineTo(8.0, 8.0);
+            folder.lineTo(10.0, 10.0);
+            folder.lineTo(19.5, 10.0);
+            folder.lineTo(18.5, 19.0);
+            folder.lineTo(2.5, 19.0);
+            folder.closeSubpath();
+            painter.drawPath(folder);
+            painter.drawLine(QPointF(16.5, 3.5), QPointF(16.5, 9.0));
+            painter.drawLine(QPointF(13.75, 6.25), QPointF(19.25, 6.25));
+            break;
+        }
+        case UiAssets::Glyph::ListView:
+            for (qreal y : {6.0, 12.0, 18.0}) {
+                painter.setBrush(color);
+                painter.drawEllipse(QPointF(5.0, y), 1.0, 1.0);
+                painter.setBrush(Qt::NoBrush);
+                painter.drawLine(QPointF(9.0, y), QPointF(20.0, y));
+            }
+            break;
+        case UiAssets::Glyph::DetailView:
+            painter.drawRoundedRect(QRectF(3.0, 4.0, 18.0, 16.0), 1.0, 1.0);
+            painter.drawLine(QPointF(3.0, 9.0), QPointF(21.0, 9.0));
+            painter.drawLine(QPointF(9.0, 4.0), QPointF(9.0, 20.0));
+            painter.drawLine(QPointF(15.0, 4.0), QPointF(15.0, 20.0));
+            painter.drawLine(QPointF(3.0, 14.5), QPointF(21.0, 14.5));
+            break;
         case UiAssets::Glyph::ChevronRight:
             painter.drawLine(QPointF(8.0, 5.0), QPointF(15.0, 12.0));
             painter.drawLine(QPointF(15.0, 12.0), QPointF(8.0, 19.0));
@@ -229,19 +267,26 @@ void paintGlyph(QPainter& painter, UiAssets::Glyph glyph,
 } // namespace
 
 QIcon UiAssets::icon(Glyph glyph, const QColor& color, int logicalSize) {
-    const int pixels = qMax(1, qRound(logicalSize * kDeviceScale));
-    QImage image(pixels, pixels, QImage::Format_ARGB32_Premultiplied);
-    image.fill(Qt::transparent);
+    QIcon result;
+    // Supplying only a 2x pixmap makes Qt's non-native file dialog render the
+    // glyph at half size on 1x/offscreen surfaces. Register both density
+    // variants so every QToolButton receives the requested logical size.
+    for (const qreal scale : {1.0, kDeviceScale}) {
+        const int pixels = qMax(1, qRound(logicalSize * scale));
+        QImage image(pixels, pixels, QImage::Format_ARGB32_Premultiplied);
+        image.fill(Qt::transparent);
 
-    QPainter painter(&image);
-    painter.setRenderHint(QPainter::Antialiasing, true);
-    painter.scale(pixels / kDesignSize, pixels / kDesignSize);
-    paintGlyph(painter, glyph, color);
-    painter.end();
+        QPainter painter(&image);
+        painter.setRenderHint(QPainter::Antialiasing, true);
+        painter.scale(pixels / kDesignSize, pixels / kDesignSize);
+        paintGlyph(painter, glyph, color);
+        painter.end();
 
-    QPixmap pixmap = QPixmap::fromImage(image);
-    pixmap.setDevicePixelRatio(kDeviceScale);
-    return QIcon(pixmap);
+        QPixmap pixmap = QPixmap::fromImage(image);
+        pixmap.setDevicePixelRatio(scale);
+        result.addPixmap(pixmap);
+    }
+    return result;
 }
 
 QPixmap UiAssets::logoMark(int logicalSize) {

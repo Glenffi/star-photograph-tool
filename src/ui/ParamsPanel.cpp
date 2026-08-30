@@ -1,6 +1,7 @@
 #include "ParamsPanel.h"
 #include "ProcessingScene.h"
 #include "InspectorWidgets.h"
+#include "FileDialogUtils.h"
 #include "StyleTokens.h"
 #include "UiAssets.h"
 #include "core/PresetManager.h"
@@ -18,7 +19,6 @@
 #include <QLineEdit>
 #include <QListWidget>
 #include <QListWidgetItem>
-#include <QFileDialog>
 #include <QFileInfo>
 #include <QGraphicsOpacityEffect>
 #include <QDir>
@@ -545,12 +545,11 @@ void ParamsPanel::setupUI() {
     m_importMaskBtn = new QPushButton(QCoreApplication::translate("Nebulens", "导入蒙版..."), m_stackGroup);
     m_importMaskBtn->setVisible(false);
     connect(m_importMaskBtn, &QPushButton::clicked, this, [this]() {
-        QString path = QFileDialog::getOpenFileName(
+        QString path = FileDialogUtils::getOpenFileName(
             this, QCoreApplication::translate("Nebulens", "选择蒙版"),
             QString(),
             QCoreApplication::translate(
-                "Nebulens", "图像 (*.png *.jpg *.bmp)"),
-            nullptr, QFileDialog::DontUseNativeDialog);
+                "Nebulens", "图像 (*.png *.jpg *.bmp)"));
         if (!path.isEmpty()) {
             m_userMaskPath = path;
             m_maskPathLabel->setText(QFileInfo(path).fileName());
@@ -1174,10 +1173,9 @@ void ParamsPanel::setupUI() {
     pathBtn->setAccessibleName(pathBtn->toolTip());
     setButtonVariant(pathBtn, "icon");
     connect(pathBtn, &QPushButton::clicked, this, [this]() {
-        QString dir = QFileDialog::getExistingDirectory(
+        QString dir = FileDialogUtils::getExistingDirectory(
             this, QCoreApplication::translate("Nebulens", "选择输出目录"),
-            outputPath(),
-            QFileDialog::ShowDirsOnly | QFileDialog::DontUseNativeDialog);
+            outputPath());
         if (!dir.isEmpty()) {
             displayOutputPath(m_outputPath, dir);
             refreshRecentResults();
@@ -2817,12 +2815,11 @@ void ParamsPanel::importCalibrationFrames(QStringList& paths,
                                           QLabel* countLabel,
                                           QPushButton* clearButton,
                                           const QString& dialogTitle) {
-    const QStringList selected = QFileDialog::getOpenFileNames(
+    const QStringList selected = FileDialogUtils::getOpenFileNames(
         this, dialogTitle, QString(),
         QCoreApplication::translate("Nebulens",
             "RAW 文件 (*.nef *.cr2 *.arw *.dng *.raw *.orf *.raf *.pef *.cr3);;"
-            "所有文件 (*)"),
-        nullptr, QFileDialog::DontUseNativeDialog);
+            "所有文件 (*)"));
     if (selected.isEmpty()) return;
 
     auto pathIdentity = [](const QString& path) {
@@ -2890,14 +2887,13 @@ void ParamsPanel::importCalibrationMaster(QString& masterPath,
                                           QPushButton* clearButton,
                                           const QString& roleName,
                                           bool confirmNormalizedFlat) {
-    const QString selected = QFileDialog::getOpenFileName(
+    const QString selected = FileDialogUtils::getOpenFileName(
         this,
         QCoreApplication::translate("Nebulens", "选择 Master %1")
             .arg(roleName),
         QString(),
         QCoreApplication::translate(
-            "Nebulens", "Nebulens Master (*.spmaster)"),
-        nullptr, QFileDialog::DontUseNativeDialog);
+            "Nebulens", "Nebulens Master (*.spmaster)"));
     if (selected.isEmpty()) return;
 
     const QFileInfo selectedInfo(selected);

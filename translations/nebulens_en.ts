@@ -4181,5 +4181,10 @@
             <source>取消处理，当前进度 %1%</source>
             <translation>Cancel processing, current progress %1%</translation>
         </message>
+        <message>
+            <location filename='../src/ui/FileDialogUtils.cpp' line='79'/>
+            <source>选择</source>
+            <translation>Select</translation>
+        </message>
     </context>
 </TS>
