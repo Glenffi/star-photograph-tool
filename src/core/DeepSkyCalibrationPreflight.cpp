@@ -1,5 +1,6 @@
 #include "DeepSkyCalibrationPreflight.h"
 #include "MasterFrameIO.h"
+#include "RawCalibrationEngine.h"
 
 #include <QCoreApplication>
 #include <QFileInfo>
@@ -429,11 +430,20 @@ DeepSkyCalibrationPreflight::Report DeepSkyCalibrationPreflight::validate(
     const double maximumBiasExposure =
         std::min(0.1, baseline.exposureTime * 0.01);
     const FrameRecord* flatReference = nullptr;
+    double shortestFlatExposure = 0.0;
+    double longestFlatExposure = 0.0;
     for (const FrameRecord& frame : frames) {
-        if (frame.role == Role::Flat && frame.readable) {
-            flatReference = &frame;
-            break;
+        const double exposure = frame.metadata.exposureTime;
+        if (frame.role != Role::Flat || !frame.readable ||
+            !std::isfinite(exposure) || exposure <= 0.0) {
+            continue;
         }
+        if (!flatReference) {
+            flatReference = &frame;
+            shortestFlatExposure = exposure;
+        }
+        shortestFlatExposure = std::min(shortestFlatExposure, exposure);
+        longestFlatExposure = std::max(longestFlatExposure, exposure);
     }
     const bool usesDarkFlat = buildsFlat && darkFlatSources > 0;
     for (const FrameRecord& frame : frames) {
@@ -528,19 +538,26 @@ DeepSkyCalibrationPreflight::Report DeepSkyCalibrationPreflight::validate(
                 frame.path);
         } else if ((frame.role == Role::DarkFlat ||
                     frame.role == Role::MasterDarkFlat) &&
-                   flatReference &&
-                   !exposureMatches(metadata.exposureTime,
-                                    flatReference->metadata.exposureTime)) {
-            addFinding(
-                Severity::Error, frame.role,
-                QStringLiteral("dark-flat-exposure-%1")
-                    .arg(metadata.exposureTime, 0, 'g', 6),
-                QCoreApplication::translate("Nebulens",
-                    "%1 曝光不匹配：当前 %2 秒，Flat 为 %3 秒。")
-                    .arg(role)
-                    .arg(metadata.exposureTime, 0, 'g', 6)
-                    .arg(flatReference->metadata.exposureTime, 0, 'g', 6),
-                frame.path);
+                   flatReference) {
+            // Matching the extremes guarantees the offset matches every Flat,
+            // even when both exposures seem close enough to the first Flat.
+            const double unmatchedFlatExposure =
+                !exposureMatches(metadata.exposureTime, shortestFlatExposure)
+                    ? shortestFlatExposure
+                    : !exposureMatches(metadata.exposureTime, longestFlatExposure)
+                        ? longestFlatExposure : 0.0;
+            if (unmatchedFlatExposure > 0.0) {
+                addFinding(
+                    Severity::Error, frame.role,
+                    QStringLiteral("dark-flat-exposure-%1")
+                        .arg(metadata.exposureTime, 0, 'g', 6),
+                    QCoreApplication::translate("Nebulens",
+                        "%1 曝光不匹配：当前 %2 秒，Flat 为 %3 秒。")
+                        .arg(role)
+                        .arg(metadata.exposureTime, 0, 'g', 6)
+                        .arg(unmatchedFlatExposure, 0, 'g', 6),
+                    frame.path);
+            }
         } else if (frame.role == Role::Flat && usesDarkFlat &&
                    flatReference &&
                    !exposureMatches(metadata.exposureTime,
@@ -571,13 +588,7 @@ DeepSkyCalibrationPreflight::Report DeepSkyCalibrationPreflight::validate(
 
 bool DeepSkyCalibrationPreflight::exposureMatches(
     double first, double second) {
-    if (!std::isfinite(first) || !std::isfinite(second) ||
-        first <= 0.0 || second <= 0.0) {
-        return false;
-    }
-    const double tolerance = std::max(
-        0.01, std::max(first, second) * 0.01);
-    return std::abs(first - second) <= tolerance;
+    return RawCalibrationEngine::exposureMatches(first, second);
 }
 
 QString DeepSkyCalibrationPreflight::roleName(Role role) {

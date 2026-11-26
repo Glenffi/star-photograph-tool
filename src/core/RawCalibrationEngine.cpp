@@ -29,16 +29,6 @@ bool validSensorGeometry(int width, int height, int rawWidth, int rawHeight,
         topMargin <= rawHeight - height;
 }
 
-bool exposureMatches(double first, double second) {
-    if (!std::isfinite(first) || !std::isfinite(second) || first <= 0.0 ||
-        second <= 0.0) {
-        return false;
-    }
-    const double tolerance = std::max(
-        0.01, std::max(first, second) * 0.01);
-    return std::abs(first - second) <= tolerance;
-}
-
 bool finitePixels(const std::vector<float>& values) {
     return std::all_of(values.begin(), values.end(), [](float value) {
         return std::isfinite(value);
@@ -136,6 +126,16 @@ bool phaseMedians(const std::vector<float>& values, int width, int height,
 }
 
 } // namespace
+
+bool RawCalibrationEngine::exposureMatches(double first, double second) noexcept {
+    if (!std::isfinite(first) || !std::isfinite(second) ||
+        first <= 0.0 || second <= 0.0) {
+        return false;
+    }
+    // A relative tolerance admits metadata rounding without letting a fixed
+    // number of milliseconds dominate the duration of very short exposures.
+    return std::abs(first - second) / std::max(first, second) <= 0.01;
+}
 
 bool RawCalibrationEngine::MasterFrame::complete() const noexcept {
     size_t pixelCount = 0;

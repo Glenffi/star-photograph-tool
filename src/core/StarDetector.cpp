@@ -1,6 +1,91 @@
 #include "StarDetector.h"
-#include <cmath>
+
 #include <algorithm>
+#include <array>
+#include <cmath>
+#include <utility>
+
+bool StarDetector::detectForAlignment(const std::vector<uint16_t>& image,
+                                      int width, int height,
+                                      AlignmentStarSelection& selection) {
+    constexpr int gridSize = 3;
+    // Match the sampling scale of the aligner's coverage check. Fewer than
+    // 18 evaluation stars would bypass its full-field coverage gates.
+    constexpr size_t minCellEvaluation = 3;
+    constexpr size_t minIndependentEvaluation = 18;
+    constexpr size_t minIndependentFit = 12;
+    constexpr size_t maxFit = 50;
+
+    selection = {};
+    DetectionOptions options;
+    options.spatiallyBalanced = true;
+    options.maxCandidates = 300;
+    options.maxStars = options.maxCandidates;
+    std::vector<StarPoint> detected;
+    if (!detect(image, width, height, detected, options)) return false;
+    selection.detectedCount = detected.size();
+
+    struct Cell {
+        std::vector<StarPoint> stars;
+        size_t fitCount = 0;
+    };
+    std::array<Cell, gridSize * gridSize> cells;
+    for (const StarPoint& star : detected) {
+        const int column = std::clamp(
+            static_cast<int>(star.x * gridSize / width), 0, gridSize - 1);
+        const int row = std::clamp(
+            static_cast<int>(star.y * gridSize / height), 0, gridSize - 1);
+        cells[row * gridSize + column].stars.push_back(star);
+    }
+    size_t fitAvailable = 0;
+    for (const Cell& cell : cells) {
+        const size_t count = cell.stars.size();
+        fitAvailable += count - std::min(count, minCellEvaluation);
+    }
+    if (detected.size() < minIndependentFit + minIndependentEvaluation ||
+        fitAvailable < minIndependentFit) {
+        selection.fit = detected;
+        selection.evaluation = std::move(detected);
+        return true;
+    }
+
+    for (Cell& cell : cells) {
+        std::sort(cell.stars.begin(), cell.stars.end(),
+                  [](const StarPoint& a, const StarPoint& b) {
+                      if (a.flux != b.flux) return a.flux > b.flux;
+                      if (a.y != b.y) return a.y < b.y;
+                      return a.x < b.x;
+                  });
+    }
+    const auto selectFit = [&](size_t budget, bool reserveHalf) {
+        while (selection.fit.size() < budget) {
+            bool added = false;
+            for (Cell& cell : cells) {
+                const size_t count = cell.stars.size();
+                const size_t reserved = std::min(
+                    count, std::max(minCellEvaluation,
+                                    reserveHalf ? (count + 1) / 2 : 0));
+                if (cell.fitCount >= count - reserved) continue;
+                selection.fit.push_back(cell.stars[cell.fitCount++]);
+                added = true;
+                if (selection.fit.size() == budget) break;
+            }
+            if (!added) break;
+        }
+    };
+
+    // Keep roughly half of each cell for evaluation. Spend that reserve only
+    // when more fit stars are needed, without erasing an eligible cell.
+    selectFit(std::min(maxFit, detected.size() - minIndependentEvaluation), true);
+    selectFit(minIndependentFit, false);
+    for (const Cell& cell : cells) {
+        selection.evaluation.insert(selection.evaluation.end(),
+                                    cell.stars.begin() + cell.fitCount,
+                                    cell.stars.end());
+    }
+    selection.independentEvaluation = true;
+    return true;
+}
 
 // 高斯核生成
 static std::vector<float> generateGaussianKernel(int size, float sigma) {

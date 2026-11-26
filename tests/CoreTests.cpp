@@ -495,6 +495,22 @@ void testRawCalibration() {
               preservedOutput == std::vector<float>{42.0f},
           "Rejected Dark Flat metadata must not overwrite an existing output buffer");
 
+    RawImageLoader::CfaImageData shortFlat = longFlat;
+    shortFlat.exposureTime = 0.001;
+    wrongExposureDarkFlat.exposureTime = 0.01;
+    check(!RawCalibrationEngine::normalizeFlat(
+              shortFlat, wrongExposureDarkFlat, preservedOutput, nullptr,
+              &reason) &&
+              reason == "Master Dark Flat exposure differs from Flat" &&
+              preservedOutput == std::vector<float>{42.0f},
+          "CFA calibration must reject a 10 ms offset for a 1 ms Flat");
+    RawCalibrationEngine::MasterFrame roundedDarkFlat = masterDarkFlat;
+    roundedDarkFlat.exposureTime = 0.000997;
+    check(RawCalibrationEngine::normalizeFlat(
+              shortFlat, roundedDarkFlat, preservedOutput, nullptr, &reason) &&
+              reason.empty() && preservedOutput == darkFlatNormalized,
+          "CFA calibration should accept a rounded 1 ms exposure");
+
     // Imported masters carry their own geometry/CFA metadata. A calibrated,
     // normalized Master Flat removes the runtime dependency on Master Bias.
     RawCalibrationEngine::MasterFrame importedDark;
@@ -736,6 +752,48 @@ void testDeepSkyCalibrationPreflight() {
               wrongDarkFlatReport.userMessage().contains(
                   QString::fromUtf8("Dark Flat 曝光不匹配")),
           "Dark Flat exposure must match the Flat group");
+
+    const auto validateShortFlatGroup = [&](Preflight::Role offsetRole,
+                                           double flatExposure,
+                                           double offsetExposure) {
+        std::vector<Preflight::FrameRecord> shortFlatGroup = {
+            valid[0], valid[1]
+        };
+        for (int i = 0; i < 3; ++i) {
+            shortFlatGroup.push_back(frame(
+                QString("/tmp/short-dark-%1.cr2").arg(i),
+                Preflight::Role::Dark, 1600, 30.0));
+            shortFlatGroup.push_back(frame(
+                QString("/tmp/short-flat-%1.cr2").arg(i),
+                Preflight::Role::Flat, 1600, i == 1 ? flatExposure : 0.001));
+            if (offsetRole == Preflight::Role::DarkFlat || i == 0) {
+                shortFlatGroup.push_back(frame(
+                    QString("/tmp/short-offset-%1").arg(i),
+                    offsetRole, 1600, offsetExposure));
+            }
+        }
+        return Preflight::validate(shortFlatGroup);
+    };
+    const auto rejectsOffsetExposure = [](const Preflight::Report& report,
+                                          Preflight::Role role) {
+        return std::any_of(
+            report.findings.begin(), report.findings.end(),
+            [role](const Preflight::Finding& finding) {
+                return finding.severity == Preflight::Severity::Error &&
+                    finding.role == role && finding.groupKey.startsWith(
+                        QStringLiteral("dark-flat-exposure-"));
+            });
+    };
+    for (auto role : {Preflight::Role::DarkFlat,
+                      Preflight::Role::MasterDarkFlat}) {
+        check(rejectsOffsetExposure(validateShortFlatGroup(role, 0.001, 0.01), role),
+              "Preflight must reject a raw or Master 10 ms offset for 1 ms Flats");
+        check(!validateShortFlatGroup(role, 0.000997, 0.001).hasErrors(),
+              "Preflight should accept slightly rounded 1 ms metadata");
+        check(rejectsOffsetExposure(
+                  validateShortFlatGroup(role, 0.000991, 0.001009), role),
+              "The offset must match every Flat, not just the first exposure");
+    }
 
     std::vector<Preflight::FrameRecord> mixedFlatExposure = darkFlatValid;
     for (Preflight::FrameRecord& item : mixedFlatExposure) {
@@ -2189,6 +2247,109 @@ void testAlignmentEstimation() {
           "Failed model selection should be explicit in alignment diagnostics");
 }
 
+void testAlignmentStarSelection() {
+    constexpr int width = 600;
+    constexpr int height = 450;
+    StarDetector detector;
+    const auto detectShiftedField = [&](int shift, int rows, int starsPerCell) {
+        std::vector<uint16_t> image(width * height, 1000);
+        std::mt19937 random(0x53544152U);
+        for (int row = 0; row < rows; ++row) {
+            for (int col = 0; col < 3; ++col) {
+                for (int star = 0; star < starsPerCell; ++star) {
+                    const int jitterX = static_cast<int>(random() % 13) - 6;
+                    const int jitterY = static_cast<int>(random() % 13) - 6;
+                    const double x = col * 200 + 20.23 +
+                        (star % 5) * 34 + jitterX + shift;
+                    const double y = row * 150 + 22.19 +
+                        (star / 5) * 40 + jitterY + shift * 0.5;
+                    addGaussianStar(image, width, height, x, y, 1.5,
+                                    12000.0 + 1800.0 * star);
+                }
+            }
+        }
+        AlignmentStarSelection selection;
+        check(detector.detectForAlignment(image, width, height, selection) &&
+                  selection.detectedCount == static_cast<size_t>(rows * 3 * starsPerCell),
+              "Every generated Gaussian star should be detected");
+        return selection;
+    };
+    const auto countsByCell = [](const std::vector<StarPoint>& stars) {
+        std::array<int, 9> counts = {};
+        for (const StarPoint& star : stars) {
+            const int column = static_cast<int>(star.x * 3 / width);
+            const int row = static_cast<int>(star.y * 3 / height);
+            ++counts[row * 3 + column];
+        }
+        return counts;
+    };
+
+    // The last 34 stars in a row-major 50+34 split all lie in the second row.
+    std::array<AlignmentStarSelection, 3> frames;
+    for (int i = 0; i < 3; ++i) {
+        frames[i] = detectShiftedField(i, 2, 14);
+        const auto& stars = frames[i];
+        const auto fitCells = countsByCell(stars.fit);
+        const auto evaluationCells = countsByCell(stars.evaluation);
+        for (int cell = 0; cell < 6; ++cell) {
+            check(fitCells[cell] >= 3 && evaluationCells[cell] >= 3,
+                  "Fit and holdout stars should both sample every populated cell");
+        }
+        const bool overlaps = std::any_of(
+            stars.fit.begin(), stars.fit.end(), [&](const StarPoint& fit) {
+                return std::any_of(
+                    stars.evaluation.begin(), stars.evaluation.end(),
+                    [&](const StarPoint& evaluation) {
+                        return std::hypot(fit.x - evaluation.x, fit.y - evaluation.y) < 1.0;
+                    });
+            });
+        check(stars.independentEvaluation && !overlaps &&
+                  stars.fit.size() <= 50 && stars.evaluation.size() >= 18 &&
+                  stars.fit.size() + stars.evaluation.size() == stars.detectedCount,
+              "Independent fit and evaluation sets must partition real detections");
+    }
+
+    ImageAligner aligner;
+    AlignmentOptions options;
+    options.imageWidth = width;
+    options.imageHeight = height;
+    for (int reference = 0; reference < 3; ++reference) {
+        for (int source = 0; source < 3; ++source) {
+            if (reference == source) continue;
+            options.evaluationReferenceStars = &frames[reference].evaluation;
+            options.evaluationSourceStars = &frames[source].evaluation;
+            AlignmentTransform transform;
+            AlignmentQuality quality;
+            const double shift = reference - source;
+            check(aligner.align(frames[reference].fit, frames[source].fit,
+                                transform, &quality, options) &&
+                      quality.eligibleCells == 6 && quality.coveredCells == 6 &&
+                      quality.outerCoveredCells >= 3 && quality.rmsError < 0.2 &&
+                      std::abs(transform.c - shift) < 0.2 &&
+                      std::abs(transform.f - shift * 0.5) < 0.2,
+                  "Every reference should recover the known translation with independent coverage");
+        }
+    }
+
+    for (int starsPerCell : {14, 7}) {
+        const auto reference = detectShiftedField(0, 1, starsPerCell);
+        const auto source = detectShiftedField(1, 1, starsPerCell);
+        AlignmentTransform transform;
+        AlignmentQuality quality;
+        options.evaluationReferenceStars = &reference.evaluation;
+        options.evaluationSourceStars = &source.evaluation;
+        check(reference.independentEvaluation == (starsPerCell == 14) &&
+                  reference.evaluation.size() >= 18 &&
+                  !aligner.align(reference.fit, source.fit, transform, &quality, options) &&
+                  quality.affineEvaluated && quality.affineCandidate.eligibleCells == 3 &&
+                  std::find(quality.affineCandidate.failureReasons.begin(),
+                            quality.affineCandidate.failureReasons.end(),
+                            "insufficient-field-coverage") !=
+                      quality.affineCandidate.failureReasons.end(),
+              "Intrinsically narrow fields must still fail the full-field coverage gate");
+    }
+}
+
 void testStarDetectionAndReduction() {
     constexpr int width = 96;
     constexpr int height = 72;
@@ -3469,6 +3630,7 @@ int main(int argc, char* argv[]) {
     testPreviewToneMapper();
     testTransformDirection();
     testAlignmentEstimation();
+    testAlignmentStarSelection();
     testStarDetectionAndReduction();
     testNoiseReduction();
     testPhotometricNormalization();

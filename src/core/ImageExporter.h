@@ -49,6 +49,15 @@ public:
                             Format format = Tiff16,
                             const std::function<bool()>& cancelled = {});
 
+    // Publish in preferredPath's existing directory without replacing a file.
+    // On collision, append a number before the extension. actualPath is empty
+    // on failure or cancellation. After publication, cancellation has no effect.
+    static bool exportNewRgb16(const std::vector<uint16_t>& rgb,
+                               int width, int height,
+                               const QString& preferredPath, Format format,
+                               QString& actualPath,
+                               const std::function<bool()>& cancelled = {});
+
     // 读取本应用导出的 16-bit 连续平面 TIFF。灰度输入会复制为 RGB。
     static bool loadTiffRgb16(const QString& path,
                               std::vector<uint16_t>& rgb,

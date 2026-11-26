@@ -43,8 +43,16 @@
 #include <numeric>
 #include <utility>
 
+#ifdef Q_OS_WIN
+#include <QtCore/qt_windows.h>
+#include <string>
+#endif
 #ifdef Q_OS_MACOS
 #include <fcntl.h>
+#include <sys/mount.h>
+#endif
+#ifdef Q_OS_UNIX
+#include <sys/stat.h>
 #endif
 
 namespace {
@@ -103,6 +111,179 @@ QString formatMemoryBytes(uint64_t bytes) {
         return QString("%1 MB").arg(bytes / kMiB, 0, 'f', 0);
     }
     return QString("%1 GB").arg(bytes / kGiB, 0, 'f', 1);
+}
+
+#ifdef Q_OS_WIN
+struct WindowsVolumeSpace {
+    qint64 availableBytes = -1;
+    int allocationUnit = -1;
+    QString key;
+
+    int blockSize() const { return allocationUnit; }
+};
+
+bool hasWindowsDevicePrefix(const QString& path) {
+    return path.startsWith(QStringLiteral(R"(\\?\)")) ||
+        path.startsWith(QStringLiteral(R"(\\.\)"));
+}
+
+QString uncShareRoot(QString path) {
+    if (hasWindowsDevicePrefix(path)) {
+        if (path.mid(4, 4).compare(QStringLiteral("UNC\\"), Qt::CaseInsensitive) != 0) return {};
+        path.remove(2, 6);
+    }
+    if (!path.startsWith(QStringLiteral(R"(\\)"))) return {};
+    const auto serverEnd = path.indexOf(u'\\', 2);
+    if (serverEnd < 3 || serverEnd + 1 >= path.size()) return {};
+    const auto shareEnd = path.indexOf(u'\\', serverEnd + 1);
+    if (shareEnd == serverEnd + 1) return {};
+    if (shareEnd >= 0) path.truncate(shareEnd);
+    return path + u'\\';
+}
+
+QString mappedDriveShare(const QString& drive) {
+    // Load the system DLL on demand without adding a link dependency on Mpr.
+    using GetConnection = DWORD (WINAPI*)(LPCWSTR, LPWSTR, LPDWORD);
+    static const auto getConnection = []() -> GetConnection {
+        const auto module = ::LoadLibraryExW(L"mpr.dll", nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32);
+        return module ? reinterpret_cast<GetConnection>(::GetProcAddress(module, "WNetGetConnectionW"))
+                      : nullptr;
+    }();
+    if (!getConnection) return {};
+
+    const auto local = drive.left(2).toStdWString();
+    std::wstring remote(MAX_PATH, L'\0');
+    DWORD length = MAX_PATH;
+    DWORD result = getConnection(local.c_str(), remote.data(), &length);
+    if (result == ERROR_MORE_DATA) {
+        remote.resize(length);
+        result = getConnection(local.c_str(), remote.data(), &length);
+    }
+    return result == NO_ERROR ? uncShareRoot(QString::fromWCharArray(remote.c_str())) : QString{};
+}
+
+WindowsVolumeSpace storageForDirectory(const QString& directory) {
+    QString path = QDir::toNativeSeparators(directory);
+    QString root = uncShareRoot(path);
+    if (!root.isEmpty() && !path.endsWith(u'\\')) path += u'\\';
+    if (path.size() >= MAX_PATH && !hasWindowsDevicePrefix(path)) {
+        path = root.isEmpty() ? QStringLiteral(R"(\\?\)") + path
+                              : QStringLiteral(R"(\\?\UNC\)") + path.mid(2);
+    }
+    const auto native = path.toStdWString();
+    ULARGE_INTEGER available{};
+    if (!::GetDiskFreeSpaceExW(native.c_str(), &available, nullptr, nullptr)) return {};
+
+    // The directories already exist. Root metadata is best effort, notably on SMB.
+    WindowsVolumeSpace volume;
+    volume.availableBytes = static_cast<qint64>(std::min<quint64>(
+        available.QuadPart, std::numeric_limits<qint64>::max()));
+    volume.key = root;
+    if (root.isEmpty()) {
+        const QString drive = path.mid(hasWindowsDevicePrefix(path) ? 4 : 0, 3);
+        if (drive.size() == 3 && drive.at(1) == u':' && drive.at(2) == u'\\' &&
+            ::GetDriveTypeW(drive.toStdWString().c_str()) == DRIVE_REMOTE) {
+            root = drive;
+            volume.key = mappedDriveShare(drive);
+        } else {
+            wchar_t mount[MAX_PATH + 1];
+            if (!::GetVolumePathNameW(native.c_str(), mount, MAX_PATH + 1)) return volume;
+            root = QString::fromWCharArray(mount);
+            volume.key = uncShareRoot(root);
+            wchar_t guid[50];
+            if (volume.key.isEmpty() && ::GetVolumeNameForVolumeMountPointW(mount, guid, 50)) {
+                volume.key = QString::fromWCharArray(guid);
+            }
+        }
+        if (volume.key.isEmpty()) volume.key = root;
+    }
+
+    DWORD sectorsPerCluster = 0, bytesPerSector = 0, freeClusters = 0, totalClusters = 0;
+    if (::GetDiskFreeSpaceW(root.toStdWString().c_str(), &sectorsPerCluster, &bytesPerSector,
+                            &freeClusters, &totalClusters)) {
+        const quint64 clusterBytes = static_cast<quint64>(sectorsPerCluster) * bytesPerSector;
+        if (clusterBytes <= std::numeric_limits<int>::max()) {
+            volume.allocationUnit = static_cast<int>(clusterBytes);
+        }
+    }
+    return volume;
+}
+#else
+QStorageInfo storageForDirectory(const QString& directory) {
+#ifdef Q_OS_MACOS
+    // Qt's path lookup can report the read-only system volume for paths
+    // firmlinked into the writable Data volume. Use the actual mount point.
+    struct statfs filesystem {};
+    if (::statfs(QFile::encodeName(directory).constData(), &filesystem) == 0) {
+        return QStorageInfo(QFile::decodeName(filesystem.f_mntonname));
+    }
+#endif
+    return QStorageInfo(directory);
+}
+
+bool sameStorageVolume(const QStorageInfo& scratch, const QStorageInfo& output,
+                       const QString& scratchPath, const QString& outputPath) {
+    if (scratch == output) return true;
+#ifdef Q_OS_UNIX
+    // Different mount paths (such as bind mounts) can share a free-space pool.
+    struct stat scratchStat {};
+    struct stat outputStat {};
+    return ::stat(QFile::encodeName(scratchPath).constData(), &scratchStat) == 0 &&
+        ::stat(QFile::encodeName(outputPath).constData(), &outputStat) == 0 &&
+        scratchStat.st_dev == outputStat.st_dev;
+#else
+    Q_UNUSED(scratchPath);
+    Q_UNUSED(outputPath);
+    return !scratch.device().isEmpty() && scratch.device() == output.device();
+#endif
+}
+#endif
+
+QString timelapseDiskError(const QString& scratchPath, const QString& outputPath,
+                           int width, int height, int frameCount, bool pngOutput) {
+    const auto scratch = storageForDirectory(scratchPath);
+    const auto output = storageForDirectory(outputPath);
+#ifdef Q_OS_WIN
+    const qint64 scratchAvailable = scratch.availableBytes;
+    const qint64 outputAvailable = output.availableBytes;
+    const bool sharedVolume = !scratch.key.isEmpty() &&
+        scratch.key.compare(output.key, Qt::CaseInsensitive) == 0;
+#else
+    const auto availableBytes = [](const QStorageInfo& volume) -> qint64 {
+        return volume.isValid() && volume.isReady() && !volume.isReadOnly()
+            ? volume.bytesAvailable() : -1;
+    };
+    const qint64 scratchAvailable = availableBytes(scratch);
+    const qint64 outputAvailable = availableBytes(output);
+    const bool sharedVolume = scratchAvailable >= 0 && outputAvailable >= 0 &&
+        sameStorageVolume(scratch, output, scratchPath, outputPath);
+#endif
+    if (scratchAvailable < 0 || outputAvailable < 0) {
+        return QCoreApplication::translate("Nebulens", "无法读取延时序列的磁盘可用空间：%1")
+            .arg(scratchAvailable < 0 ? scratchPath : outputPath);
+    }
+
+    const auto budget = ProcessingMemoryEstimator::estimateTimelapseDiskBudget(
+        width, height, frameCount, pngOutput, scratch.blockSize(), output.blockSize());
+    const QString format = pngOutput ? QStringLiteral("PNG8") : QStringLiteral("TIFF16");
+    using Shortfall = ProcessingMemoryEstimator::TimelapseDiskBudget::Shortfall;
+    switch (budget.shortfall(sharedVolume, scratchAvailable, outputAvailable)) {
+    case Shortfall::None:
+        return {};
+    case Shortfall::InvalidEstimate:
+        return QCoreApplication::translate("Nebulens", "无法估算延时序列所需的磁盘空间。");
+    case Shortfall::SharedVolume:
+        return QCoreApplication::translate("Nebulens", "临时卷和输出卷相同，磁盘空间不足：RAW 缓存与 %1 序列共需约 %2，当前可用 %3。")
+            .arg(format, formatMemoryBytes(budget.sharedBytes),
+                 formatMemoryBytes(std::min(scratchAvailable, outputAvailable)));
+    case Shortfall::Scratch:
+        return QCoreApplication::translate("Nebulens", "临时磁盘空间不足：延时 RAW 缓存约需 %1，当前可用 %2。")
+            .arg(formatMemoryBytes(budget.scratchBytes), formatMemoryBytes(scratchAvailable));
+    case Shortfall::Output:
+        return QCoreApplication::translate("Nebulens", "输出磁盘空间不足：%1 序列约需 %2，当前可用 %3。")
+            .arg(format, formatMemoryBytes(budget.outputBytes), formatMemoryBytes(outputAvailable));
+    }
+    return {};
 }
 
 double medianValue(std::vector<double> values) {
@@ -223,6 +404,7 @@ public:
         : m_directory(QDir::tempPath() + "/" + prefix + "-XXXXXX") {}
 
     bool isValid() const { return m_directory.isValid(); }
+    QString path() const { return m_directory.path(); }
     int frameCount() const { return m_files.size(); }
 
     bool append(const std::vector<uint16_t>& frame) {
@@ -854,6 +1036,7 @@ void ProcessingWorker::run() {
     m_calibrationInvalidFlatPixels = 0;
     m_calibrationPreflightWarnings.clear();
     m_generatedMasterFiles.clear();
+    emit phaseChanged(Phase::Preparation);
     emit progress(0);
 
     if (m_files.isEmpty()) {
@@ -1222,32 +1405,15 @@ void ProcessingWorker::run() {
         }
     }
 
+    emit phaseChanged(Phase::Alignment);
     emit stageMessage(QCoreApplication::translate("Nebulens", "参考帧星点检测..."));
     StarDetector detector;
-    DetectionOptions evaluationDetectionOptions;
-    evaluationDetectionOptions.spatiallyBalanced = true;
-    evaluationDetectionOptions.maxCandidates = 300;
-    evaluationDetectionOptions.maxStars = 250;
-    std::vector<StarPoint> referenceDetectedStars;
-    if (!detector.detect(*referenceDetectionPlane, width, height,
-                         referenceDetectedStars, evaluationDetectionOptions)) {
+    AlignmentStarSelection referenceStars;
+    if (!detector.detectForAlignment(*referenceDetectionPlane, width, height,
+                                     referenceStars)) {
         m_errorString = QCoreApplication::translate("Nebulens", "参考帧星点检测失败");
         return;
     }
-    const size_t referenceFitCount =
-        std::min<size_t>(50, referenceDetectedStars.size());
-    std::vector<StarPoint> referenceStars(
-        referenceDetectedStars.begin(),
-        referenceDetectedStars.begin() + referenceFitCount);
-    // Keep model fitting and quality evaluation disjoint when the field has
-    // enough stars. Sparse fields fall back to reuse so legacy small inputs
-    // can still be aligned and judged by the reduced-sample gates.
-    std::vector<StarPoint> referenceEvaluationStars =
-        referenceDetectedStars.size() >= referenceFitCount + 12
-            ? std::vector<StarPoint>(
-                  referenceDetectedStars.begin() + referenceFitCount,
-                  referenceDetectedStars.end())
-            : referenceDetectedStars;
 
     // Build the reference horizon before aligning source frames. The same
     // mask must follow every accepted star transform; otherwise terrain that
@@ -1375,9 +1541,9 @@ void ProcessingWorker::run() {
                                 .arg(QFileInfo(m_files[i]).fileName());
             return;
         }
-        std::vector<StarPoint> sourceDetectedStars;
-        if (!detector.detect(sourceLuminance, width, height,
-                             sourceDetectedStars, evaluationDetectionOptions)) {
+        AlignmentStarSelection sourceStars;
+        if (!detector.detectForAlignment(sourceLuminance, width, height,
+                                         sourceStars)) {
             SkippedFrameInfo skipped;
             skipped.filePath = m_files[i];
             skipped.stage = "star-detection";
@@ -1386,32 +1552,20 @@ void ProcessingWorker::run() {
             qWarning() << "星点检测失败，跳过:" << m_files[i];
             continue;
         }
-        const size_t sourceFitCount =
-            std::min<size_t>(50, sourceDetectedStars.size());
-        std::vector<StarPoint> sourceStars(
-            sourceDetectedStars.begin(),
-            sourceDetectedStars.begin() + sourceFitCount);
-        std::vector<StarPoint> sourceEvaluationStars =
-            sourceDetectedStars.size() >= sourceFitCount + 12
-                ? std::vector<StarPoint>(
-                      sourceDetectedStars.begin() + sourceFitCount,
-                      sourceDetectedStars.end())
-                : sourceDetectedStars;
-
         AlignmentTransform transform;
         AlignmentQuality alignmentQuality;
         AlignmentOptions alignmentModelOptions;
         alignmentModelOptions.imageWidth = width;
         alignmentModelOptions.imageHeight = height;
         alignmentModelOptions.evaluationReferenceStars =
-            &referenceEvaluationStars;
-        alignmentModelOptions.evaluationSourceStars = &sourceEvaluationStars;
-        if (!aligner.align(referenceStars, sourceStars, transform,
+            &referenceStars.evaluation;
+        alignmentModelOptions.evaluationSourceStars = &sourceStars.evaluation;
+        if (!aligner.align(referenceStars.fit, sourceStars.fit, transform,
                            &alignmentQuality, alignmentModelOptions)) {
             SkippedFrameInfo skipped;
             skipped.filePath = m_files[i];
             skipped.stage = "alignment";
-            skipped.detectedStars = static_cast<int>(sourceDetectedStars.size());
+            skipped.detectedStars = static_cast<int>(sourceStars.detectedCount);
             skipped.affineEvaluated = alignmentQuality.affineEvaluated;
             skipped.affineMatchedStars =
                 alignmentQuality.affineCandidate.matchedStars;
@@ -1589,6 +1743,16 @@ void ProcessingWorker::run() {
     emit progress(55);
     if (stopIfCancelled()) return;
 
+    AlignmentBounds commonBounds;
+    if (!aligner.commonValidBounds(
+            acceptedTransforms, width, height, commonBounds,
+            chromaticModel.active() ? &chromaticModel : nullptr)) {
+        m_errorString = QCoreApplication::translate("Nebulens", "对齐后共同有效区域不足，无法堆栈。请移除偏移过大的帧后重试。");
+        return;
+    }
+    if (stopIfCancelled()) return;
+
+    emit phaseChanged(Phase::Stacking);
     emit stageMessage(QCoreApplication::translate("Nebulens", "堆栈中..."));
     StackingEngine stacker;
     const StackingEngine::Method method = stackMethodFromName(m_params.stackMethod);
@@ -1653,17 +1817,8 @@ void ProcessingWorker::run() {
         }
     }
 
-    AlignmentBounds commonBounds;
-    const bool commonBoundsReady = aligner.commonValidBounds(
-        acceptedTransforms, width, height, commonBounds,
-        chromaticModel.active() ? &chromaticModel : nullptr);
-    if (chromaticModel.active() && !commonBoundsReady) {
-        m_errorString = QCoreApplication::translate("Nebulens", "无法计算镜头色差校正后的共同有效区域");
-        return;
-    }
-    if (commonBounds.width > 0 && commonBounds.height > 0 &&
-        (commonBounds.x != 0 || commonBounds.y != 0 ||
-         commonBounds.width != width || commonBounds.height != height)) {
+    if (commonBounds.x != 0 || commonBounds.y != 0 ||
+        commonBounds.width != width || commonBounds.height != height) {
         emit stageMessage(QCoreApplication::translate("Nebulens", "裁切共同有效区域..."));
         std::vector<uint16_t> cropped;
         if (!cropRgb(resultRgb, width, height, commonBounds, cropped)) {
@@ -1713,13 +1868,6 @@ void ProcessingWorker::runStarTrail() {
                                 .arg(QFileInfo(m_files[index]).fileName());
             return;
         }
-        if (!metadata.empty() &&
-            (item.width != metadata.front().width ||
-             item.height != metadata.front().height)) {
-            m_errorString = QCoreApplication::translate("Nebulens", "星轨序列尺寸不一致: %1")
-                                .arg(QFileInfo(m_files[index]).fileName());
-            return;
-        }
         metadata.push_back(std::move(item));
     }
 
@@ -1729,8 +1877,6 @@ void ProcessingWorker::runStarTrail() {
         return;
     }
 
-    const int width = metadata.front().width;
-    const int height = metadata.front().height;
     ProcessingMemoryEstimator::EstimateOptions estimateOptions;
     // The compositor is streaming. One synthetic frame keeps the generic
     // estimator's finishing-stage model while avoiding a false frame-count
@@ -1745,21 +1891,40 @@ void ProcessingWorker::runStarTrail() {
         m_params.basicAdjustments.hasToneOrColorAdjustments();
     estimateOptions.sharpening = m_params.basicAdjustments.hasSharpening();
     estimateOptions.starReduction = false;
-    const uint64_t estimatedBytes = ProcessingMemoryEstimator::estimatePeakBytes(
-        width, height, estimateOptions);
     const ProcessingMemoryEstimator::SystemMemoryInfo memoryInfo =
         ProcessingMemoryEstimator::systemMemoryInfo();
     const uint64_t budgetBytes =
         ProcessingMemoryEstimator::calculateEffectiveBudgetBytes(
             memoryInfo.safeBudgetBytes, m_params.memoryBudgetBytes);
-    if (estimatedBytes == 0 || estimatedBytes > budgetBytes) {
+    auto fitsMemoryBudget = [&](int candidateWidth, int candidateHeight) {
+        const uint64_t estimatedBytes = ProcessingMemoryEstimator::estimatePeakBytes(
+            candidateWidth, candidateHeight, estimateOptions);
+        if (estimatedBytes != 0 && estimatedBytes <= budgetBytes) return true;
         m_errorString = QCoreApplication::translate("Nebulens", "星轨合成预计需要约 %1 内存，当前安全预算为 %2"
             "（系统当前可用约 %3）。请关闭去雾或降噪后重试。")
                             .arg(formatMemoryBytes(estimatedBytes))
                             .arg(formatMemoryBytes(budgetBytes))
                             .arg(formatMemoryBytes(memoryInfo.availableBytes));
+        return false;
+    };
+    for (const auto& item : metadata) {
+        if (!fitsMemoryBudget(item.width, item.height)) return;
+    }
+    if (stopIfCancelled()) return;
+
+    // The RAW header is in sensor coordinates, but LibRaw's RGB is already
+    // rotated. Keep the first decoded frame for the streaming pass below.
+    RawImageLoader::ImageData firstImage;
+    if (!loader.loadRaw(m_files.front(), firstImage) || firstImage.channels != 3) {
+        m_errorString = QCoreApplication::translate("Nebulens", "无法解码星轨 RAW: %1")
+                            .arg(QFileInfo(m_files.front()).fileName());
         return;
     }
+    const int width = firstImage.width;
+    const int height = firstImage.height;
+    const auto& firstMetadata = metadata.front();
+    if (((width != firstMetadata.width || height != firstMetadata.height) &&
+         !fitsMemoryBudget(width, height)) || stopIfCancelled()) return;
 
     StarTrailEngine::Options trailOptions;
     trailOptions.cometStrength =
@@ -1777,21 +1942,47 @@ void ProcessingWorker::runStarTrail() {
         return;
     }
 
-    bool protectGround = m_params.starTrailProtectGround;
+    const bool protectGround = m_params.starTrailProtectGround;
     bool groundMaskReady = false;
     std::vector<uint8_t> skyMask;
     if (protectGround) {
         emit stageMessage(QCoreApplication::translate("Nebulens", "检测固定地景蒙版..."));
-        const int maskFrameIndex = m_files.size() / 2;
-        QImage preview;
-        if (loadMaskPreview(m_files[maskFrameIndex], preview) &&
-            SkyGroundMask::autoDetectPreview(
-                preview, width, height, skyMask, m_params.featherRadius)) {
-            m_skyGroundMaskSource = "star-trail-auto-preview";
-            groundMaskReady = true;
+        // A camera thumbnail may still be in sensor orientation. Build a
+        // bounded preview from the exact pixels used by the compositor.
+        constexpr int kMaskAnalysisLongSide = 640;
+        const PreviewImage8 preview = PreviewToneMapper::mapRgb16(
+            firstImage.data, width, height, kMaskAnalysisLongSide);
+        if (!preview.rgb.empty()) {
+            const QImage borrowed(preview.rgb.data(), preview.width,
+                                  preview.height, preview.width * 3,
+                                  QImage::Format_RGB888);
+            groundMaskReady = SkyGroundMask::autoDetectPreview(
+                borrowed, width, height, skyMask, m_params.featherRadius);
+            if (groundMaskReady) m_skyGroundMaskSource = "star-trail-auto-preview";
+        }
+        if (!groundMaskReady) {
+            std::vector<uint16_t> luminance;
+            groundMaskReady = ImageBufferUtils::extractLuminance(
+                firstImage.data, width, height, luminance) &&
+                SkyGroundMask::autoDetect(
+                    luminance, width, height, skyMask, m_params.featherRadius);
+            if (groundMaskReady) m_skyGroundMaskSource = "star-trail-auto-linear";
+        }
+        if (!groundMaskReady) {
+            qWarning() << "星轨地平线检测失败，本次按纯天空序列合成";
+            emit stageMessage(QCoreApplication::translate("Nebulens", "未检测到可靠地景，按纯天空星轨处理"));
+            try {
+                skyMask.assign(static_cast<size_t>(width) * height, uint8_t{255});
+            } catch (const std::bad_alloc&) {
+                m_errorString = QCoreApplication::translate("Nebulens", "无法分配星轨全天空蒙版");
+                return;
+            }
+            m_skyGroundMaskSource = "star-trail-all-sky-fallback";
         }
     }
 
+    if (stopIfCancelled()) return;
+    emit phaseChanged(Phase::Stacking);
     emit stageMessage(
         trailOptions.mode == StarTrailEngine::Mode::Lighten
             ? QCoreApplication::translate("Nebulens", "逐帧累积连续星轨...")
@@ -1803,35 +1994,17 @@ void ProcessingWorker::runStarTrail() {
     for (int index = 0; index < m_files.size(); ++index) {
         if (stopIfCancelled()) return;
         RawImageLoader::ImageData image;
-        if (!loader.loadRaw(m_files[index], image) ||
-            image.width != width || image.height != height ||
-            image.channels != 3) {
+        if (index == 0) {
+            image = std::move(firstImage);
+        } else if (!loader.loadRaw(m_files[index], image) || image.channels != 3) {
             m_errorString = QCoreApplication::translate("Nebulens", "无法解码星轨 RAW: %1")
                                 .arg(QFileInfo(m_files[index]).fileName());
             return;
         }
-
-        if (index == 0 && protectGround && !groundMaskReady) {
-            std::vector<uint16_t> luminance;
-            if (ImageBufferUtils::extractLuminance(
-                    image.data, width, height, luminance) &&
-                SkyGroundMask::autoDetect(
-                    luminance, width, height, skyMask,
-                    m_params.featherRadius)) {
-                m_skyGroundMaskSource = "star-trail-auto-linear";
-                groundMaskReady = true;
-            } else {
-                qWarning() << "星轨地平线检测失败，本次按纯天空序列合成";
-                emit stageMessage(QCoreApplication::translate("Nebulens", "未检测到可靠地景，按纯天空星轨处理"));
-                try {
-                    skyMask.assign(
-                        static_cast<size_t>(width) * height, uint8_t{255});
-                } catch (const std::bad_alloc&) {
-                    m_errorString = QCoreApplication::translate("Nebulens", "无法分配星轨全天空蒙版");
-                    return;
-                }
-                m_skyGroundMaskSource = "star-trail-all-sky-fallback";
-            }
+        if (image.width != width || image.height != height) {
+            m_errorString = QCoreApplication::translate("Nebulens", "星轨序列尺寸不一致: %1")
+                                .arg(QFileInfo(m_files[index]).fileName());
+            return;
         }
 
         if (index == 0 && m_params.photometricNormalizationEnabled) {
@@ -1927,6 +2100,7 @@ void ProcessingWorker::runStarTrail() {
                 m_errorString = QCoreApplication::translate("Nebulens", "星轨天空与地景融合失败");
                 return;
             }
+            std::vector<uint16_t>().swap(groundAverage);
         }
         if (!m_params.skyGroundMaskOutputPath.isEmpty()) {
             const QImage borrowedMask(
@@ -2000,45 +2174,53 @@ void ProcessingWorker::runTimelapse() {
         m_errorString = QCoreApplication::translate("Nebulens", "延时序列图像尺寸无效");
         return;
     }
-    const uint64_t estimatedBytes =
-        ProcessingMemoryEstimator::estimateTimelapsePeakBytes(
-            metadataWidth, metadataHeight, windowSize, protectGround,
-            m_params.timelapseMotionProtection > 0);
     const ProcessingMemoryEstimator::SystemMemoryInfo memoryInfo =
         ProcessingMemoryEstimator::systemMemoryInfo();
     const uint64_t budgetBytes =
         ProcessingMemoryEstimator::calculateEffectiveBudgetBytes(
             memoryInfo.safeBudgetBytes, m_params.memoryBudgetBytes);
-    if (estimatedBytes == 0 || estimatedBytes > budgetBytes) {
+    auto fitsMemoryBudget = [&](int width, int height) {
+        const uint64_t estimatedBytes =
+            ProcessingMemoryEstimator::estimateTimelapsePeakBytes(
+                width, height, windowSize, protectGround,
+                m_params.timelapseMotionProtection > 0);
+        if (estimatedBytes != 0 && estimatedBytes <= budgetBytes) return true;
         m_errorString = QCoreApplication::translate("Nebulens", "延时 %1 帧窗口预计需要约 %2 内存，当前安全预算为 %3。"
                                 "请改用 3 帧窗口或关闭固定地景保护。")
                             .arg(windowSize)
                             .arg(formatMemoryBytes(estimatedBytes))
                             .arg(formatMemoryBytes(budgetBytes));
-        return;
-    }
-
-    const uint64_t scratchBytes =
-        ProcessingMemoryEstimator::estimateScratchDiskBytes(
-            metadataWidth, metadataHeight, m_files.size(), false);
-    const QStorageInfo temporaryStorage(QDir::tempPath());
-    const uint64_t scratchHeadroom = scratchBytes / 10 +
-        (scratchBytes % 10 == 0 ? 0 : 1);
-    if (scratchBytes == 0 || !temporaryStorage.isValid() ||
-        temporaryStorage.bytesAvailable() <= 0 ||
-        scratchBytes > std::numeric_limits<uint64_t>::max() - scratchHeadroom ||
-        static_cast<uint64_t>(temporaryStorage.bytesAvailable()) <
-            scratchBytes + scratchHeadroom) {
-        m_errorString = QCoreApplication::translate("Nebulens", "临时磁盘空间不足：延时 RAW 缓存约需 %1。")
-                            .arg(formatMemoryBytes(scratchBytes));
-        return;
-    }
+        return false;
+    };
+    if (!fitsMemoryBudget(metadataWidth, metadataHeight) || stopIfCancelled()) return;
 
     DiskFrameStore decodedCache("starprocessor-timelapse");
     if (!decodedCache.isValid()) {
         m_errorString = QCoreApplication::translate("Nebulens", "无法创建延时处理临时目录");
         return;
     }
+
+    const QDir outputRoot(m_params.outputPath.isEmpty()
+        ? QDir::homePath() + "/Nebulens/Output" : m_params.outputPath);
+    if (!QDir().mkpath(outputRoot.absolutePath())) {
+        m_errorString = QCoreApplication::translate("Nebulens", "无法创建延时序列输出目录");
+        return;
+    }
+    // Unlike mkpath on a timestamp, this reserves a new directory atomically.
+    QTemporaryDir outputDirectory(outputRoot.absoluteFilePath(
+        QDateTime::currentDateTime().toString("yyyyMMdd_hhmmss_zzz") +
+        "_timelapse-XXXXXX"));
+    if (!outputDirectory.isValid()) {
+        m_errorString = QCoreApplication::translate("Nebulens", "无法创建延时序列输出目录");
+        return;
+    }
+    const bool png = m_params.outputFormat == "png8";
+    auto fitsDiskBudget = [&](int width, int height) {
+        m_errorString = timelapseDiskError(decodedCache.path(), outputDirectory.path(),
+                                           width, height, m_files.size(), png);
+        return m_errorString.isEmpty();
+    };
+    if (!fitsDiskBudget(metadataWidth, metadataHeight)) return;
 
     emit stageMessage(QCoreApplication::translate("Nebulens", "预解码 RAW 并检测星点..."));
     StarDetector detector;
@@ -2069,6 +2251,10 @@ void ProcessingWorker::runTimelapse() {
                     std::numeric_limits<size_t>::max() /
                         static_cast<size_t>(height) / 3) {
                 m_errorString = QCoreApplication::translate("Nebulens", "延时 RAW 实际解码尺寸无效");
+                return;
+            }
+            if ((width != metadataWidth || height != metadataHeight) &&
+                (!fitsMemoryBudget(width, height) || !fitsDiskBudget(width, height))) {
                 return;
             }
             rgbValueCount = static_cast<size_t>(width) * height * 3;
@@ -2104,6 +2290,8 @@ void ProcessingWorker::runTimelapse() {
     ImageAligner aligner;
     int alignedPairCount = 0;
     const int radius = windowSize / 2;
+    if (stopIfCancelled()) return;
+    emit phaseChanged(Phase::Alignment);
     emit stageMessage(QCoreApplication::translate("Nebulens", "预分析邻近帧对齐..."));
     for (int targetIndex = 0; targetIndex < m_files.size(); ++targetIndex) {
         if (stopIfCancelled()) return;
@@ -2242,19 +2430,6 @@ void ProcessingWorker::runTimelapse() {
         }
     }
 
-    QString rootOutput = m_params.outputPath;
-    if (rootOutput.isEmpty()) {
-        rootOutput = QDir::homePath() + "/Nebulens/Output";
-    }
-    const QString outputDirectory = QDir(rootOutput).filePath(
-        QDateTime::currentDateTime().toString("yyyyMMdd_hhmmss_zzz") +
-        "_timelapse");
-    if (stopIfCancelled()) return;
-    if (!QDir().mkpath(outputDirectory)) {
-        m_errorString = QCoreApplication::translate("Nebulens", "无法创建延时序列输出目录");
-        return;
-    }
-    m_outputFile = outputDirectory;
     m_selectedReferenceIndex = m_files.size() / 2;
     m_selectedReferenceFrame = m_files[m_selectedReferenceIndex];
 
@@ -2270,7 +2445,6 @@ void ProcessingWorker::runTimelapse() {
     flickerOptions.windowSize = 5;
     flickerOptions.strength = 65.0;
 
-    emit stageMessage(QCoreApplication::translate("Nebulens", "逐帧滑动窗口降噪..."));
     int writtenFrames = 0;
     const int outputIndexWidth = std::max(
         4, static_cast<int>(QString::number(m_files.size()).size()));
@@ -2284,6 +2458,8 @@ void ProcessingWorker::runTimelapse() {
         NormalizationState::NotAttempted);
     for (int targetIndex = 0; targetIndex < m_files.size(); ++targetIndex) {
         if (stopIfCancelled()) return;
+        emit phaseChanged(Phase::Stacking);
+        emit stageMessage(QCoreApplication::translate("Nebulens", "逐帧滑动窗口降噪..."));
         const int start = std::max(0, targetIndex - radius);
         const int end = std::min(
             static_cast<int>(m_files.size()) - 1, targetIndex + radius);
@@ -2481,16 +2657,16 @@ void ProcessingWorker::runTimelapse() {
                 m_beforePreviewBlackPoint = previewBefore.blackPoint;
                 m_beforePreviewWhitePoint = previewBefore.whitePoint;
             }
-            m_stackedData = resultRgb;
         }
 
-        const bool png = m_params.outputFormat == "png8";
         const QString extension = png ? ".png" : ".tiff";
         const QString baseName = QFileInfo(m_files[targetIndex]).completeBaseName();
         const QString outputName = QString("%1_%2_denoised%3")
             .arg(targetIndex + 1, outputIndexWidth, 10, QLatin1Char('0'))
             .arg(baseName, extension);
-        const QString outputPath = QDir(outputDirectory).filePath(outputName);
+        const QString outputPath = outputDirectory.filePath(outputName);
+        if (stopIfCancelled()) return;
+        emit phaseChanged(Phase::Output);
         emit stageMessage(QCoreApplication::translate("Nebulens", "输出第 %1/%2 张...")
                               .arg(targetIndex + 1).arg(m_files.size()));
         if (stopIfCancelled()) return;
@@ -2501,6 +2677,14 @@ void ProcessingWorker::runTimelapse() {
             if (m_wasCancelled) return;
             m_errorString = QCoreApplication::translate("Nebulens", "延时序列导出失败: %1").arg(outputName);
             return;
+        }
+        if (targetIndex == m_selectedReferenceIndex) {
+            m_stackedData = std::move(resultRgb);
+        }
+        if (writtenFrames == 0) {
+            // Keep completed frames on cancellation, but discard an empty run.
+            outputDirectory.setAutoRemove(false);
+            m_outputFile = outputDirectory.path();
         }
         ++writtenFrames;
         m_frameCount = writtenFrames;
@@ -2642,6 +2826,8 @@ void ProcessingWorker::runSingleFrame() {
 bool ProcessingWorker::finishResult(std::vector<uint16_t>& resultRgb,
                                     int width, int height,
                                     std::vector<uint8_t>& mask) {
+    if (stopIfCancelled()) return false;
+    emit phaseChanged(Phase::Adjustment);
     const bool usesSkyGroundMask = m_params.skyGroundSepEnabled ||
         (m_params.starTrailMode && m_params.starTrailProtectGround);
     constexpr int kQuickPreviewLongSide = 2400;
@@ -2789,30 +2975,31 @@ bool ProcessingWorker::finishResult(std::vector<uint16_t>& resultRgb,
         }
     }
 
-    m_stackedData = std::move(resultRgb);
     if (stopIfCancelled()) return false;
 
+    emit phaseChanged(Phase::Output);
     emit stageMessage(QCoreApplication::translate("Nebulens", "导出结果..."));
-    QString outputPath = m_params.outputPath;
-    if (outputPath.isEmpty()) outputPath = QDir::homePath() + "/Nebulens/Output";
-    QDir().mkpath(outputPath);
+    if (stopIfCancelled()) return false;
+    const QString outputDirectory = m_params.outputPath.isEmpty()
+        ? QDir::homePath() + "/Nebulens/Output" : m_params.outputPath;
     const bool png = m_params.outputFormat == "png8";
     const QString extension = png ? ".png" : ".tiff";
     const QString outputSuffix = m_params.singleFrameMode
         ? "_single"
         : m_params.starTrailMode ? "_star_trail" : "_stacked";
-    m_outputFile = outputPath + "/" +
+    const QString preferredPath = QDir(outputDirectory).filePath(
         QDateTime::currentDateTime().toString("yyyyMMdd_hhmmss") +
-        outputSuffix + extension;
-    if (!ImageExporter::exportRgb16(m_stackedData, width, height,
-                                    m_outputFile,
-                                    png ? ImageExporter::Png8 : ImageExporter::Tiff16,
-                                    [this]() { return stopIfCancelled(); })) {
-        m_outputFile.clear();
+        outputSuffix + extension);
+    if (!QDir().mkpath(outputDirectory) ||
+        !ImageExporter::exportNewRgb16(
+            resultRgb, width, height, preferredPath,
+            png ? ImageExporter::Png8 : ImageExporter::Tiff16, m_outputFile,
+            [this]() { return stopIfCancelled(); })) {
         if (m_wasCancelled) return false;
         m_errorString = QCoreApplication::translate("Nebulens", "导出失败");
         return false;
     }
+    m_stackedData = std::move(resultRgb);
     emit progress(100);
     emit stageMessage(QCoreApplication::translate("Nebulens", "处理完成"));
     return true;

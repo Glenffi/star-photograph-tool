@@ -43,6 +43,23 @@ public:
     static uint64_t estimateScratchDiskBytes(int width, int height, int frameCount,
                                              bool skyGroundSeparation);
 
+    struct TimelapseDiskBudget {
+        enum class Shortfall { None, InvalidEstimate, SharedVolume, Scratch, Output };
+
+        uint64_t scratchBytes = 0;
+        uint64_t outputBytes = 0;
+        uint64_t sharedBytes = 0;
+
+        Shortfall shortfall(bool sharedVolume, uint64_t scratchAvailable,
+                            uint64_t outputAvailable) const;
+    };
+
+    // Includes per-file allocation, format overhead and 10% headroom on both
+    // volumes. A zero budget denotes invalid dimensions or overflow.
+    static TimelapseDiskBudget estimateTimelapseDiskBudget(
+        int width, int height, int frameCount, bool pngOutput,
+        int scratchBlockSize = 0, int outputBlockSize = 0);
+
     // Caps work at 65% of physical RAM. When current availability is known,
     // it first reserves max(1 GiB, 10% of RAM), then uses 85% of the remainder.
     // Falls back to the physical-RAM cap when availability cannot be queried.

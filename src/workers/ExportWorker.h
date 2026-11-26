@@ -30,7 +30,8 @@ public:
     void requestCancel();
     bool succeeded() const { return m_succeeded; }
     bool wasCancelled() const { return m_wasCancelled; }
-    QString outputPath() const { return m_path; }
+    // Read after the worker finishes; empty unless a file was published.
+    QString outputPath() const { return m_outputPath; }
 
 protected:
     void run() override;
@@ -39,7 +40,8 @@ private:
     std::shared_ptr<std::vector<uint16_t>> m_image;
     int m_width = 0;
     int m_height = 0;
-    QString m_path;
+    QString m_preferredPath;
+    QString m_outputPath;
     ImageExporter::Format m_format = ImageExporter::Tiff16;
     std::atomic<bool> m_cancelRequested{false};
     bool m_succeeded = false;

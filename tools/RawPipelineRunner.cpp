@@ -123,17 +123,19 @@ int main(int argc, char* argv[]) {
     const QCommandLineOption inputOption({"i", "input"},
         "Directory containing one RAW sequence.", "directory");
     const QCommandLineOption outputOption({"o", "output"},
-        "Directory for the TIFF and pipeline-report.json.", "directory");
+        QCoreApplication::translate("Nebulens", "保存 TIFF 成片与 pipeline-report.json 的目录；延时 TIFF 写入子目录。"),
+        "directory");
     const QCommandLineOption limitOption("limit",
-        "Use at most this many sorted RAW files.", "count", "0");
+        QCoreApplication::translate("Nebulens", "跳过 --start-index 指定的张数后，最多选取的 RAW 张数；0 表示不限。"),
+        "count", "0");
     const QCommandLineOption startIndexOption(
         "start-index",
-        "Skip this many sorted RAW files before applying --limit.",
+        QCoreApplication::translate("Nebulens", "先按不区分大小写的路径字典序跳过指定张数；延时和星轨在选片后才按拍摄时间重新排序。"),
         "index", "0");
     const QCommandLineOption singleOption(
         "single", "Refine the first RAW without alignment or stacking.");
     const QCommandLineOption timelapseOption(
-        "timelapse", "Denoise every RAW with an aligned temporal window.");
+        "timelapse", QCoreApplication::translate("Nebulens", "用对齐的时域窗口对每张 RAW 降噪，不接受单图收尾参数。"));
     const QCommandLineOption darkDirectoryOption(
         "dark-dir", "Directory containing matched Dark RAW frames.",
         "directory");
@@ -188,7 +190,8 @@ int main(int argc, char* argv[]) {
         "star-trail-no-ground-protection",
         "Apply the star-trail composite to the complete frame without fixed-ground protection.");
     const QCommandLineOption referenceOption("reference-index",
-        "Zero-based reference index; -1 selects the best frame automatically.", "index", "-1");
+        QCoreApplication::translate("Nebulens", "堆栈参考帧在选中片段内从 0 计数；-1 使用场景默认值。延时固定取排序后的中间帧，只接受 -1。"),
+        "index", "-1");
     const QCommandLineOption methodOption("method",
         "Stack method: average, median, kappa-sigma, or winsorized.",
         "name", "kappa-sigma");
@@ -316,6 +319,44 @@ int main(int argc, char* argv[]) {
                        starDefringeOption, starReduceOption});
     parser.process(application);
 
+    const bool timelapseMode = parser.isSet(timelapseOption);
+    bool referenceOk = false;
+    const int referenceIndex = parser.value(referenceOption).toInt(&referenceOk);
+    if (timelapseMode) {
+        // The sequence worker does not run the single-image finishing pipeline.
+        QSet<QString> supportedOptions;
+        for (const QCommandLineOption& option : {
+                 inputOption, outputOption, startIndexOption, limitOption,
+                 timelapseOption, timelapseWindowOption, timelapseStrengthOption,
+                 timelapseMotionProtectionOption, timelapseNoGroundOption,
+                 memoryBudgetOption, noPhotometricNormalizationOption,
+                 skyGroundFeatherOption, referenceOption}) {
+            for (const QString& name : option.names()) {
+                supportedOptions.insert(name);
+            }
+        }
+        QStringList unsupportedOptions;
+        for (const QString& name : parser.optionNames()) {
+            if (!supportedOptions.contains(name)) {
+                unsupportedOptions.append(QStringLiteral("--") + name);
+            }
+        }
+        unsupportedOptions.removeDuplicates();
+        if (!unsupportedOptions.isEmpty()) {
+            std::cerr << QCoreApplication::translate(
+                             "Nebulens", "延时序列不支持以下参数：%1")
+                             .arg(unsupportedOptions.join(QStringLiteral(", ")))
+                             .toStdString() << '\n';
+            return 2;
+        }
+        if (!referenceOk || referenceIndex != -1) {
+            std::cerr << QCoreApplication::translate(
+                             "Nebulens", "延时序列固定使用排序后的中间帧，--reference-index 只能设为 -1。")
+                             .toStdString() << '\n';
+            return 2;
+        }
+    }
+
     const QString input = QDir(parser.value(inputOption)).absolutePath();
     if (parser.value(inputOption).isEmpty() || !QDir(input).exists()) {
         std::cerr << "A valid --input directory is required.\n";
@@ -334,8 +375,6 @@ int main(int argc, char* argv[]) {
     bool startIndexOk = false;
     const int startIndex =
         parser.value(startIndexOption).toInt(&startIndexOk);
-    bool referenceOk = false;
-    int referenceIndex = parser.value(referenceOption).toInt(&referenceOk);
     bool kappaOk = false;
     const double kappa = parser.value(kappaOption).toDouble(&kappaOk);
     bool memoryBudgetOk = false;
@@ -415,7 +454,6 @@ int main(int argc, char* argv[]) {
         parser.isSet(modifiedCameraColorOption) ||
         !modifiedCameraGrayPointText.isEmpty();
     const bool singleFrameMode = parser.isSet(singleOption);
-    const bool timelapseMode = parser.isSet(timelapseOption);
     const bool starTrailMode = parser.isSet(starTrailOption);
     bool starTrailCometStrengthOk = false;
     const int starTrailCometStrength =
@@ -486,15 +524,12 @@ int main(int argc, char* argv[]) {
                      "calibration role, not both.\n";
         return 2;
     }
-    if (deepSkyCalibration &&
-        (singleFrameMode || timelapseMode || starTrailMode ||
-         skyGroundEnabled)) {
+    if (deepSkyCalibration && (singleFrameMode || starTrailMode || skyGroundEnabled)) {
         std::cerr << "Deep-sky calibration cannot be combined with --single, "
                      "--timelapse, --star-trail, or sky/ground separation.\n";
         return 2;
     }
-    if (starTrailMode &&
-        (singleFrameMode || timelapseMode || skyGroundEnabled)) {
+    if (starTrailMode && (singleFrameMode || skyGroundEnabled)) {
         std::cerr << "--star-trail cannot be combined with --single, "
                      "--timelapse, deep-sky calibration, or --sky-ground.\n";
         return 2;
@@ -503,16 +538,6 @@ int main(int argc, char* argv[]) {
         (starReduceStrength > 0 || starDefringeStrength > 0)) {
         std::cerr << "--star-trail cannot be combined with "
                      "--star-reduce-strength or --star-defringe-strength.\n";
-        return 2;
-    }
-    if (timelapseMode && modifiedCameraColorEnabled) {
-        std::cerr << "Modified-camera color restoration is not yet available "
-                     "for timelapse sequence output.\n";
-        return 2;
-    }
-    if (timelapseMode && !basicAdjustments.isNeutral()) {
-        std::cerr << "Basic color adjustments and sharpening are not yet "
-                     "available for timelapse sequence output.\n";
         return 2;
     }
     if (!limitOk || limit < 0 || !startIndexOk || startIndex < 0 ||
@@ -543,8 +568,6 @@ int main(int argc, char* argv[]) {
         memoryBudgetMiB >
             std::numeric_limits<uint64_t>::max() / (1024ULL * 1024ULL) ||
         !validMethod(method) ||
-        (singleFrameMode && timelapseMode) ||
-        (timelapseMode && skyGroundEnabled) ||
         !timelapseWindowOk ||
         (timelapseWindow != 3 && timelapseWindow != 5) ||
         !timelapseStrengthOk || timelapseStrength < 0 ||
@@ -691,7 +714,7 @@ int main(int argc, char* argv[]) {
     params.photometricNormalizationEnabled = !singleFrameMode &&
         !parser.isSet(noPhotometricNormalizationOption);
     params.autoLensChromaticAberration =
-        !parser.isSet(noAutoLensChromaticAberrationOption);
+        !timelapseMode && !parser.isSet(noAutoLensChromaticAberrationOption);
     params.noiseReductionEnabled = denoiseStrength > 0;
     params.noiseReductionStrength = denoiseStrength;
     params.modifiedCameraColorEnabled = modifiedCameraColorEnabled;
@@ -754,13 +777,15 @@ int main(int argc, char* argv[]) {
     worker.start();
     worker.wait();
 
+    // Sequence modes reorder the selected slice inside the worker.
+    const QStringList orderedFiles = worker.orderedFilePaths();
     QJsonObject report;
-    report["schemaVersion"] = 19;
+    report["schemaVersion"] = 20;
     report["toolVersion"] = QCoreApplication::applicationVersion();
     report["generatedAt"] = QDateTime::currentDateTimeUtc().toString(Qt::ISODate);
     report["input"] = input;
     report["startIndex"] = startIndex;
-    report["selectedFrames"] = files.size();
+    report["selectedFrames"] = orderedFiles.size();
     report["singleFrameMode"] = singleFrameMode;
     report["timelapseMode"] = timelapseMode;
     report["starTrailMode"] = starTrailMode;
@@ -808,8 +833,9 @@ int main(int argc, char* argv[]) {
         worker.timelapseMaximumFlickerOffset();
     report["requestedReferenceIndex"] = referenceIndex;
     report["referenceIndex"] = worker.selectedReferenceIndex();
-    report["referenceFile"] =
-        QFileInfo(worker.selectedReferenceFrame()).fileName();
+    const QString referencePath = worker.selectedReferenceFrame();
+    report["referenceFile"] = QFileInfo(referencePath).fileName();
+    report["referencePath"] = referencePath;
     report["autoQualityRejectionEnabled"] =
         params.autoRejectLowQualityFrames;
     const bool sequenceGroundApplied = (timelapseMode || starTrailMode) &&
@@ -832,11 +858,16 @@ int main(int argc, char* argv[]) {
     QJsonArray qualityFrames;
     const std::vector<FrameQualityMetrics>& qualityMetrics =
         worker.frameQualityMetrics();
-    for (int index = 0; index < files.size(); ++index) {
+    for (int index = 0; index < orderedFiles.size(); ++index) {
+        const QString& sourcePath = orderedFiles[index];
         QJsonObject quality;
         quality["index"] = index;
-        quality["file"] = QFileInfo(files[index]).fileName();
-        quality["rejected"] = rejectedSet.contains(files[index]);
+        quality["file"] = QFileInfo(sourcePath).fileName();
+        quality["sourcePath"] = sourcePath;
+        if (timelapseMode && index < worker.stackedFrameCount()) {
+            quality["outputNumber"] = index + 1;
+        }
+        quality["rejected"] = rejectedSet.contains(sourcePath);
         if (static_cast<size_t>(index) < qualityMetrics.size()) {
             const FrameQualityMetrics& metrics =
                 qualityMetrics[static_cast<size_t>(index)];

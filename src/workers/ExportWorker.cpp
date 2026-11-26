@@ -10,7 +10,7 @@ ExportWorker::ExportWorker(
     , m_image(std::move(image))
     , m_width(width)
     , m_height(height)
-    , m_path(std::move(path))
+    , m_preferredPath(std::move(path))
     , m_format(format) {}
 
 void ExportWorker::requestCancel() {
@@ -18,15 +18,12 @@ void ExportWorker::requestCancel() {
 }
 
 void ExportWorker::run() {
-    if (!m_image) return;
-    m_succeeded = ImageExporter::exportRgb16(
-        *m_image, m_width, m_height, m_path, m_format,
-        [this]() {
-            if (!m_cancelRequested.load()) return false;
-            m_wasCancelled = true;
-            return true;
-        });
-    if (!m_succeeded && m_cancelRequested.load()) {
-        m_wasCancelled = true;
-    }
+    m_outputPath.clear();
+    m_succeeded = false;
+    m_wasCancelled = m_cancelRequested.load();
+    if (m_wasCancelled || !m_image) return;
+    m_succeeded = ImageExporter::exportNewRgb16(
+        *m_image, m_width, m_height, m_preferredPath, m_format, m_outputPath,
+        [this]() { return m_cancelRequested.load(); });
+    m_wasCancelled = !m_succeeded && m_cancelRequested.load();
 }

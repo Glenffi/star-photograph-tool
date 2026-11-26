@@ -28,6 +28,27 @@ bool checkedMultiply(uint64_t left, uint64_t right, uint64_t& result) {
     return true;
 }
 
+bool checkedAdd(uint64_t left, uint64_t right, uint64_t& result) {
+    if (right > std::numeric_limits<uint64_t>::max() - left) return false;
+    result = left + right;
+    return true;
+}
+
+uint64_t ceilDivide(uint64_t value, uint64_t divisor) {
+    return value / divisor + (value % divisor != 0);
+}
+
+bool estimateVolumeBytes(uint64_t fileBytes, int frameCount, int blockSize,
+                         uint64_t& requiredBytes) {
+    const uint64_t block = static_cast<uint64_t>(std::max(4096, blockSize));
+    uint64_t blocks = 0;
+    uint64_t allocatedBytes = 0;
+    return checkedMultiply(ceilDivide(fileBytes, block),
+                           static_cast<uint64_t>(frameCount), blocks) &&
+        checkedMultiply(blocks, block, allocatedBytes) &&
+        checkedAdd(allocatedBytes, ceilDivide(allocatedBytes, 10), requiredBytes);
+}
+
 uint64_t percentageOf(uint64_t value, uint64_t percentage) {
     return value / 100 * percentage + (value % 100) * percentage / 100;
 }
@@ -180,6 +201,56 @@ uint64_t ProcessingMemoryEstimator::estimateScratchDiskBytes(
     if (!skyGroundSeparation) return allFrames;
     uint64_t doubled = 0;
     return checkedMultiply(allFrames, 2, doubled) ? doubled : 0;
+}
+
+ProcessingMemoryEstimator::TimelapseDiskBudget
+ProcessingMemoryEstimator::estimateTimelapseDiskBudget(
+    int width, int height, int frameCount, bool pngOutput,
+    int scratchBlockSize, int outputBlockSize) {
+    const uint64_t scratchFrameBytes = estimateScratchDiskBytes(
+        width, height, 1, false);
+    if (scratchFrameBytes == 0 || frameCount <= 0) return {};
+
+    const uint64_t rows = static_cast<uint64_t>(height);
+    uint64_t outputFrameBytes = 0;
+    if (pngOutput) {
+        // Budget for incompressible RGB8, including a filter byte per row
+        // and expansion from DEFLATE and IDAT framing.
+        const uint64_t filteredRowBytes = static_cast<uint64_t>(width) * 3 + 1;
+        if (!checkedMultiply(filteredRowBytes, rows, outputFrameBytes) ||
+            !checkedAdd(outputFrameBytes, ceilDivide(outputFrameBytes, 100),
+                        outputFrameBytes)) {
+            return {};
+        }
+    } else {
+        // RGB16 TIFF is uncompressed and the exporter writes one strip per row.
+        if (!checkedAdd(scratchFrameBytes, rows * 16, outputFrameBytes)) return {};
+    }
+    constexpr uint64_t kFileMetadataBytes = 16 * 1024; // Header/tags and ICC.
+    if (!checkedAdd(outputFrameBytes, kFileMetadataBytes, outputFrameBytes)) return {};
+
+    TimelapseDiskBudget budget;
+    if (!estimateVolumeBytes(scratchFrameBytes, frameCount, scratchBlockSize,
+                             budget.scratchBytes) ||
+        !estimateVolumeBytes(outputFrameBytes, frameCount, outputBlockSize,
+                             budget.outputBytes) ||
+        !checkedAdd(budget.scratchBytes, budget.outputBytes, budget.sharedBytes)) {
+        return {};
+    }
+    return budget;
+}
+
+ProcessingMemoryEstimator::TimelapseDiskBudget::Shortfall
+ProcessingMemoryEstimator::TimelapseDiskBudget::shortfall(
+    bool sharedVolume, uint64_t scratchAvailable, uint64_t outputAvailable) const {
+    if (sharedBytes == 0) return Shortfall::InvalidEstimate;
+    if (sharedVolume) {
+        return std::min(scratchAvailable, outputAvailable) < sharedBytes
+            ? Shortfall::SharedVolume : Shortfall::None;
+    }
+    if (scratchAvailable < scratchBytes) return Shortfall::Scratch;
+    if (outputAvailable < outputBytes) return Shortfall::Output;
+    return Shortfall::None;
 }
 
 uint64_t ProcessingMemoryEstimator::totalPhysicalMemoryBytes() {

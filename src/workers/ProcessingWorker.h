@@ -19,6 +19,9 @@ class ProcessingWorker : public QThread {
     Q_OBJECT
 
 public:
+    enum class Phase { Preparation, Alignment, Stacking, Adjustment, Output };
+    Q_ENUM(Phase)
+
     struct SkippedFrameInfo {
         QString filePath;
         QString stage;
@@ -110,7 +113,7 @@ public:
     ProcessingWorker(const QStringList& files, const QString& referenceFrame,
                      const Params& params, QObject* parent = nullptr);
 
-    // These accessors are called by the GUI only after QThread::finished.
+    // Read these results only after QThread::finished.
     std::vector<uint16_t> takeStackedData();
     QImage takeBeforePreview();
     std::vector<uint16_t> takeQuickPreviewSource();
@@ -136,6 +139,7 @@ public:
     int stackedFrameCount() const { return m_frameCount; }
     int selectedReferenceIndex() const { return m_selectedReferenceIndex; }
     QString selectedReferenceFrame() const { return m_selectedReferenceFrame; }
+    QStringList orderedFilePaths() const { return m_files; }
     const std::vector<FrameQualityMetrics>& frameQualityMetrics() const {
         return m_frameQualityMetrics;
     }
@@ -215,6 +219,7 @@ public:
 
 signals:
     void progress(int value);
+    void phaseChanged(ProcessingWorker::Phase phase);
     void stageMessage(const QString& message);
 
 protected:

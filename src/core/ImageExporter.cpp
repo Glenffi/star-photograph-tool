@@ -3,14 +3,32 @@
 #include <QString>
 #include <QColorSpace>
 #include <QDebug>
+#include <QDir>
 #include <QFile>
+#include <QFileInfo>
+#include <QSaveFile>
+#include <QScopeGuard>
+#include <QTemporaryFile>
 #include <algorithm>
 #include <array>
 #include <cmath>
-#include <iostream>
+#include <cstdio>
 #include <limits>
+#include <memory>
 #include <new>
 #include <stdexcept>
+
+#ifdef Q_OS_WIN
+#include <QtCore/qt_windows.h>
+#else
+#include <cerrno>
+#include <unistd.h>
+#ifdef Q_OS_LINUX
+#include <fcntl.h>
+#include <linux/fs.h>
+#include <sys/syscall.h>
+#endif
+#endif
 
 #ifdef HAS_LIBTIFF
 #include <tiffio.h>
@@ -28,25 +46,110 @@ static bool checkedSampleCount(int width, int height, size_t channels,
     return true;
 }
 
-#ifdef HAS_LIBTIFF
-static TIFF* openTiffForWrite(const QString& path) {
-#ifdef _WIN32
-    const std::wstring nativePath = path.toStdWString();
-    return TIFFOpenW(nativePath.c_str(), "w");
+#ifdef Q_OS_WIN
+static QString windowsPath(const QString& absolutePath) {
+    const QString native = QDir::toNativeSeparators(absolutePath);
+    if (native.startsWith(QStringLiteral("\\\\?\\")) ||
+        native.startsWith(QStringLiteral("\\\\.\\"))) {
+        return native;
+    }
+    if (native.startsWith(QStringLiteral("\\\\"))) {
+        return QStringLiteral("\\\\?\\UNC\\") + native.mid(2);
+    }
+    return QStringLiteral("\\\\?\\") + native;
+}
+#endif
+
+enum class Publication { Renamed, Linked, Occupied, Failed };
+
+static Publication publishWithoutReplacing(const QString& stagedPath,
+                                           const QString& outputPath) {
+#ifdef Q_OS_WIN
+    const auto from = windowsPath(stagedPath).toStdWString();
+    const auto to = windowsPath(outputPath).toStdWString();
+    if (MoveFileExW(from.c_str(), to.c_str(), 0)) return Publication::Renamed;
+
+    const DWORD error = GetLastError();
+    if (error == ERROR_ALREADY_EXISTS || error == ERROR_FILE_EXISTS ||
+        ((error == ERROR_ACCESS_DENIED || error == ERROR_SHARING_VIOLATION) &&
+         GetFileAttributesW(to.c_str()) != INVALID_FILE_ATTRIBUTES)) {
+        return Publication::Occupied;
+    }
+    return Publication::Failed;
 #else
-    const QByteArray nativePath = QFile::encodeName(path);
-    return TIFFOpen(nativePath.constData(), "w");
+    const QByteArray from = QFile::encodeName(stagedPath);
+    const QByteArray to = QFile::encodeName(outputPath);
+#if (defined(Q_OS_MACOS) && defined(RENAME_EXCL)) || \
+    (defined(Q_OS_LINUX) && defined(SYS_renameat2) && defined(RENAME_NOREPLACE))
+#ifdef Q_OS_MACOS
+    if (::renamex_np(from.constData(), to.constData(), RENAME_EXCL) == 0) {
+#else
+    if (::syscall(SYS_renameat2, AT_FDCWD, from.constData(),
+                  AT_FDCWD, to.constData(), RENAME_NOREPLACE) == 0) {
+#endif
+        return Publication::Renamed;
+    }
+    const int error = errno;
+    if (error == EEXIST) return Publication::Occupied;
+    if (error != ENOTSUP && error != ENOSYS && error != EINVAL) {
+        return Publication::Failed;
+    }
+#endif
+    // Never fall back to plain rename or a copy: either could violate delivery.
+    if (::link(from.constData(), to.constData()) == 0) return Publication::Linked;
+    return errno == EEXIST ? Publication::Occupied : Publication::Failed;
 #endif
 }
 
+#ifdef HAS_LIBTIFF
 static TIFF* openTiffForRead(const QString& path) {
-#ifdef _WIN32
-    const std::wstring nativePath = path.toStdWString();
+#ifdef Q_OS_WIN
+    const auto nativePath = windowsPath(QFileInfo(path).absoluteFilePath())
+                                .toStdWString();
     return TIFFOpenW(nativePath.c_str(), "r");
 #else
     const QByteArray nativePath = QFile::encodeName(path);
     return TIFFOpen(nativePath.constData(), "r");
 #endif
+}
+
+static TIFF* openTiffForWrite(QFileDevice& file) {
+    // Write through the already-open Qt device, including on Unicode paths.
+    return TIFFClientOpen(
+        "ImageExporter", "w", &file,
+        [](thandle_t handle, void* data, tmsize_t size) {
+            return static_cast<tmsize_t>(
+                static_cast<QFileDevice*>(handle)->read(
+                    static_cast<char*>(data), size));
+        },
+        [](thandle_t handle, void* data, tmsize_t size) {
+            return static_cast<tmsize_t>(
+                static_cast<QFileDevice*>(handle)->write(
+                    static_cast<const char*>(data), size));
+        },
+        [](thandle_t handle, toff_t offset, int origin) -> toff_t {
+            auto& device = *static_cast<QFileDevice*>(handle);
+            constexpr toff_t failed = static_cast<toff_t>(-1);
+            qint64 base = 0;
+            if (origin == SEEK_CUR) {
+                base = device.pos();
+            } else if (origin == SEEK_END) {
+                base = device.size();
+            } else if (origin != SEEK_SET) {
+                return failed;
+            }
+            if (base < 0 || offset > static_cast<toff_t>(
+                    std::numeric_limits<qint64>::max() - base)) {
+                return failed;
+            }
+            const qint64 position = base + static_cast<qint64>(offset);
+            return device.seek(position) ? static_cast<toff_t>(position) : failed;
+        },
+        [](thandle_t) { return 0; },
+        [](thandle_t handle) {
+            return static_cast<toff_t>(static_cast<QFileDevice*>(handle)->size());
+        },
+        nullptr, nullptr);
 }
 
 static bool setTiffImageFields(TIFF* tiff, int width, int height,
@@ -67,105 +170,53 @@ static bool setTiffImageFields(TIFF* tiff, int width, int height,
 }
 #endif
 
-static bool exportTiff16Bit(
-    const std::vector<uint16_t>& image, int width, int height,
-    const QString& path, const std::function<bool()>& cancelled) {
+static bool writeTiff16(QFileDevice& file, const std::vector<uint16_t>& image,
+                        int width, int height, int channels,
+                        const std::function<bool()>& cancelled) {
 #ifdef HAS_LIBTIFF
-    TIFF* tiff = openTiffForWrite(path);
-    if (!tiff) {
-        qWarning().noquote() << "ImageExporter: 无法打开 TIFF 文件:" << path;
+    const std::unique_ptr<TIFF, decltype(&TIFFClose)> tiff(
+        openTiffForWrite(file), TIFFClose);
+    if (!tiff) return false;
+    const bool rgb = channels == 3;
+    if (!setTiffImageFields(tiff.get(), width, height,
+                            static_cast<uint16_t>(channels),
+                            rgb ? PHOTOMETRIC_RGB : PHOTOMETRIC_MINISBLACK)) {
+        qWarning() << "ImageExporter: Could not set TIFF image fields";
         return false;
     }
 
-    if (!setTiffImageFields(
-            tiff, width, height, 1, PHOTOMETRIC_MINISBLACK)) {
-        qWarning() << "ImageExporter: 无法设置灰度 TIFF 必需标签";
-        TIFFClose(tiff);
-        return false;
-    }
-
-    for (int row = 0; row < height; ++row) {
-        if (cancelled && cancelled()) {
-            TIFFClose(tiff);
-            QFile::remove(path);
-            return false;
-        }
-        uint16_t* scanline = const_cast<uint16_t*>(
-            image.data() + static_cast<size_t>(row) * width);
-        if (TIFFWriteScanline(tiff, scanline, row, 0) < 0) {
-            std::cerr << "ImageExporter: TIFF 写入失败于行 " << row << std::endl;
-            TIFFClose(tiff);
-            QFile::remove(path);
-            return false;
-        }
-    }
-
-    TIFFClose(tiff);
-    if (cancelled && cancelled()) {
-        QFile::remove(path);
-        return false;
-    }
-    return true;
-#else
-    std::cerr << "ImageExporter: TIFF 导出不可用，libtiff 未找到" << std::endl;
-    return false;
-#endif
-}
-
-static bool exportTiffRgb16(
-    const std::vector<uint16_t>& rgb, int width, int height,
-    const QString& path, const std::function<bool()>& cancelled) {
-#ifdef HAS_LIBTIFF
-    TIFF* tiff = openTiffForWrite(path);
-    if (!tiff) {
-        qWarning().noquote() << "ImageExporter: 无法打开 TIFF 文件:" << path;
-        return false;
-    }
-
-    if (!setTiffImageFields(tiff, width, height, 3, PHOTOMETRIC_RGB)) {
-        qWarning() << "ImageExporter: 无法设置 RGB TIFF 必需标签";
-        TIFFClose(tiff);
-        return false;
-    }
-
-    // 使用 Qt 内置的线性 sRGB ICC profile
-    const QByteArray iccProfile = QColorSpace(QColorSpace::SRgbLinear).iccProfile();
-    if (!iccProfile.isEmpty()) {
-        if (TIFFSetField(tiff, TIFFTAG_ICCPROFILE,
+    if (rgb) {
+        const QByteArray iccProfile =
+            QColorSpace(QColorSpace::SRgbLinear).iccProfile();
+        if (iccProfile.isEmpty() ||
+            TIFFSetField(tiff.get(), TIFFTAG_ICCPROFILE,
                          static_cast<uint32_t>(iccProfile.size()),
                          iccProfile.constData()) != 1) {
-            std::cerr << "ImageExporter: 警告：TIFFSetField ICC profile 失败，"
-                         "导出将不嵌入色彩空间标记" << std::endl;
+            qWarning() << "ImageExporter: Could not embed the linear sRGB profile";
         }
-    } else {
-        std::cerr << "ImageExporter: 警告：无法获取线性 sRGB ICC profile，"
-                     "TIFF 将不嵌入色彩空间标记" << std::endl;
     }
 
+    const size_t samplesPerRow = static_cast<size_t>(width) * channels;
     for (int row = 0; row < height; ++row) {
-        if (cancelled && cancelled()) {
-            TIFFClose(tiff);
-            QFile::remove(path);
-            return false;
-        }
+        if (cancelled && cancelled()) return false;
         uint16_t* scanline = const_cast<uint16_t*>(
-            rgb.data() + static_cast<size_t>(row) * width * 3);
-        if (TIFFWriteScanline(tiff, scanline, row, 0) < 0) {
-            std::cerr << "ImageExporter: TIFF 写入失败于行 " << row << std::endl;
-            TIFFClose(tiff);
-            QFile::remove(path);
+            image.data() + static_cast<size_t>(row) * samplesPerRow);
+        if (TIFFWriteScanline(tiff.get(), scanline, row, 0) != 1) {
+            qWarning() << "ImageExporter: TIFF write failed at row" << row;
             return false;
         }
     }
 
-    TIFFClose(tiff);
-    if (cancelled && cancelled()) {
-        QFile::remove(path);
-        return false;
-    }
-    return true;
+    // TIFFClose cannot report errors writing the final image directory.
+    return TIFFFlush(tiff.get()) == 1;
 #else
-    std::cerr << "ImageExporter: TIFF 导出不可用，libtiff 未找到" << std::endl;
+    Q_UNUSED(file)
+    Q_UNUSED(image)
+    Q_UNUSED(width)
+    Q_UNUSED(height)
+    Q_UNUSED(channels)
+    Q_UNUSED(cancelled)
+    qWarning() << "ImageExporter: TIFF export requires libtiff";
     return false;
 #endif
 }
@@ -199,56 +250,63 @@ static const std::array<uint8_t, 65536>& linearToSrgb8Table() {
     return table;
 }
 
-static bool exportPng8Bit(
-    const std::vector<uint16_t>& image, int width, int height,
-    const QString& path, const std::function<bool()>& cancelled) {
-    QImage qimg(width, height, QImage::Format_Grayscale8);
+static bool writePng8(QFileDevice& file, const std::vector<uint16_t>& image,
+                      int width, int height, int channels,
+                      const std::function<bool()>& cancelled) {
+    QImage qimg(width, height, channels == 3
+                    ? QImage::Format_RGB888 : QImage::Format_Grayscale8);
     if (qimg.isNull()) return false;
-    // 设置 sRGB 色彩空间，与 RGB PNG 保持一致
     qimg.setColorSpace(QColorSpace(QColorSpace::SRgb));
     const auto& transfer = linearToSrgb8Table();
+    const size_t samplesPerRow = static_cast<size_t>(width) * channels;
     for (int y = 0; y < height; ++y) {
         if (cancelled && cancelled()) return false;
         uchar* output = qimg.scanLine(y);
-        const uint16_t* input = image.data() + static_cast<size_t>(y) * width;
-        for (int x = 0; x < width; ++x) {
-            output[x] = transfer[input[x]];
-        }
-    }
-    if (cancelled && cancelled()) return false;
-    const bool saved = qimg.save(path, "PNG");
-    if (cancelled && cancelled()) {
-        if (saved) QFile::remove(path);
-        return false;
-    }
-    return saved;
-}
-
-static bool exportPngRgb16(
-    const std::vector<uint16_t>& rgb, int width, int height,
-    const QString& path, const std::function<bool()>& cancelled) {
-    QImage qimg(width, height, QImage::Format_RGB888);
-    if (qimg.isNull()) return false;
-    // 设置 sRGB 色彩空间，确保查看器正确解释
-    qimg.setColorSpace(QColorSpace(QColorSpace::SRgb));
-    const auto& transfer = linearToSrgb8Table();
-    const size_t samplesPerRow = static_cast<size_t>(width) * 3;
-    for (int y = 0; y < height; ++y) {
-        if (cancelled && cancelled()) return false;
-        uchar* output = qimg.scanLine(y);
-        const uint16_t* input = rgb.data() +
+        const uint16_t* input = image.data() +
             static_cast<size_t>(y) * samplesPerRow;
         for (size_t x = 0; x < samplesPerRow; ++x) {
             output[x] = transfer[input[x]];
         }
     }
     if (cancelled && cancelled()) return false;
-    const bool saved = qimg.save(path, "PNG");
-    if (cancelled && cancelled()) {
-        if (saved) QFile::remove(path);
+    return qimg.save(&file, "PNG");
+}
+
+static bool validateExport(const std::vector<uint16_t>& image,
+                           int width, int height, int channels,
+                           ImageExporter::Format format) {
+    size_t expected = 0;
+    if (!checkedSampleCount(width, height, channels, expected) ||
+        image.size() != expected) {
+        qWarning() << "ImageExporter: Invalid dimensions or sample count";
         return false;
     }
-    return saved;
+    return format == ImageExporter::Tiff16 || format == ImageExporter::Png8;
+}
+
+static bool writeImage(QFileDevice& file, const std::vector<uint16_t>& image,
+                        int width, int height, int channels,
+                        ImageExporter::Format format,
+                        const std::function<bool()>& cancelled) {
+    const bool written = format == ImageExporter::Tiff16
+        ? writeTiff16(file, image, width, height, channels, cancelled)
+        : writePng8(file, image, width, height, channels, cancelled);
+    return written && file.error() == QFileDevice::NoError && file.flush();
+}
+
+static bool exportToExplicitPath(const std::vector<uint16_t>& image,
+                                 int width, int height, int channels,
+                                 const QString& path, ImageExporter::Format format,
+                                 const std::function<bool()>& cancelled) {
+    if (!validateExport(image, width, height, channels, format) ||
+        (cancelled && cancelled())) {
+        return false;
+    }
+    QSaveFile file(path);
+    file.setDirectWriteFallback(false);
+    return file.open(QIODevice::WriteOnly) &&
+           writeImage(file, image, width, height, channels, format, cancelled) &&
+           !(cancelled && cancelled()) && file.commit();
 }
 
 bool ImageExporter::export16Bit(const std::vector<uint16_t>& image,
@@ -256,22 +314,7 @@ bool ImageExporter::export16Bit(const std::vector<uint16_t>& image,
                                 const QString& path,
                                 Format format,
                                 const std::function<bool()>& cancelled) {
-    if (image.empty() || width <= 0 || height <= 0) {
-        std::cerr << "ImageExporter: 无效的图像数据" << std::endl;
-        return false;
-    }
-    size_t expectedSize = 0;
-    if (!checkedSampleCount(width, height, 1, expectedSize) ||
-        image.size() != expectedSize) {
-        std::cerr << "ImageExporter: 图像尺寸不匹配" << std::endl;
-        return false;
-    }
-
-    if (format == Tiff16) {
-        return exportTiff16Bit(image, width, height, path, cancelled);
-    } else {
-        return exportPng8Bit(image, width, height, path, cancelled);
-    }
+    return exportToExplicitPath(image, width, height, 1, path, format, cancelled);
 }
 
 bool ImageExporter::exportRgb16(const std::vector<uint16_t>& rgb,
@@ -279,22 +322,70 @@ bool ImageExporter::exportRgb16(const std::vector<uint16_t>& rgb,
                                 const QString& path,
                                 Format format,
                                 const std::function<bool()>& cancelled) {
-    if (rgb.empty() || width <= 0 || height <= 0) {
-        std::cerr << "ImageExporter: 无效的 RGB 图像数据" << std::endl;
-        return false;
-    }
-    size_t expectedSize = 0;
-    if (!checkedSampleCount(width, height, 3, expectedSize) ||
-        rgb.size() != expectedSize) {
-        std::cerr << "ImageExporter: RGB 图像尺寸不匹配" << std::endl;
+    return exportToExplicitPath(rgb, width, height, 3, path, format, cancelled);
+}
+
+bool ImageExporter::exportNewRgb16(const std::vector<uint16_t>& rgb,
+                                   int width, int height,
+                                   const QString& preferredPath, Format format,
+                                   QString& actualPath,
+                                   const std::function<bool()>& cancelled) {
+    const QString requested = preferredPath;
+    actualPath.clear();
+    if (requested.isEmpty() || requested.contains(QChar::Null) ||
+        !validateExport(rgb, width, height, 3, format) ||
+        (cancelled && cancelled())) {
         return false;
     }
 
-    if (format == Tiff16) {
-        return exportTiffRgb16(rgb, width, height, path, cancelled);
-    } else {
-        return exportPngRgb16(rgb, width, height, path, cancelled);
+    const QFileInfo preferred(requested);
+    const QString name = preferred.fileName();
+    if (name.isEmpty() || name == QStringLiteral(".") ||
+        name == QStringLiteral("..")) {
+        return false;
     }
+    const QDir directory = preferred.absoluteDir();
+    QString stagedPath;
+    const auto cleanup = qScopeGuard([&]() {
+        if (!stagedPath.isEmpty() && !QFile::remove(stagedPath)) {
+            qWarning().noquote() << "ImageExporter: Could not remove" << stagedPath;
+        }
+    });
+    {
+        QTemporaryFile staged(directory.filePath(
+            QStringLiteral(".nebulens-export-XXXXXX")));
+        if (!staged.open() ||
+            !writeImage(staged, rgb, width, height, 3, format, cancelled)) {
+            return false;
+        }
+        const QString path = staged.fileName();
+        staged.close();
+        if (path.isEmpty() || staged.error() != QFileDevice::NoError) return false;
+        stagedPath = path;
+        staged.setAutoRemove(false);
+        // Destruction closes the native handle so Windows can rename it.
+    }
+
+    const QString suffix = preferred.suffix();
+    const QString extension =
+        suffix.isEmpty() ? QString() : QLatin1Char('.') + suffix;
+    const QString stem = preferred.completeBaseName();
+    for (int number = 1; number <= 10'000; ++number) {
+        const QString candidate = directory.filePath(number == 1
+            ? name : stem + QLatin1Char('_') + QString::number(number) + extension);
+        if (cancelled && cancelled()) return false;
+        const Publication publication =
+            publishWithoutReplacing(stagedPath, candidate);
+        if (publication == Publication::Occupied) continue;
+        if (publication == Publication::Failed) {
+            qWarning().noquote() << "ImageExporter: Could not publish" << candidate;
+            return false;
+        }
+        if (publication == Publication::Renamed) stagedPath.clear();
+        actualPath = candidate;
+        return true;
+    }
+    return false;
 }
 
 bool ImageExporter::loadTiffRgb16(const QString& path,
@@ -380,12 +471,12 @@ bool ImageExporter::loadTiffRgb16(const QString& path,
         return false;
     }
     const tmsize_t scanlineBytes = TIFFScanlineSize(tiff);
-    const size_t requiredBytes = static_cast<size_t>(imageWidth) *
+    const uint64_t requiredBytes = static_cast<uint64_t>(imageWidth) *
         samplesPerPixel * sizeof(uint16_t);
     constexpr size_t kMaximumScanlineBytes = 256U * 1024U * 1024U;
     if (scanlineBytes <= 0 ||
         static_cast<uint64_t>(scanlineBytes) > kMaximumScanlineBytes ||
-        static_cast<size_t>(scanlineBytes) < requiredBytes) {
+        static_cast<uint64_t>(scanlineBytes) < requiredBytes) {
         TIFFClose(tiff);
         return false;
     }
@@ -406,7 +497,7 @@ bool ImageExporter::loadTiffRgb16(const QString& path,
                 static_cast<uint32_t>(
                     (static_cast<uint64_t>(outputRow) * 2 + 1) *
                     imageHeight / (static_cast<uint64_t>(outputHeight) * 2)));
-            if (TIFFReadScanline(tiff, scanline.data(), sourceRow, 0) < 0) {
+            if (TIFFReadScanline(tiff, scanline.data(), sourceRow, 0) != 1) {
                 rgb.clear();
                 TIFFClose(tiff);
                 return false;

@@ -109,6 +109,8 @@ public:
                            const RawImageLoader::CfaImageData& candidate,
                            std::string& reason);
 
+    static bool exposureMatches(double first, double second) noexcept;
+
     static bool createMasterFrame(
         MasterRole role,
         const RawImageLoader::CfaImageData& source,

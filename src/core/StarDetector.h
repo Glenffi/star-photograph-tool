@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <vector>
 
@@ -9,6 +10,13 @@ struct StarPoint {
     double flux = 0.0;     // 亮度总流量
     double fwhm = 0.0;     // 半高全宽 (pixels)
     double ellipticity = 0.0; // 椭率 (0=圆形, 1=线)
+};
+
+struct AlignmentStarSelection {
+    std::vector<StarPoint> fit;
+    std::vector<StarPoint> evaluation;
+    size_t detectedCount = 0;
+    bool independentEvaluation = false;
 };
 
 /**
@@ -62,6 +70,13 @@ public:
     bool detect(const std::vector<uint16_t>& image, int width, int height,
                 std::vector<StarPoint>& stars,
                 const DetectionOptions& options);
+
+    // Reserve a spatially distributed evaluation set before selecting fit
+    // stars. If there are too few detections to split, evaluate on the full
+    // set so the existing quality gates still see all available evidence.
+    bool detectForAlignment(const std::vector<uint16_t>& image,
+                            int width, int height,
+                            AlignmentStarSelection& selection);
 
 private:
     void gaussianBlur(const std::vector<uint16_t>& src, int w, int h,

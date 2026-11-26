@@ -37,8 +37,7 @@ struct ReferenceFrame {
     QString path;
     int width = 0;
     int height = 0;
-    std::vector<StarPoint> stars;
-    std::vector<StarPoint> evaluationStars;
+    AlignmentStarSelection stars;
 };
 
 struct Summary {
@@ -289,28 +288,18 @@ QJsonObject inspectFile(const QString& sampleRoot,
     image.data.shrink_to_fit();
     if (!luminanceOk) return result;
 
-    DetectionOptions options;
-    options.spatiallyBalanced = true;
-    options.maxCandidates = 300;
-    options.maxStars = 250;
-    std::vector<StarPoint> detectedStars;
+    AlignmentStarSelection stars;
     StarDetector detector;
     timer.restart();
-    const bool starsOk = detector.detect(luminance, image.width, image.height,
-                                         detectedStars, options);
-    const size_t fitCount = std::min<size_t>(50, detectedStars.size());
-    const std::vector<StarPoint> stars(
-        detectedStars.begin(), detectedStars.begin() + fitCount);
-    const std::vector<StarPoint> evaluationStars =
-        detectedStars.size() >= fitCount + 12
-            ? std::vector<StarPoint>(
-                  detectedStars.begin() + fitCount, detectedStars.end())
-            : detectedStars;
+    const bool starsOk = detector.detectForAlignment(
+        luminance, image.width, image.height, stars);
     result["starDetectionMs"] = static_cast<double>(timer.elapsed());
     result["starDetectionOk"] = starsOk;
-    result["alignmentStarCount"] = static_cast<int>(stars.size());
+    result["alignmentDetectedStarCount"] = static_cast<int>(stars.detectedCount);
+    result["alignmentStarCount"] = static_cast<int>(stars.fit.size());
     result["alignmentEvaluationStarCount"] =
-        static_cast<int>(evaluationStars.size());
+        static_cast<int>(stars.evaluation.size());
+    result["alignmentEvaluationIndependent"] = stars.independentEvaluation;
     if (starsOk) ++summary.starDetectionPassed;
 
     if (!reference.valid && starsOk) {
@@ -319,7 +308,6 @@ QJsonObject inspectFile(const QString& sampleRoot,
         reference.width = image.width;
         reference.height = image.height;
         reference.stars = stars;
-        reference.evaluationStars = evaluationStars;
         result["alignment"] = "reference";
         result["alignmentReference"] = relativePath(sampleRoot, reference.path);
     } else if (reference.valid && starsOk) {
@@ -335,11 +323,11 @@ QJsonObject inspectFile(const QString& sampleRoot,
             alignmentOptions.imageWidth = image.width;
             alignmentOptions.imageHeight = image.height;
             alignmentOptions.evaluationReferenceStars =
-                &reference.evaluationStars;
-            alignmentOptions.evaluationSourceStars = &evaluationStars;
+                &reference.stars.evaluation;
+            alignmentOptions.evaluationSourceStars = &stars.evaluation;
             timer.restart();
             const bool aligned = aligner.align(
-                reference.stars, stars, transform, &quality, alignmentOptions);
+                reference.stars.fit, stars.fit, transform, &quality, alignmentOptions);
             result["alignmentMs"] = static_cast<double>(timer.elapsed());
             result["alignment"] = aligned ? "passed" : "failed";
             result["alignmentMatchedStars"] = quality.matchedStars;
