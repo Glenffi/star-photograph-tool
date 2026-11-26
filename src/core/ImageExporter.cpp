@@ -1,5 +1,5 @@
 #include "ImageExporter.h"
-#include <QImage>
+#include "ImageBufferUtils.h"
 #include <QString>
 #include <QColorSpace>
 #include <QDebug>
@@ -250,17 +250,17 @@ static const std::array<uint8_t, 65536>& linearToSrgb8Table() {
     return table;
 }
 
-static bool writePng8(QFileDevice& file, const std::vector<uint16_t>& image,
-                      int width, int height, int channels,
-                      const std::function<bool()>& cancelled) {
+static QImage encodeSrgb8(const std::vector<uint16_t>& image,
+                          int width, int height, int channels,
+                          const std::function<bool()>& cancelled = {}) {
     QImage qimg(width, height, channels == 3
                     ? QImage::Format_RGB888 : QImage::Format_Grayscale8);
-    if (qimg.isNull()) return false;
+    if (qimg.isNull()) return {};
     qimg.setColorSpace(QColorSpace(QColorSpace::SRgb));
     const auto& transfer = linearToSrgb8Table();
     const size_t samplesPerRow = static_cast<size_t>(width) * channels;
     for (int y = 0; y < height; ++y) {
-        if (cancelled && cancelled()) return false;
+        if (cancelled && cancelled()) return {};
         uchar* output = qimg.scanLine(y);
         const uint16_t* input = image.data() +
             static_cast<size_t>(y) * samplesPerRow;
@@ -268,8 +268,37 @@ static bool writePng8(QFileDevice& file, const std::vector<uint16_t>& image,
             output[x] = transfer[input[x]];
         }
     }
-    if (cancelled && cancelled()) return false;
-    return qimg.save(&file, "PNG");
+    return qimg;
+}
+
+static bool writePng8(QFileDevice& file, const std::vector<uint16_t>& image,
+                      int width, int height, int channels,
+                      const std::function<bool()>& cancelled) {
+    const QImage encoded = encodeSrgb8(image, width, height, channels, cancelled);
+    return !encoded.isNull() && !(cancelled && cancelled()) && encoded.save(&file, "PNG");
+}
+
+QImage ImageExporter::makeRgb16Proof(const std::vector<uint16_t>& rgb,
+                                     int width, int height) {
+    size_t expected = 0;
+    if (!checkedSampleCount(width, height, 3, expected) || rgb.size() != expected) return {};
+
+    constexpr int kProofLongSide = 1600;
+    if (std::max(width, height) <= kProofLongSide) return encodeSrgb8(rgb, width, height, 3);
+
+    // Resample in linear light before applying the same display transfer as PNG.
+    std::vector<uint16_t> bounded;
+    int proofWidth = 0;
+    int proofHeight = 0;
+    try {
+        if (ImageBufferUtils::resizeRgb16ToLongSide(rgb, width, height, kProofLongSide,
+                                                     bounded, proofWidth, proofHeight)) {
+            return encodeSrgb8(bounded, proofWidth, proofHeight, 3);
+        }
+    } catch (const std::bad_alloc&) {
+        // A proof is optional; low memory must not invalidate a saved result.
+    }
+    return {};
 }
 
 static bool validateExport(const std::vector<uint16_t>& image,

@@ -4098,6 +4098,702 @@
             <source>地景检测失败</source>
             <translation>Ground detection failed</translation>
         </message>
+        <message>
+            <location filename='../src/app/MainWindow.cpp' line='1473'/>
+            <source>&lt;b&gt;文件路径：&lt;/b&gt;%1&lt;br&gt;&lt;b&gt;相机型号：&lt;/b&gt;%2&lt;br&gt;&lt;b&gt;ISO：&lt;/b&gt;%3&lt;br&gt;&lt;b&gt;曝光时间：&lt;/b&gt;%4&lt;br&gt;&lt;b&gt;光圈：&lt;/b&gt;%5&lt;br&gt;&lt;b&gt;焦距：&lt;/b&gt;%6 mm&lt;br&gt;&lt;b&gt;尺寸：&lt;/b&gt;%7×%8&lt;br&gt;&lt;b&gt;时间戳：&lt;/b&gt;%9</source>
+            <translation>&lt;b&gt;File path:&lt;/b&gt; %1&lt;br&gt;&lt;b&gt;Camera:&lt;/b&gt; %2&lt;br&gt;&lt;b&gt;ISO:&lt;/b&gt; %3&lt;br&gt;&lt;b&gt;Exposure:&lt;/b&gt; %4&lt;br&gt;&lt;b&gt;Aperture:&lt;/b&gt; %5&lt;br&gt;&lt;b&gt;Focal length:&lt;/b&gt; %6 mm&lt;br&gt;&lt;b&gt;Dimensions:&lt;/b&gt; %7×%8&lt;br&gt;&lt;b&gt;Timestamp:&lt;/b&gt; %9</translation>
+        </message>
+        <message>
+            <location filename='../src/app/MainWindow.cpp' line='1544'/>
+            <source>Dark 与 Flat 各需要至少 3 张 RAW 或一个 Master；生成 Master Flat 时还需 Bias 或同曝光 Dark Flat 二选一。</source>
+            <translation>Dark and Flat each require at least 3 RAW frames or one Master. To generate a Master Flat, also supply either Bias or Dark Flat with a matching exposure.</translation>
+        </message>
+        <message>
+            <location filename='../src/app/MainWindow.cpp' line='1578'/>
+            <source>同一个文件不能同时作为 Light 或多个校准角色：
+%1</source>
+            <translation>The same file cannot be used as a Light and a calibration frame, or in more than one calibration role:
+%1</translation>
+        </message>
+        <message>
+            <location filename='../src/app/MainWindow.cpp' line='1912'/>
+            <location filename='../src/core/DeepSkyCalibrationPreflight.cpp' line='135'/>
+            <source>
+• </source>
+            <translation>
+• </translation>
+        </message>
+        <message>
+            <location filename='../src/app/MainWindow.cpp' line='2169'/>
+            <source>导入文件    Cmd/Ctrl+O
+导入目录    Shift+Cmd/Ctrl+O
+处理/取消   Cmd/Ctrl+Return
+导出结果    Cmd/Ctrl+E
+
+适应视图    F
+实际像素    1
+缩放        + / -
+循环对比    B
+直接分屏    Shift+B
+蒙版叠加    M
+返回结果    R
+灰点吸管    G
+排除/恢复   Space
+笔刷大小    [ / ]
+退出工具    Esc</source>
+            <translation>Import files    Cmd/Ctrl+O
+Import folder   Shift+Cmd/Ctrl+O
+Process/Cancel  Cmd/Ctrl+Return
+Export result   Cmd/Ctrl+E
+
+Fit to view     F
+Actual pixels   1
+Zoom            + / -
+Cycle comparison  B
+Before/after split  Shift+B
+Mask overlay    M
+Return to result  R
+Gray-point eyedropper  G
+Exclude/restore  Space
+Brush size      [ / ]
+Exit tool       Esc</translation>
+        </message>
+        <message>
+            <location filename='../src/core/DeepSkyCalibrationPreflight.cpp' line='97'/>
+            <source>校准素材预检%1。
+Light %2 张 · Dark %3 张 · Flat %4 张 · Bias %5 张</source>
+            <translation>Calibration preflight: %1.
+Light %2 · Dark %3 · Flat %4 · Bias %5</translation>
+        </message>
+        <message>
+            <location filename='../src/core/DeepSkyCalibrationPreflight.cpp' line='107'/>
+            <source>
+基准 Light：%1 · ISO %2 · %3 秒 · %4×%5</source>
+            <translation>
+Reference Light: %1 · ISO %2 · %3 s · %4×%5</translation>
+        </message>
+        <message>
+            <location filename='../src/core/DeepSkyCalibrationPreflight.cpp' line='117'/>
+            <source>
+Dark Flat %1 张 · Master Dark/Flat/Bias/Dark Flat %2/%3/%4/%5</source>
+            <translation>
+Dark Flat %1 · Master Dark/Flat/Bias/Dark Flat %2/%3/%4/%5</translation>
+        </message>
+        <message>
+            <location filename='../src/core/DeepSkyCalibrationPreflight.cpp' line='129'/>
+            <source>
+
+元数据规则均符合，可以继续解包 Bayer 并检查 Flat 亮度。</source>
+            <translation>
+
+Metadata checks passed. Bayer unpacking and Flat brightness checks can continue.</translation>
+        </message>
+        <message>
+            <location filename='../src/core/DeepSkyCalibrationPreflight.cpp' line='132'/>
+            <source>
+
+检查结果：</source>
+            <translation>
+
+Findings:</translation>
+        </message>
+        <message>
+            <location filename='../src/core/DeepSkyCalibrationPreflight.cpp' line='139'/>
+            <source>
+• 另有 %1 类问题未展开</source>
+            <translation>
+• %1 more issue categories not shown</translation>
+        </message>
+        <message>
+            <location filename='../src/core/DeepSkyCalibrationPreflight.cpp' line='142'/>
+            <source>
+
+预检只读取 RAW 头信息；CFA 布局和 Flat 实际亮度会在正式校准时继续检查。</source>
+            <translation>
+
+Preflight reads RAW headers only. CFA layout and actual Flat brightness are checked during calibration.</translation>
+        </message>
+        <message>
+            <location filename='../src/core/DeepSkyCalibrationPreflight.cpp' line='385'/>
+            <source>Flat 校准同时提供了 Bias 与 Dark Flat；请选择其中一种偏移校准方式。只有已减 Bias 的 Master Dark 需要额外 Bias 时，两者才可并存。</source>
+            <translation>Both Bias and Dark Flat were supplied for Flat calibration. Choose one offset-calibration method. Both are allowed only when a bias-subtracted Master Dark still requires a separate Bias.</translation>
+        </message>
+        <message>
+            <location filename='../src/core/VerifiedDownloadFinalizer.cpp' line='144'/>
+            <source>无法保存安装包到下载目录。
+目标：%1
+移动失败：%2
+复制失败：%3</source>
+            <translation>Unable to save the package to Downloads.
+Target: %1
+Move failed: %2
+Copy failed: %3</translation>
+        </message>
+        <message>
+            <location filename='../src/ui/FileDialogUtils.cpp' line='98'/>
+            <source>选择</source>
+            <translation>Select</translation>
+        </message>
+        <message>
+            <location filename='../src/ui/ParamsPanel.cpp' line='176'/>
+            <source>已选主帧</source>
+            <translation>Master Selected</translation>
+        </message>
+        <message>
+            <location filename='../src/ui/ParamsPanel.cpp' line='329'/>
+            <source>当前场景使用 LibRaw 线性 16-bit 解码，并在处理阶段完成黑电平、白平衡和星点色差校正。深空模式可在此设置 Dark、Flat、Bias 与 Dark Flat。</source>
+            <translation>This scene uses linear 16-bit LibRaw decoding. Black-level correction, white balance, and stellar chromatic aberration correction are applied during processing. In Deep Sky mode, set Dark, Flat, Bias, and Dark Flat here.</translation>
+        </message>
+        <message>
+            <location filename='../src/ui/ParamsPanel.cpp' line='481'/>
+            <source>校准详情</source>
+            <translation>Calibration Details</translation>
+        </message>
+        <message>
+            <location filename='../src/ui/ParamsPanel.cpp' line='491'/>
+            <source>每类校准帧可选一组 RAW（至少 3 张，建议 10–20 张），或一个 Nebulens .spmaster。Master Flat 必须已完成偏移校准与 CFA 分相归一化；若 Master Dark 已减偏置，亮场仍需偏置场。处理前会检查相机、尺寸、ISO、曝光、CFA 和 Master 的校准状态。</source>
+            <translation>For each calibration type, use a set of RAW frames (at least 3; 10–20 recommended) or one Nebulens .spmaster file. A Master Flat must already be offset-calibrated and normalized by CFA phase. If the Master Dark is bias-subtracted, Light frames still need Bias. Before processing, Nebulens checks camera, dimensions, ISO, exposure, CFA, and Master calibration status.</translation>
+        </message>
+        <message>
+            <location filename='../src/ui/ParamsPanel.cpp' line='553'/>
+            <source>选择堆栈降噪算法：
+• Median：取中位数，简单鲁棒，适合 ≤5 帧
+• Mean：取平均值，信噪比最高但抗异常差
+• Kappa-Sigma：迭代剔除异常值，适合 6-15 帧
+• Winsorized：用 MAD 替代标准差，适合 &gt;15 帧</source>
+            <translation>Choose a stacking method for noise reduction:
+• Median: robust and simple; best with 5 frames or fewer
+• Mean: highest signal-to-noise ratio, but sensitive to outliers
+• Kappa-Sigma: iteratively rejects outliers; best with 6–15 frames
+• Winsorized: uses MAD instead of standard deviation; best with more than 15 frames</translation>
+        </message>
+        <message>
+            <location filename='../src/ui/ParamsPanel.cpp' line='579'/>
+            <source>κ (kappa)：异常值剔除阈值系数
+• 值越小，剔除越严格，可能误删微弱星点
+• 值越大，保留越多，可能残留飞机轨迹
+• 推荐值：2.0~3.0，深空常用 2.5</source>
+            <translation>κ (kappa) controls the outlier rejection threshold.
+• Lower values reject more aggressively and may remove faint stars.
+• Higher values retain more data but may leave aircraft trails.
+• Recommended: 2.0–3.0; 2.5 is common for deep sky.</translation>
+        </message>
+        <message>
+            <location filename='../src/ui/ParamsPanel.cpp' line='1012'/>
+            <source>在线性堆栈结果上抑制亮度和色彩噪声
+建议在去雾和曲线拉伸之前使用</source>
+            <translation>Suppress luminance and chroma noise in the linear stacked result.
+Use before dehazing and applying curve stretches.</translation>
+        </message>
+        <message>
+            <location filename='../src/ui/ParamsPanel.cpp' line='1035'/>
+            <source>适用于 BCF 或天文改机造成的整体红偏
+自动采样中性天空并校正通道响应；普通相机请关闭</source>
+            <translation>Corrects the overall red cast from a BCF filter or an astro-modified camera.
+Automatically samples neutral sky to correct channel response. Leave off for unmodified cameras.</translation>
+        </message>
+        <message>
+            <location filename='../src/ui/ParamsPanel.cpp' line='1122'/>
+            <source>亮度引导的 Dark Channel Prior 去雾
+适合明显薄雾；银河暗尘丰富时建议关闭</source>
+            <translation>Luminance-guided Dark Channel Prior dehazing.
+Use for visible haze; leave off when the Milky Way has rich dark dust lanes.</translation>
+        </message>
+        <message>
+            <location filename='../src/ui/ParamsPanel.cpp' line='1144'/>
+            <source>背景色偏中和 + RGB 联动 Arcsinh 拉伸
+增强暗部并保留星点颜色</source>
+            <translation>Neutralizes the background cast and applies a linked RGB Arcsinh stretch.
+Lifts shadows while preserving star colors.</translation>
+        </message>
+        <message>
+            <location filename='../src/ui/ParamsPanel.cpp' line='1161'/>
+            <source>比较星核与星翼色度，只抑制向边缘突增的紫、蓝或绿色边
+不会改变星点尺寸，也不会全局降低饱和度</source>
+            <translation>Compares color in the star core and wings to suppress purple, blue, or green fringes that intensify at the edge.
+Does not change star size or reduce overall saturation.</translation>
+        </message>
+        <message>
+            <location filename='../src/ui/ParamsPanel.cpp' line='1184'/>
+            <source>40-60 适合普通镜头色差；更高强度用于明显的蓝紫星翼
+建议在 100% 预览下确认真实蓝星仍保留颜色</source>
+            <translation>Use 40–60 for typical lens fringing; higher values target pronounced blue or purple wings.
+Check at 100% that naturally blue stars retain their color.</translation>
+        </message>
+        <message>
+            <location filename='../src/ui/ParamsPanel.cpp' line='1201'/>
+            <source>自动建立无星层，仅对星层应用亚像素圆形 Minimum
+饱和大星保持原样，避免宽光晕形成暗环</source>
+            <translation>Builds a starless layer and applies a subpixel circular minimum filter only to the star layer.
+Leaves large saturated stars unchanged so broad halos do not develop dark rings.</translation>
+        </message>
+        <message>
+            <location filename='../src/ui/ParamsPanel.cpp' line='1213'/>
+            <source>缩星强度：40 温和，70 强烈，90 接近清星
+请在 100% 预览下判断，过高会损失星点细节</source>
+            <translation>Star reduction: 40 is mild, 70 is strong, and 90 nearly removes stars.
+Check at 100%; too much reduction can erase star detail.</translation>
+        </message>
+        <message>
+            <location filename='../src/ui/ParamsPanel.cpp' line='1223'/>
+            <source>40 温和收紧；70 强烈缩星；90 会清除多数暗弱小星
+推荐在 100% 预览下调整</source>
+            <translation>40 gently tightens stars; 70 strongly reduces them; 90 removes most faint small stars.
+Adjust at 100% for best results.</translation>
+        </message>
+        <message>
+            <location filename='../src/ui/ParamsPanel.cpp' line='1254'/>
+            <source>TIFF 16-bit：最高质量，保留完整动态范围（推荐）
+PNG 8-bit：无损压缩，预览/分享首选</source>
+            <translation>TIFF 16-bit: highest quality, preserves full dynamic range (recommended)
+PNG 8-bit: lossless compression, best for previewing or sharing</translation>
+        </message>
+        <message>
+            <location filename='../src/ui/ParamsPanel.cpp' line='1260'/>
+            <source>PNG 8-bit (预览)</source>
+            <translation>PNG 8-bit (Preview)</translation>
+        </message>
+        <message>
+            <location filename='../src/ui/ParamsPanel.cpp' line='2527'/>
+            <source>%1
+%2 · %3 MB</source>
+            <translation>%1
+%2 · %3 MB</translation>
+        </message>
+        <message>
+            <location filename='../src/ui/ParamsPanel.cpp' line='2893'/>
+            <source>校准来源已齐，处理前将检查兼容性</source>
+            <translation>Calibration inputs are ready. Compatibility will be checked before processing.</translation>
+        </message>
+        <message>
+            <location filename='../src/ui/ParamsPanel.cpp' line='2900'/>
+            <source>缺少%1</source>
+            <translation>Missing %1</translation>
+        </message>
+        <message>
+            <location filename='../src/ui/ParamsPanel.cpp' line='2902'/>
+            <source>%1还差 %2 张 RAW</source>
+            <translation>%1: %2 more RAW needed</translation>
+        </message>
+        <message>
+            <location filename='../src/ui/ParamsPanel.cpp' line='2910'/>
+            <source>RAW 平场需偏置场或同曝光的暗平场</source>
+            <translation>RAW Flats need Bias or Dark Flat with a matching exposure</translation>
+        </message>
+        <message>
+            <location filename='../src/ui/ParamsPanel.cpp' line='2913'/>
+            <source>请在偏置场和暗平场中移除一组</source>
+            <translation>Remove either Bias or Dark Flat</translation>
+        </message>
+        <message>
+            <location filename='../src/ui/ParamsPanel.cpp' line='2918'/>
+            <source>Master Flat 搭配 RAW 暗场不需要偏置场，请移除偏置场</source>
+            <translation>Master Flat with RAW Darks does not need Bias. Remove Bias</translation>
+        </message>
+        <message>
+            <location filename='../src/ui/ParamsPanel.cpp' line='2920'/>
+            <source>保留偏置场需搭配已减偏置的 Master Dark</source>
+            <translation>Keep Bias only with a bias-subtracted Master Dark</translation>
+        </message>
+        <message>
+            <location filename='../src/ui/ParamsPanel.cpp' line='2926'/>
+            <source>Master Flat 不需要暗平场，请移除暗平场</source>
+            <translation>Master Flat does not need Dark Flat. Remove Dark Flat</translation>
+        </message>
+        <message>
+            <location filename='../src/app/MainWindow.cpp' line='526'/>
+            <location filename='../src/ui/PrintOrderPanel.cpp' line='1125'/>
+            <location filename='../src/ui/PrintOrderPanel.cpp' line='1140'/>
+            <source>冲印单</source>
+            <translation>Print Order</translation>
+        </message>
+        <message>
+            <location filename='../src/ui/PrintOrderPanel.cpp' line='1126'/>
+            <source>影像冲印室</source>
+            <translation>Print Studio</translation>
+        </message>
+        <message>
+            <location filename='../src/ui/PrintOrderPanel.cpp' line='1127'/>
+            <source>纸面光影</source>
+            <translation>Paper Lighting</translation>
+        </message>
+        <message>
+            <location filename='../src/ui/PrintOrderPanel.cpp' line='1132'/>
+            <source>柔光</source>
+            <translation>Soft Light</translation>
+        </message>
+        <message>
+            <location filename='../src/ui/PrintOrderPanel.cpp' line='1133'/>
+            <source>流光</source>
+            <translation>Light Sweep</translation>
+        </message>
+        <message>
+            <location filename='../src/ui/PrintOrderPanel.cpp' line='1134'/>
+            <source>静止</source>
+            <translation>Still</translation>
+        </message>
+        <message>
+            <location filename='../src/ui/PrintOrderPanel.cpp' line='1138'/>
+            <location filename='../src/ui/PrintOrderPanel.cpp' line='1460'/>
+            <source>已遵循系统的减弱动态效果设置</source>
+            <translation>Follows your system's Reduce Motion setting</translation>
+        </message>
+        <message>
+            <location filename='../src/ui/PrintOrderPanel.cpp' line='1141'/>
+            <source>成品</source>
+            <translation>Product</translation>
+        </message>
+        <message>
+            <location filename='../src/ui/PrintOrderPanel.cpp' line='1143'/>
+            <source>保存</source>
+            <translation>Save</translation>
+        </message>
+        <message>
+            <location filename='../src/ui/PrintOrderPanel.cpp' line='1145'/>
+            <source>想得到什么？</source>
+            <translation>What Will You Make?</translation>
+        </message>
+        <message>
+            <location filename='../src/ui/PrintOrderPanel.cpp' line='1146'/>
+            <location filename='../src/ui/PrintOrderPanel.cpp' line='1238'/>
+            <source>一张成片</source>
+            <translation>One Finished Image</translation>
+        </message>
+        <message>
+            <location filename='../src/ui/PrintOrderPanel.cpp' line='1147'/>
+            <source>精修单张，或合成多张以降低噪点</source>
+            <translation>Refine one frame or stack several to reduce noise</translation>
+        </message>
+        <message>
+            <location filename='../src/ui/PrintOrderPanel.cpp' line='1148'/>
+            <location filename='../src/ui/PrintOrderPanel.cpp' line='1237'/>
+            <source>一张星轨</source>
+            <translation>One Star Trail Image</translation>
+        </message>
+        <message>
+            <location filename='../src/ui/PrintOrderPanel.cpp' line='1149'/>
+            <source>将连续拍摄的星点连成轨迹</source>
+            <translation>Blend successive frames into star trails</translation>
+        </message>
+        <message>
+            <location filename='../src/ui/PrintOrderPanel.cpp' line='1150'/>
+            <location filename='../src/ui/PrintOrderPanel.cpp' line='1233'/>
+            <source>一组延时照片</source>
+            <translation>A Timelapse Sequence</translation>
+        </message>
+        <message>
+            <location filename='../src/ui/PrintOrderPanel.cpp' line='1151'/>
+            <source>逐张输出，留给剪辑时编排</source>
+            <translation>Save individual frames for editing</translation>
+        </message>
+        <message>
+            <location filename='../src/ui/PrintOrderPanel.cpp' line='1153'/>
+            <location filename='../src/ui/PrintOrderPanel.cpp' line='1367'/>
+            <source>核对素材</source>
+            <translation>Review Assets</translation>
+        </message>
+        <message>
+            <location filename='../src/ui/PrintOrderPanel.cpp' line='1154'/>
+            <source>拍摄组</source>
+            <translation>Capture Set</translation>
+        </message>
+        <message>
+            <location filename='../src/ui/PrintOrderPanel.cpp' line='1155'/>
+            <source>选用素材</source>
+            <translation>Selected Frames</translation>
+        </message>
+        <message>
+            <location filename='../src/ui/PrintOrderPanel.cpp' line='1156'/>
+            <source>拍摄对象</source>
+            <translation>Subject</translation>
+        </message>
+        <message>
+            <location filename='../src/ui/PrintOrderPanel.cpp' line='1161'/>
+            <source>星景</source>
+            <translation>Nightscape</translation>
+        </message>
+        <message>
+            <location filename='../src/ui/PrintOrderPanel.cpp' line='1169'/>
+            <source>导入文件</source>
+            <translation>Import Files</translation>
+        </message>
+        <message>
+            <location filename='../src/ui/PrintOrderPanel.cpp' line='1170'/>
+            <source>导入文件夹</source>
+            <translation>Import Folder</translation>
+        </message>
+        <message>
+            <location filename='../src/ui/PrintOrderPanel.cpp' line='1172'/>
+            <source>管理素材</source>
+            <translation>Manage Assets</translation>
+        </message>
+        <message>
+            <location filename='../src/ui/PrintOrderPanel.cpp' line='1173'/>
+            <source>地景设置</source>
+            <translation>Ground Settings</translation>
+        </message>
+        <message>
+            <location filename='../src/ui/PrintOrderPanel.cpp' line='1175'/>
+            <location filename='../src/ui/PrintOrderPanel.cpp' line='1370'/>
+            <source>交付设置</source>
+            <translation>Delivery Settings</translation>
+        </message>
+        <message>
+            <location filename='../src/ui/PrintOrderPanel.cpp' line='1181'/>
+            <source>TIFF · 16 位</source>
+            <translation>TIFF · 16-bit</translation>
+        </message>
+        <message>
+            <location filename='../src/ui/PrintOrderPanel.cpp' line='1183'/>
+            <source>PNG · 8 位</source>
+            <translation>PNG · 8-bit</translation>
+        </message>
+        <message>
+            <location filename='../src/ui/PrintOrderPanel.cpp' line='1186'/>
+            <source>保存到</source>
+            <translation>Save To</translation>
+        </message>
+        <message>
+            <location filename='../src/ui/PrintOrderPanel.cpp' line='1188'/>
+            <source>未选择目录</source>
+            <translation>No folder selected</translation>
+        </message>
+        <message>
+            <location filename='../src/ui/PrintOrderPanel.cpp' line='1189'/>
+            <source>选择目录…</source>
+            <translation>Choose Folder…</translation>
+        </message>
+        <message>
+            <location filename='../src/ui/PrintOrderPanel.cpp' line='1190'/>
+            <location filename='../src/ui/PrintOrderPanel.cpp' line='1276'/>
+            <source>补齐校准</source>
+            <translation>Add Calibration Frames</translation>
+        </message>
+        <message>
+            <location filename='../src/ui/PrintOrderPanel.cpp' line='1191'/>
+            <location filename='../src/ui/PrintOrderPanel.cpp' line='1357'/>
+            <source>冲印进度</source>
+            <translation>Print Progress</translation>
+        </message>
+        <message>
+            <location filename='../src/ui/PrintOrderPanel.cpp' line='1193'/>
+            <source>冲印回执</source>
+            <translation>Print Receipt</translation>
+        </message>
+        <message>
+            <location filename='../src/ui/PrintOrderPanel.cpp' line='1194'/>
+            <source>已出样</source>
+            <translation>Saved</translation>
+        </message>
+        <message>
+            <location filename='../src/ui/PrintOrderPanel.cpp' line='1195'/>
+            <source>交付</source>
+            <translation>Delivered</translation>
+        </message>
+        <message>
+            <location filename='../src/ui/PrintOrderPanel.cpp' line='1196'/>
+            <source>实际保存位置</source>
+            <translation>Saved To</translation>
+        </message>
+        <message>
+            <location filename='../src/ui/PrintOrderPanel.cpp' line='1198'/>
+            <source>高级设置</source>
+            <translation>Advanced Settings</translation>
+        </message>
+        <message>
+            <location filename='../src/ui/PrintOrderPanel.cpp' line='1199'/>
+            <source>上一步</source>
+            <translation>Back</translation>
+        </message>
+        <message>
+            <location filename='../src/ui/PrintOrderPanel.cpp' line='1200'/>
+            <source>重新开单</source>
+            <translation>New Order</translation>
+        </message>
+        <message>
+            <location filename='../src/ui/PrintOrderPanel.cpp' line='1201'/>
+            <source>打开目录</source>
+            <translation>Open Folder</translation>
+        </message>
+        <message>
+            <location filename='../src/ui/PrintOrderPanel.cpp' line='1234'/>
+            <source>%1 张延时照片</source>
+            <translation>Timelapse frames: %1</translation>
+        </message>
+        <message>
+            <location filename='../src/ui/PrintOrderPanel.cpp' line='1246'/>
+            <source>尚未导入 RAW 素材</source>
+            <translation>No RAW frames imported yet</translation>
+        </message>
+        <message>
+            <location filename='../src/ui/PrintOrderPanel.cpp' line='1248'/>
+            <source>还需要 %1 张选用的 RAW 素材</source>
+            <translation>Additional RAW frames needed: %1</translation>
+        </message>
+        <message>
+            <location filename='../src/ui/PrintOrderPanel.cpp' line='1253'/>
+            <source>校准素材已就绪</source>
+            <translation>Calibration inputs are ready</translation>
+        </message>
+        <message>
+            <location filename='../src/ui/PrintOrderPanel.cpp' line='1267'/>
+            <source>%1 / %2 张</source>
+            <translation>%1 / %2</translation>
+        </message>
+        <message>
+            <location filename='../src/ui/PrintOrderPanel.cpp' line='1277'/>
+            <source>校准设置</source>
+            <translation>Calibration Settings</translation>
+        </message>
+        <message>
+            <location filename='../src/ui/PrintOrderPanel.cpp' line='1288'/>
+            <source>请选择文件格式</source>
+            <translation>Choose a file format</translation>
+        </message>
+        <message>
+            <location filename='../src/ui/PrintOrderPanel.cpp' line='1290'/>
+            <source>请选择输出目录</source>
+            <translation>Choose an output folder</translation>
+        </message>
+        <message>
+            <location filename='../src/ui/PrintOrderPanel.cpp' line='1302'/>
+            <location filename='../src/ui/PrintOrderPanel.cpp' line='1360'/>
+            <source>正在取消…</source>
+            <translation>Canceling…</translation>
+        </message>
+        <message>
+            <location filename='../src/ui/PrintOrderPanel.cpp' line='1304'/>
+            <source>本次未保存成品</source>
+            <translation>No output was saved</translation>
+        </message>
+        <message>
+            <location filename='../src/ui/PrintOrderPanel.cpp' line='1316'/>
+            <source>示例印样</source>
+            <translation>Sample Proof</translation>
+        </message>
+        <message>
+            <location filename='../src/ui/PrintOrderPanel.cpp' line='1317'/>
+            <source>湖畔银河 · Neal Herbert / NPS</source>
+            <translation>Milky Way over the lake · Neal Herbert / NPS</translation>
+        </message>
+        <message>
+            <location filename='../src/app/MainWindowOrder.cpp' line='90'/>
+            <location filename='../src/ui/PrintOrderPanel.cpp' line='1318'/>
+            <location filename='../src/ui/PrintOrderPanel.cpp' line='1327'/>
+            <source>查看大图</source>
+            <translation>View Larger</translation>
+        </message>
+        <message>
+            <location filename='../src/ui/PrintOrderPanel.cpp' line='1323'/>
+            <source>暂无印样</source>
+            <translation>No proof yet</translation>
+        </message>
+        <message>
+            <location filename='../src/ui/PrintOrderPanel.cpp' line='1325'/>
+            <source>印样</source>
+            <translation>Proof</translation>
+        </message>
+        <message>
+            <location filename='../src/ui/PrintOrderPanel.cpp' line='1351'/>
+            <source>%1 张成品</source>
+            <translation>%1 saved</translation>
+        </message>
+        <message>
+            <location filename='../src/ui/PrintOrderPanel.cpp' line='1353'/>
+            <source>本单交付</source>
+            <translation>Order Output</translation>
+        </message>
+        <message>
+            <location filename='../src/ui/PrintOrderPanel.cpp' line='1359'/>
+            <source>正在冲印</source>
+            <translation>Processing</translation>
+        </message>
+        <message>
+            <location filename='../src/ui/PrintOrderPanel.cpp' line='1363'/>
+            <source>预计交付</source>
+            <translation>Expected Output</translation>
+        </message>
+        <message>
+            <location filename='../src/ui/PrintOrderPanel.cpp' line='1373'/>
+            <source>重试</source>
+            <translation>Retry</translation>
+        </message>
+        <message>
+            <location filename='../src/ui/PrintOrderPanel.cpp' line='1374'/>
+            <source>保存成品</source>
+            <translation>Save Result</translation>
+        </message>
+        <message>
+            <location filename='../src/ui/PrintOrderPanel.cpp' line='1567'/>
+            <source>已取消冲印</source>
+            <translation>Print order canceled</translation>
+        </message>
+        <message>
+            <location filename='../src/update/UpdateManager.cpp' line='236'/>
+            <source>安装包大小：%1
+
+%2</source>
+            <translation>Package size: %1
+
+%2</translation>
+        </message>
+        <message>
+            <location filename='../src/update/UpdateManager.cpp' line='440'/>
+            <source>Nebulens %1 已下载并通过 SHA-256 校验。
+
+是否现在打开安装包？
+%2</source>
+            <translation>Nebulens %1 has been downloaded and verified with SHA-256.
+
+Open the installer now?
+%2</translation>
+        </message>
+        <message>
+            <location filename='../src/workers/ProcessingWorker.cpp' line='152'/>
+            <source>无法读取延时序列的磁盘可用空间：%1</source>
+            <translation>Could not check available disk space for the timelapse sequence: %1</translation>
+        </message>
+        <message>
+            <location filename='../src/workers/ProcessingWorker.cpp' line='165'/>
+            <source>无法估算延时序列所需的磁盘空间。</source>
+            <translation>Could not estimate the disk space needed for the timelapse sequence.</translation>
+        </message>
+        <message>
+            <location filename='../src/workers/ProcessingWorker.cpp' line='167'/>
+            <source>临时卷和输出卷相同，磁盘空间不足：RAW 缓存与 %1 序列共需约 %2，当前可用 %3。</source>
+            <translation>Not enough space on the shared temporary and output volume: the RAW cache and %1 sequence need about %2 in total; %3 available.</translation>
+        </message>
+        <message>
+            <location filename='../src/workers/ProcessingWorker.cpp' line='171'/>
+            <source>临时磁盘空间不足：延时 RAW 缓存约需 %1，当前可用 %2。</source>
+            <translation>Not enough temporary disk space: the timelapse RAW cache needs about %1; %2 available.</translation>
+        </message>
+        <message>
+            <location filename='../src/workers/ProcessingWorker.cpp' line='174'/>
+            <source>输出磁盘空间不足：%1 序列约需 %2，当前可用 %3。</source>
+            <translation>Not enough space on the output volume: the %1 sequence needs about %2; %3 available.</translation>
+        </message>
+        <message>
+            <location filename='../src/workers/ProcessingWorker.cpp' line='1641'/>
+            <source>对齐后共同有效区域不足，无法堆栈。请移除偏移过大的帧后重试。</source>
+            <translation>The common valid region after alignment is too small to stack. Remove frames with large shifts and try again.</translation>
+        </message>
+        <message>
+            <location filename='../src/app/MainWindowOrder.cpp' line='96'/>
+            <location filename='../src/ui/Toolbar.cpp' line='68'/>
+            <source>返回冲印单</source>
+            <translation>Back to Order</translation>
+        </message>
+        <message>
+            <location filename='../src/app/MainWindowOrder.cpp' line='127'/>
+            <source>无法打开成品位置：%1</source>
+            <translation>Unable to open the saved output location: %1</translation>
+        </message>
+        <message>
+            <location filename='../src/app/MainWindow.cpp' line='528'/>
+            <source>高级暗房</source>
+            <translation>Advanced Darkroom</translation>
+        </message>
     </context>
     <context>
         <name>Toolbar</name>

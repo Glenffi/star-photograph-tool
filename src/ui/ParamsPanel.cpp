@@ -14,6 +14,7 @@
 #include <QSlider>
 #include <QCheckBox>
 #include <QPushButton>
+#include <QToolButton>
 #include <QLabel>
 #include <QTimer>
 #include <QLineEdit>
@@ -114,6 +115,79 @@ QString migrateDefaultOutputPath(const QString& path) {
     return path;
 }
 
+constexpr qsizetype kMinimumCalibrationRawFrames = 3;
+
+struct CalibrationSource {
+    qsizetype rawCount;
+    bool master;
+
+    bool present() const { return master || rawCount > 0; }
+    bool ready() const {
+        return master ? rawCount == 0 : rawCount >= kMinimumCalibrationRawFrames;
+    }
+};
+
+struct CalibrationSources {
+    CalibrationSource dark;
+    CalibrationSource flat;
+    CalibrationSource bias;
+    CalibrationSource darkFlat;
+
+    bool missingFlatOffset() const {
+        return !flat.master && !bias.present() && !darkFlat.present();
+    }
+    bool conflictingFlatOffsets() const {
+        // An imported Master Dark may need separate Bias for the lights.
+        return !flat.master && !dark.master && bias.present() && darkFlat.present();
+    }
+    bool unusedBias() const {
+        return flat.master && !dark.master && bias.present();
+    }
+    bool unusedDarkFlat() const {
+        return flat.master && darkFlat.present();
+    }
+    bool hasRaw() const {
+        return dark.rawCount > 0 || flat.rawCount > 0 ||
+            bias.rawCount > 0 || darkFlat.rawCount > 0;
+    }
+    bool ready() const {
+        // Header/metadata validation belongs to the processing preflight.
+        return dark.ready() && flat.ready() &&
+            !missingFlatOffset() && !conflictingFlatOffsets() &&
+            !unusedBias() && !unusedDarkFlat() &&
+            (!bias.present() || bias.ready()) &&
+            (!darkFlat.present() || darkFlat.ready());
+    }
+};
+
+CalibrationSources calibrationSources(const ParamsPanel& panel) {
+    return {
+        {panel.darkFramePaths().size(), !panel.masterDarkPath().isEmpty()},
+        {panel.flatFramePaths().size(), !panel.masterFlatPath().isEmpty()},
+        {panel.biasFramePaths().size(), !panel.masterBiasPath().isEmpty()},
+        {panel.darkFlatFramePaths().size(), !panel.masterDarkFlatPath().isEmpty()}
+    };
+}
+
+void updateCalibrationSource(QLabel* label, QPushButton* clearButton,
+                             const QStringList& rawPaths,
+                             const QString& masterPath) {
+    if (!masterPath.isEmpty()) {
+        label->setText(QCoreApplication::translate("Nebulens", "已选主帧"));
+        label->setToolTip(masterPath);
+        label->setAccessibleDescription(masterPath);
+    } else if (!rawPaths.isEmpty()) {
+        label->setText(QCoreApplication::translate("Nebulens", "RAW %1 张").arg(rawPaths.size()));
+        label->setToolTip(rawPaths.join(QLatin1Char('\n')));
+        label->setAccessibleDescription(QString());
+    } else {
+        label->setText(QCoreApplication::translate("Nebulens", "未选择"));
+        label->setToolTip(QString());
+        label->setAccessibleDescription(QString());
+    }
+    clearButton->setEnabled(!rawPaths.isEmpty() || !masterPath.isEmpty());
+}
+
 } // namespace
 
 ParamsPanel::ParamsPanel(QWidget* parent)
@@ -143,6 +217,8 @@ void ParamsPanel::setupUI() {
     m_stageKicker = new QLabel(
         QCoreApplication::translate("Nebulens", "05 / 调整"), titleBar);
     m_stageKicker->setObjectName(QStringLiteral("inspectorKicker"));
+    m_stageKicker->setStyleSheet(QStringLiteral("font-size: %1px; letter-spacing: 0px;")
+        .arg(StyleTokens::Typography::kCaptionSize));
     titleLayout->addWidget(m_stageKicker);
     m_titleLabel = new QLabel(QCoreApplication::translate("Nebulens", "成片调整"), titleBar);
     setRole(m_titleLabel, "panelTitle");
@@ -265,82 +341,79 @@ void ParamsPanel::setupUI() {
     // often move between launches.
     m_calibrationGroup = createCollapsibleGroup(
         QCoreApplication::translate("Nebulens", "校准帧"), true);
+    m_calibrationGroup->setObjectName(QStringLiteral("calibrationGroup"));
     m_calibrationGroup->setVisible(false);
     auto* calibrationLayout = new QVBoxLayout(m_calibrationGroup);
-    calibrationLayout->setSpacing(7);
 
-    auto* calibrationNote = new QLabel(
-        QCoreApplication::translate("Nebulens",
-            "Light 主帧在底部素材胶片带导入。\n"
-            "每类可使用一组 RAW 原片，或一个由 Nebulens 生成的 "
-            ".spmaster，二者自动互斥。\n"
-            "生成 Master Flat 时，Bias 与 Dark Flat 选择一种；"
-            "每组 RAW 至少 3 张，建议 10–20 张。"),
-        m_calibrationGroup);
-    calibrationNote->setWordWrap(true);
-    setRole(calibrationNote, "note");
-    calibrationLayout->addWidget(calibrationNote);
+    m_calibrationStatus = new QLabel(m_calibrationGroup);
+    m_calibrationStatus->setObjectName(QStringLiteral("calibrationStatus"));
+    m_calibrationStatus->setWordWrap(true);
+    m_calibrationStatus->setTextFormat(Qt::PlainText);
+    m_calibrationStatus->setProperty(StyleTokens::Properties::kTextRole,
+                                    StyleTokens::Properties::kSecondary);
+    calibrationLayout->addWidget(m_calibrationStatus);
 
-    // A raw group and its project Master represent the same calibration
-    // source. The two import actions share one status label and selecting one
-    // clears the other, so an ambiguous configuration cannot be created here.
     auto addCalibrationRow = [this, calibrationLayout](
+                                 const char* roleKey,
                                  const QString& name,
                                  const QString& purpose,
                                  QStringList& paths,
                                  QString& masterPath,
                                  QLabel*& sourceLabel,
-                                 QPushButton*& clearButton,
-                                 bool confirmNormalizedFlat = false) {
-        auto* row = new QHBoxLayout();
-        row->setSpacing(6);
+                                 QPushButton*& clearButton) {
+        const QString key = QStringLiteral("calibration") + QString::fromLatin1(roleKey);
+        auto* rowWidget = new QWidget(m_calibrationGroup);
+        rowWidget->setObjectName(key + QStringLiteral("Row"));
+        auto* row = new QHBoxLayout(rowWidget);
+        row->setContentsMargins(0, 0, 0, 0);
+        row->setSpacing(StyleTokens::Spacing::kBase);
 
-        auto* nameLabel = new QLabel(name, m_calibrationGroup);
-        nameLabel->setFixedWidth(formLabelWidth());
-        nameLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
-        setRole(nameLabel, "muted");
-        row->addWidget(nameLabel);
-
-        sourceLabel = new QLabel(QCoreApplication::translate("Nebulens", "未选择"), m_calibrationGroup);
-        sourceLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+        auto* summary = new QVBoxLayout();
+        summary->setSpacing(0);
+        auto* nameLabel = new QLabel(name, rowWidget);
+        summary->addWidget(nameLabel);
+        sourceLabel = new QLabel(rowWidget);
+        sourceLabel->setObjectName(key + QStringLiteral("Source"));
         sourceLabel->setTextFormat(Qt::PlainText);
-        sourceLabel->setMinimumWidth(44);
-        sourceLabel->setSizePolicy(
-            QSizePolicy::Ignored, QSizePolicy::Preferred);
         setRole(sourceLabel, "muted");
-        row->addWidget(sourceLabel, 1);
+        summary->addWidget(sourceLabel);
+        row->addLayout(summary, 1);
 
-        auto* rawButton = new QPushButton(QStringLiteral("RAW"), m_calibrationGroup);
+        auto* rawButton = new QPushButton(QStringLiteral("RAW"), rowWidget);
+        rawButton->setObjectName(key + QStringLiteral("Raw"));
         rawButton->setProperty(StyleTokens::Properties::kSizeRole,
                                "compactText");
-        rawButton->setFixedSize(54, 28);
+        rawButton->setMinimumWidth(48);
         rawButton->setToolTip(
             QCoreApplication::translate("Nebulens", "导入%1 RAW 原片组：%2").arg(name, purpose));
         rawButton->setAccessibleName(rawButton->toolTip());
         row->addWidget(rawButton);
 
         auto* masterButton = new QPushButton(
-            QCoreApplication::translate("Nebulens", "主帧"), m_calibrationGroup);
+            QCoreApplication::translate("Nebulens", "主帧"), rowWidget);
+        masterButton->setObjectName(key + QStringLiteral("Master"));
         masterButton->setProperty(StyleTokens::Properties::kSizeRole,
                                   "compactText");
-        masterButton->setFixedSize(54, 28);
+        masterButton->setMinimumWidth(60);
         masterButton->setToolTip(QCoreApplication::translate("Nebulens",
             "导入 Nebulens %1（仅支持 .spmaster）").arg(name));
         masterButton->setAccessibleName(masterButton->toolTip());
         row->addWidget(masterButton);
 
-        clearButton = new QPushButton(m_calibrationGroup);
+        clearButton = new QPushButton(rowWidget);
+        clearButton->setObjectName(key + QStringLiteral("Clear"));
         clearButton->setIcon(
             UiAssets::icon(
                 UiAssets::Glyph::Trash,
                 StyleTokens::Colors::fromHex(
                     StyleTokens::Colors::kTextSecondary)));
         clearButton->setIconSize(QSize(16, 16));
-        clearButton->setFixedSize(28, 28);
+        clearButton->setFixedSize(StyleTokens::Controls::kIconButtonSize,
+                                  StyleTokens::Controls::kIconButtonSize);
         clearButton->setToolTip(
             QCoreApplication::translate("Nebulens", "清空已选%1").arg(name));
         clearButton->setAccessibleName(clearButton->toolTip());
-        clearButton->setEnabled(false);
+        updateCalibrationSource(sourceLabel, clearButton, paths, masterPath);
         QStringList* const pathList = &paths;
         QString* const master = &masterPath;
         connect(rawButton, &QPushButton::clicked, this,
@@ -350,11 +423,9 @@ void ParamsPanel::setupUI() {
                         QCoreApplication::translate("Nebulens", "选择%1 RAW").arg(name));
                 });
         connect(masterButton, &QPushButton::clicked, this,
-                [this, master, pathList, sourceLabel, clearButton, name,
-                 confirmNormalizedFlat]() {
+                [this, master, pathList, sourceLabel, clearButton, name]() {
                     importCalibrationMaster(
-                        *master, *pathList, sourceLabel, clearButton, name,
-                        confirmNormalizedFlat);
+                        *master, *pathList, sourceLabel, clearButton, name);
                 });
         connect(clearButton, &QPushButton::clicked, this,
                 [this, pathList, master, sourceLabel, clearButton]() {
@@ -363,25 +434,30 @@ void ParamsPanel::setupUI() {
                 });
         row->addWidget(clearButton);
 
-        calibrationLayout->addLayout(row);
+        calibrationLayout->addWidget(rowWidget);
+        return rowWidget;
     };
 
     addCalibrationRow(
+        "Dark",
         QCoreApplication::translate("Nebulens", "暗场"),
         QCoreApplication::translate("Nebulens", "校正热噪声、固定图样噪声和热像素"),
         m_darkFramePaths, m_masterDarkPath,
         m_darkFrameCount, m_darkFrameClear);
     addCalibrationRow(
+        "Flat",
         QCoreApplication::translate("Nebulens", "平场"),
         QCoreApplication::translate("Nebulens", "校正暗角、灰尘阴影和像场亮度不均"),
         m_flatFramePaths, m_masterFlatPath,
-        m_flatFrameCount, m_flatFrameClear, true);
-    addCalibrationRow(
+        m_flatFrameCount, m_flatFrameClear);
+    m_biasFrameRow = addCalibrationRow(
+        "Bias",
         QCoreApplication::translate("Nebulens", "偏置场"),
         QCoreApplication::translate("Nebulens", "校正传感器读出偏置，并为平场标定零点"),
         m_biasFramePaths, m_masterBiasPath,
         m_biasFrameCount, m_biasFrameClear);
-    addCalibrationRow(
+    m_darkFlatFrameRow = addCalibrationRow(
+        "DarkFlat",
         QCoreApplication::translate("Nebulens", "暗平场"),
         QCoreApplication::translate("Nebulens", "匹配 Flat 曝光，用于替代 Bias 校准平场"),
         m_darkFlatFramePaths, m_masterDarkFlatPath,
@@ -389,6 +465,7 @@ void ParamsPanel::setupUI() {
 
     m_saveGeneratedMastersCheck = new CompactToggle(
         QCoreApplication::translate("Nebulens", "保存本次生成的 Master"), m_calibrationGroup);
+    m_saveGeneratedMastersCheck->setObjectName(QStringLiteral("saveGeneratedMasters"));
     m_saveGeneratedMastersCheck->setToolTip(QCoreApplication::translate("Nebulens",
         "把本次由 RAW 原片组合成的 Master 保存为 .spmaster，便于以后直接复用"));
     m_saveGeneratedMastersCheck->setChecked(false);
@@ -398,10 +475,32 @@ void ParamsPanel::setupUI() {
             this, [this]() { emitParamsChanged(); });
     calibrationLayout->addWidget(m_saveGeneratedMastersCheck);
 
-    m_calibrationStatus = new QLabel(m_calibrationGroup);
-    m_calibrationStatus->setWordWrap(true);
-    setRole(m_calibrationStatus, "calibrationStatus");
-    calibrationLayout->addWidget(m_calibrationStatus);
+    m_calibrationDetailsButton = new QToolButton(m_calibrationGroup);
+    m_calibrationDetailsButton->setObjectName(QStringLiteral("calibrationDetailsButton"));
+    m_calibrationDetailsButton->setText(
+        QCoreApplication::translate("Nebulens", "校准详情"));
+    m_calibrationDetailsButton->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+    m_calibrationDetailsButton->setArrowType(Qt::RightArrow);
+    m_calibrationDetailsButton->setCheckable(true);
+    m_calibrationDetailsButton->setFocusPolicy(Qt::StrongFocus);
+    m_calibrationDetailsButton->setCursor(Qt::PointingHandCursor);
+    m_calibrationDetailsButton->setProperty(StyleTokens::Properties::kVariant,
+                                           StyleTokens::Properties::kGhost);
+    calibrationLayout->addWidget(m_calibrationDetailsButton, 0, Qt::AlignLeft);
+    m_calibrationDetails = new QLabel(
+        QCoreApplication::translate("Nebulens",
+            "每类校准帧可选一组 RAW（至少 3 张，建议 10–20 张），或一个 Nebulens .spmaster。"
+            "Master Flat 必须已完成偏移校准与 CFA 分相归一化；若 Master Dark 已减偏置，亮场仍需偏置场。"
+            "处理前会检查相机、尺寸、ISO、曝光、CFA 和 Master 的校准状态。"),
+        m_calibrationGroup);
+    m_calibrationDetails->setObjectName(QStringLiteral("calibrationDetails"));
+    m_calibrationDetails->setWordWrap(true);
+    setRole(m_calibrationDetails, "note");
+    calibrationLayout->addWidget(m_calibrationDetails);
+    connect(m_calibrationDetailsButton, &QToolButton::toggled, this, [this](bool expanded) {
+        m_calibrationDetailsButton->setArrowType(expanded ? Qt::DownArrow : Qt::RightArrow);
+        m_calibrationDetails->setVisible(expanded && m_calibrationGroup->isChecked());
+    });
     updateCalibrationStatus();
 
     stackPageLayout->addWidget(m_calibrationGroup);
@@ -418,8 +517,18 @@ void ParamsPanel::setupUI() {
     setRole(refLabel, "muted");
     refRow->addWidget(refLabel);
     m_refFrame = new QComboBox(m_alignGroup);
-    m_refFrame->addItem(QCoreApplication::translate("Nebulens", "自动选择"));
-    connect(m_refFrame, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &ParamsPanel::onComboChanged);
+    m_refFrame->setObjectName(QStringLiteral("referenceFrameCombo"));
+    m_refFrame->setAccessibleName(refLabel->text());
+    m_refFrame->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
+    m_refFrame->setMinimumContentsLength(10);
+    updateRefFrameList({});
+    connect(m_refFrame, &QComboBox::activated, this, [this](int index) {
+        const QString choice = m_refFrame->itemData(index).toString();
+        if (choice == m_referenceChoice) return;
+        m_referenceChoice = choice;
+        emit referenceChoiceChanged(choice);
+        emitParamsChanged();
+    });
     refRow->addWidget(m_refFrame, 1);
     alignLayout->addLayout(refRow);
 
@@ -519,6 +628,7 @@ void ParamsPanel::setupUI() {
     // 模式选择
     auto* modeRow = new QHBoxLayout();
     m_skyGroundMode = new QComboBox(m_stackGroup);
+    m_skyGroundMode->setObjectName(QStringLiteral("skyGroundModeCombo"));
     m_skyGroundMode->addItems({"自动检测", "用户蒙版"});
     m_skyGroundMode->setEnabled(false);
     connect(m_skyGroundMode, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this](int index) {
@@ -543,6 +653,7 @@ void ParamsPanel::setupUI() {
     btnRow->addWidget(m_detectMaskBtn);
 
     m_importMaskBtn = new QPushButton(QCoreApplication::translate("Nebulens", "导入蒙版..."), m_stackGroup);
+    m_importMaskBtn->setObjectName(QStringLiteral("importMaskButton"));
     m_importMaskBtn->setVisible(false);
     connect(m_importMaskBtn, &QPushButton::clicked, this, [this]() {
         QString path = FileDialogUtils::getOpenFileName(
@@ -1143,7 +1254,11 @@ void ParamsPanel::setupUI() {
     formatLabel->setToolTip(QCoreApplication::translate("Nebulens", "TIFF 16-bit：最高质量，保留完整动态范围（推荐）\nPNG 8-bit：无损压缩，预览/分享首选"));
     outputForm->addWidget(formatLabel, 0, 0);
     m_outputFormat = new QComboBox(m_outputGroup);
-    m_outputFormat->addItems({"TIFF 16-bit", "PNG 8-bit (预览)"});
+    m_outputFormat->setAccessibleName(formatLabel->text());
+    m_outputFormat->addItem(QStringLiteral("TIFF 16-bit"), QStringLiteral("tiff16"));
+    m_outputFormat->addItem(
+        QCoreApplication::translate("Nebulens", "PNG 8-bit (预览)"),
+        QStringLiteral("png8"));
     m_outputFormat->setToolTip(QCoreApplication::translate("Nebulens", "输出图像格式，TIFF 16-bit 为推荐默认"));
     connect(m_outputFormat, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &ParamsPanel::onComboChanged);
     outputForm->addWidget(m_outputFormat, 0, 1, 1, 2);
@@ -1317,41 +1432,42 @@ void ParamsPanel::setupUI() {
 }
 
 void ParamsPanel::updateSkyGroundControls() {
-    bool enabled = m_skyGroundCheck ? m_skyGroundCheck->isChecked() : false;
-    int mode = m_skyGroundMode ? m_skyGroundMode->currentIndex() : 0;
+    const bool enabled = m_skyGroundCheck && m_skyGroundCheck->isChecked();
+    const bool visible = enabled && m_stackGroup->isChecked();
+    const int mode = m_skyGroundMode ? m_skyGroundMode->currentIndex() : 0;
     if (m_skyGroundMode) {
         m_skyGroundMode->setEnabled(enabled);
-        m_skyGroundMode->setVisible(enabled);
+        m_skyGroundMode->setVisible(visible);
     }
-    if (m_skyGroundModeLabel) m_skyGroundModeLabel->setVisible(enabled);
+    if (m_skyGroundModeLabel) m_skyGroundModeLabel->setVisible(visible);
     if (m_detectMaskBtn) {
         m_detectMaskBtn->setEnabled(enabled);
-        m_detectMaskBtn->setVisible(enabled && mode == 0);
+        m_detectMaskBtn->setVisible(visible && mode == 0);
     }
     if (m_importMaskBtn) {
         m_importMaskBtn->setEnabled(enabled);
-        m_importMaskBtn->setVisible(enabled && mode == 1);
+        m_importMaskBtn->setVisible(visible && mode == 1);
     }
     if (m_maskPathLabel) {
-        m_maskPathLabel->setVisible(enabled && mode == 1 && !m_userMaskPath.isEmpty());
+        m_maskPathLabel->setVisible(visible && mode == 1 && !m_userMaskPath.isEmpty());
     }
     if (m_featherSlider) {
         m_featherSlider->setEnabled(enabled);
-        m_featherSlider->setVisible(enabled);
+        m_featherSlider->setVisible(visible);
     }
-    if (m_featherLabel) m_featherLabel->setVisible(enabled);
-    if (m_featherNameLabel) m_featherNameLabel->setVisible(enabled);
+    if (m_featherLabel) m_featherLabel->setVisible(visible);
+    if (m_featherNameLabel) m_featherNameLabel->setVisible(visible);
     if (m_groundStackMethod) {
         m_groundStackMethod->setEnabled(enabled);
-        m_groundStackMethod->setVisible(enabled);
+        m_groundStackMethod->setVisible(visible);
     }
-    if (m_groundStackNameLabel) m_groundStackNameLabel->setVisible(enabled);
+    if (m_groundStackNameLabel) m_groundStackNameLabel->setVisible(visible);
     if (m_groundDetailSlider) {
         m_groundDetailSlider->setEnabled(enabled);
-        m_groundDetailSlider->setVisible(enabled);
+        m_groundDetailSlider->setVisible(visible);
     }
-    if (m_groundDetailLabel) m_groundDetailLabel->setVisible(enabled);
-    if (m_groundDetailNameLabel) m_groundDetailNameLabel->setVisible(enabled);
+    if (m_groundDetailLabel) m_groundDetailLabel->setVisible(visible);
+    if (m_groundDetailNameLabel) m_groundDetailNameLabel->setVisible(visible);
 }
 
 void ParamsPanel::updateModifiedCameraColorControls() {
@@ -1411,10 +1527,8 @@ void ParamsPanel::onGroupToggled(bool checked) {
 
     // The 3px title indicator is styled globally; collapsing only changes the
     // content visibility and never turns the section into a disabled form.
-    for (auto* child : group->findChildren<QWidget*>()) {
-        if (child != group) {
-            child->setVisible(checked);
-        }
+    for (auto* child : group->findChildren<QWidget*>(QString(), Qt::FindDirectChildrenOnly)) {
+        child->setVisible(checked);
     }
     if (checked && group == m_stackGroup) updateSkyGroundControls();
     if (checked && group == m_calibrationGroup) updateCalibrationStatus();
@@ -1446,6 +1560,7 @@ void ParamsPanel::onCheckChanged(int state) {
 }
 
 void ParamsPanel::onRestoreDefaults() {
+    QSignalBlocker panelBlocker(this);
     m_userChangedStackMethod = false;
     {
         const QSignalBlocker blocker(m_presetCombo);
@@ -1453,7 +1568,6 @@ void ParamsPanel::onRestoreDefaults() {
     }
     {
         QSignalBlocker blocker(m_stackAlgorithm); // 阻塞信号，避免触发 m_userChangedStackMethod = true
-        m_refFrame->setCurrentIndex(0);
         m_stackAlgorithm->setCurrentIndex(0);
         m_kappaSlider->setValue(25);
         m_kappaLabel->setText("2.5");
@@ -1498,28 +1612,10 @@ void ParamsPanel::onRestoreDefaults() {
     m_starTrailCometSlider->setValue(0);
     m_starTrailReverseCheck->setChecked(false);
     m_starTrailProtectGroundCheck->setChecked(true);
-    m_darkFramePaths.clear();
-    m_flatFramePaths.clear();
-    m_biasFramePaths.clear();
-    m_darkFlatFramePaths.clear();
-    m_masterDarkPath.clear();
-    m_masterFlatPath.clear();
-    m_masterBiasPath.clear();
-    m_masterDarkFlatPath.clear();
-    if (m_saveGeneratedMastersCheck) {
-        m_saveGeneratedMastersCheck->setChecked(false);
-    }
-    updateCalibrationSource(m_darkFrameCount, m_darkFrameClear,
-                            m_darkFramePaths, m_masterDarkPath);
-    updateCalibrationSource(m_flatFrameCount, m_flatFrameClear,
-                            m_flatFramePaths, m_masterFlatPath);
-    updateCalibrationSource(m_biasFrameCount, m_biasFrameClear,
-                            m_biasFramePaths, m_masterBiasPath);
-    updateCalibrationSource(m_darkFlatFrameCount, m_darkFlatFrameClear,
-                            m_darkFlatFramePaths, m_masterDarkFlatPath);
-    m_userMaskPath.clear();
-    m_maskPathLabel->clear();
-    m_maskPathLabel->setVisible(false);
+    clearCalibrationSources();
+    clearUserMask();
+    m_debounceTimer->stop();
+    panelBlocker.unblock();
     emitParamsChanged();
 }
 
@@ -2107,8 +2203,7 @@ void ParamsPanel::applyPreset(const Preset& preset) {
     m_starReduceLabel->setEnabled(preset.starReduceEnabled);
 
     // Output format
-    if (preset.outputFormat == "tiff16") m_outputFormat->setCurrentIndex(0);
-    else if (preset.outputFormat == "png8") m_outputFormat->setCurrentIndex(1);
+    setOutputFormat(preset.outputFormat);
 
     updateStackMethodDescription();
     emitParamsChanged();
@@ -2369,6 +2464,7 @@ void ParamsPanel::showCalibrationSettings() {
         return;
     }
     showWorkflowStage(WorkflowStage::Calibration);
+    if (m_scene == ProcessingScene::DeepSky) m_calibrationGroup->setChecked(true);
     QWidget* ancestor = m_calibrationGroup->parentWidget();
     while (ancestor) {
         if (auto* scrollArea = qobject_cast<QScrollArea*>(ancestor)) {
@@ -2623,12 +2719,13 @@ int ParamsPanel::starReduceStrength() const {
 }
 
 QString ParamsPanel::outputFormat() const {
-    if (!m_outputFormat) return "tiff16";
-    switch (m_outputFormat->currentIndex()) {
-        case 0: return "tiff16";
-        case 1: return "png8";
-        default: return "tiff16";
-    }
+    const QString format = m_outputFormat->currentData().toString();
+    return format.isEmpty() ? QStringLiteral("tiff16") : format;
+}
+
+void ParamsPanel::setOutputFormat(const QString& format) {
+    const int index = m_outputFormat->findData(format);
+    if (index >= 0) m_outputFormat->setCurrentIndex(index);
 }
 
 QString ParamsPanel::outputPath() const {
@@ -2645,29 +2742,49 @@ void ParamsPanel::setOutputPath(const QString& path) {
     }
 }
 
+void ParamsPanel::clearProjectSources() {
+    m_debounceTimer->stop();
+    clearCalibrationSources();
+    clearModifiedCameraGrayPoint();
+    clearUserMask();
+    updateRefFrameList({});
+    setAssetSummary(0, 0, QString(), false);
+    setProcessingReport(QString());
+    emitParamsChanged();
+}
+
+void ParamsPanel::clearUserMask() {
+    m_userMaskPath.clear();
+    m_maskPathLabel->clear();
+    const QSignalBlocker blocker(m_skyGroundMode);
+    m_skyGroundMode->setCurrentIndex(0);
+    updateSkyGroundControls();
+}
+
 void ParamsPanel::updateRefFrameList(const QStringList& fileNames) {
-    if (!m_refFrame) return;
-    const QString currentPath = m_refFrame->currentData().toString();
-    QSignalBlocker blocker(m_refFrame);
+    if (m_refFrame->count() > 0 && fileNames == m_referenceFiles) return;
+    m_referenceFiles = fileNames;
+    const QSignalBlocker blocker(m_refFrame);
     m_refFrame->clear();
-    m_refFrame->addItem(QCoreApplication::translate("Nebulens", "自动选择"));
+    m_refFrame->addItem(QCoreApplication::translate("Nebulens", "自动选择"), QString());
     for (const QString& path : fileNames) {
         m_refFrame->addItem(QFileInfo(path).fileName(), path);
     }
-    const int idx = m_refFrame->findData(currentPath);
-    if (idx >= 0) m_refFrame->setCurrentIndex(idx);
+    const int index = m_refFrame->findData(m_referenceChoice);
+    m_refFrame->setCurrentIndex(std::max(index, 0));
+    m_referenceChoice = m_refFrame->currentData().toString();
 }
 
 void ParamsPanel::setSelectedReferenceFrame(const QString& filePath) {
-    if (!m_refFrame || filePath.isEmpty()) return;
-    const int index = m_refFrame->findData(filePath);
-    if (index > 0 && index != m_refFrame->currentIndex()) {
-        m_refFrame->setCurrentIndex(index);
-    }
+    const int index = filePath.isEmpty() ? 0 : m_refFrame->findData(filePath);
+    if (index < 0) return;
+    const QSignalBlocker blocker(m_refFrame);
+    m_refFrame->setCurrentIndex(index);
+    m_referenceChoice = filePath;
 }
 
 QString ParamsPanel::selectedReferenceFrame() const {
-    return m_refFrame ? m_refFrame->currentData().toString() : QString();
+    return m_referenceChoice;
 }
 
 bool ParamsPanel::skyGroundSeparationEnabled() const {
@@ -2762,53 +2879,57 @@ QString ParamsPanel::masterDarkFlatPath() const {
 }
 
 bool ParamsPanel::saveGeneratedMasters() const {
-    return m_saveGeneratedMastersCheck &&
-        m_saveGeneratedMastersCheck->isEnabled() &&
-        m_saveGeneratedMastersCheck->isChecked();
+    return m_saveGeneratedMastersCheck->isChecked() &&
+        calibrationSources(*this).hasRaw();
 }
 
 bool ParamsPanel::deepSkyCalibrationInputsComplete() const {
-    auto sourceReady = [](const QStringList& rawPaths,
-                          const QString& masterPath) {
-        return (rawPaths.size() >= 3 && masterPath.isEmpty()) ||
-            (rawPaths.isEmpty() && !masterPath.isEmpty());
+    return calibrationSources(*this).ready();
+}
+
+QString ParamsPanel::calibrationHint() const {
+    const CalibrationSources sources = calibrationSources(*this);
+    if (sources.ready()) {
+        return QCoreApplication::translate("Nebulens", "校准来源已齐，处理前将检查兼容性");
+    }
+
+    QStringList issues;
+    const auto addMissing = [&issues](CalibrationSource source, const QString& role) {
+        if (source.ready()) return;
+        if (!source.present()) {
+            issues.append(QCoreApplication::translate("Nebulens", "缺少%1").arg(role));
+        } else {
+            issues.append(QCoreApplication::translate("Nebulens", "%1还差 %2 张 RAW")
+                .arg(role).arg(kMinimumCalibrationRawFrames - source.rawCount));
+        }
     };
 
-    if (!sourceReady(m_darkFramePaths, m_masterDarkPath) ||
-        !sourceReady(m_flatFramePaths, m_masterFlatPath)) {
-        return false;
+    addMissing(sources.dark, QCoreApplication::translate("Nebulens", "暗场"));
+    addMissing(sources.flat, QCoreApplication::translate("Nebulens", "平场"));
+    if (sources.missingFlatOffset() && sources.flat.rawCount > 0) {
+        issues.append(QCoreApplication::translate("Nebulens",
+            "RAW 平场需偏置场或同曝光的暗平场"));
+    } else if (sources.conflictingFlatOffsets() && sources.flat.rawCount > 0) {
+        issues.append(QCoreApplication::translate("Nebulens",
+            "请在偏置场和暗平场中移除一组"));
+    } else {
+        if (sources.unusedBias()) {
+            issues.append(sources.dark.present()
+                ? QCoreApplication::translate("Nebulens",
+                    "Master Flat 搭配 RAW 暗场不需要偏置场，请移除偏置场")
+                : QCoreApplication::translate("Nebulens",
+                    "保留偏置场需搭配已减偏置的 Master Dark"));
+        } else if (sources.bias.present()) {
+            addMissing(sources.bias, QCoreApplication::translate("Nebulens", "偏置场"));
+        }
+        if (sources.unusedDarkFlat()) {
+            issues.append(QCoreApplication::translate("Nebulens",
+                "Master Flat 不需要暗平场，请移除暗平场"));
+        } else if (sources.darkFlat.present()) {
+            addMissing(sources.darkFlat, QCoreApplication::translate("Nebulens", "暗平场"));
+        }
     }
-
-    const bool biasReady = sourceReady(m_biasFramePaths, m_masterBiasPath);
-    const bool darkFlatReady = sourceReady(
-        m_darkFlatFramePaths, m_masterDarkFlatPath);
-    const bool hasAnyBias = !m_biasFramePaths.isEmpty() ||
-        !m_masterBiasPath.isEmpty();
-    const bool hasAnyDarkFlat = !m_darkFlatFramePaths.isEmpty() ||
-        !m_masterDarkFlatPath.isEmpty();
-
-    if (!m_masterFlatPath.isEmpty()) {
-        // A serialized Master Flat is already offset-corrected and normalized.
-        // Bias is still meaningful only when an imported Master Dark had its
-        // Bias pedestal removed and Light therefore needs a separate offset.
-        if (hasAnyDarkFlat) return false;
-        // Master Dark's internal metadata decides whether Light still needs a
-        // Bias source. The panel cannot infer that before the file is parsed,
-        // so an optional Bias is accepted and Worker performs the final rule.
-        if (m_masterDarkPath.isEmpty()) return !hasAnyBias;
-        return !hasAnyBias || biasReady;
-    }
-
-    // A raw Flat group needs exactly one offset source. Supplying both would
-    // make the calibration path ambiguous.
-    // A bias-corrected imported Master Dark may need Bias for Light while
-    // Dark Flat calibrates Flat. The panel cannot trust filenames to infer
-    // that internal state, so allow this combination and let preflight read
-    // the `.spmaster` metadata before processing starts.
-    if (hasAnyBias && hasAnyDarkFlat) return !m_masterDarkPath.isEmpty() &&
-        biasReady && darkFlatReady;
-    if (!hasAnyBias && !hasAnyDarkFlat) return false;
-    return hasAnyBias ? biasReady : darkFlatReady;
+    return issues.join(QCoreApplication::translate("Nebulens", "；"));
 }
 
 void ParamsPanel::importCalibrationFrames(QStringList& paths,
@@ -2822,11 +2943,6 @@ void ParamsPanel::importCalibrationFrames(QStringList& paths,
             "所有文件 (*)"));
     if (selected.isEmpty()) return;
 
-    auto pathIdentity = [](const QString& path) {
-        QString identity = QFileInfo(path).canonicalFilePath();
-        if (identity.isEmpty()) identity = QFileInfo(path).absoluteFilePath();
-        return QDir::cleanPath(identity);
-    };
     QSet<QString> otherCalibrationPaths;
     const std::array<const QStringList*, 4> lists = {
         &m_darkFramePaths, &m_flatFramePaths, &m_biasFramePaths,
@@ -2834,7 +2950,7 @@ void ParamsPanel::importCalibrationFrames(QStringList& paths,
     for (const QStringList* list : lists) {
         if (list == &paths) continue;
         for (const QString& path : *list) {
-            otherCalibrationPaths.insert(pathIdentity(path));
+            otherCalibrationPaths.insert(calibrationPathIdentity(path));
         }
     }
     const std::array<const QString*, 4> masters = {
@@ -2843,19 +2959,19 @@ void ParamsPanel::importCalibrationFrames(QStringList& paths,
     QString* const ownMaster = masterPathForRawGroup(paths);
     for (const QString* master : masters) {
         if (master == ownMaster || master->isEmpty()) continue;
-        otherCalibrationPaths.insert(pathIdentity(*master));
+        otherCalibrationPaths.insert(calibrationPathIdentity(*master));
     }
 
     QStringList merged = paths;
     QSet<QString> currentCalibrationPaths;
     for (const QString& path : paths) {
-        currentCalibrationPaths.insert(pathIdentity(path));
+        currentCalibrationPaths.insert(calibrationPathIdentity(path));
     }
     int categoryConflicts = 0;
     for (const QString& path : selected) {
         const QString absolutePath =
             QDir::cleanPath(QFileInfo(path).absoluteFilePath());
-        const QString identity = pathIdentity(path);
+        const QString identity = calibrationPathIdentity(path);
         if (otherCalibrationPaths.contains(identity)) {
             ++categoryConflicts;
         } else if (!absolutePath.isEmpty() &&
@@ -2877,6 +2993,7 @@ void ParamsPanel::importCalibrationFrames(QStringList& paths,
     if (ownMaster) ownMaster->clear();
     updateCalibrationSource(countLabel, clearButton, paths,
                             ownMaster ? *ownMaster : QString());
+    updateCalibrationStatus();
     markPresetCustom();
     emitParamsChanged();
 }
@@ -2885,8 +3002,7 @@ void ParamsPanel::importCalibrationMaster(QString& masterPath,
                                           QStringList& rawPaths,
                                           QLabel* sourceLabel,
                                           QPushButton* clearButton,
-                                          const QString& roleName,
-                                          bool confirmNormalizedFlat) {
+                                          const QString& roleName) {
     const QString selected = FileDialogUtils::getOpenFileName(
         this,
         QCoreApplication::translate("Nebulens", "选择 Master %1")
@@ -2915,18 +3031,10 @@ void ParamsPanel::importCalibrationMaster(QString& masterPath,
         return;
     }
 
-    if (confirmNormalizedFlat) {
-        QMessageBox::information(
-            this, QCoreApplication::translate("Nebulens", "Master Flat 校验"),
-            QCoreApplication::translate("Nebulens",
-                "Nebulens 会读取 .spmaster 内的处理状态。只有已经"
-                "完成偏移校准并按 CFA phase 分相归一化的 Master Flat "
-                "才能通过正式预检。"));
-    }
-
     rawPaths.clear();
     masterPath = absolutePath;
     updateCalibrationSource(sourceLabel, clearButton, rawPaths, masterPath);
+    updateCalibrationStatus();
     markPresetCustom();
     emitParamsChanged();
 }
@@ -2939,28 +3047,24 @@ void ParamsPanel::clearCalibrationSource(QStringList& paths,
     paths.clear();
     masterPath.clear();
     updateCalibrationSource(sourceLabel, clearButton, paths, masterPath);
+    updateCalibrationStatus();
     markPresetCustom();
     emitParamsChanged();
 }
 
-void ParamsPanel::updateCalibrationSource(
-    QLabel* label, QPushButton* clearButton,
-    const QStringList& rawPaths, const QString& masterPath) {
-    if (label) {
-        if (!masterPath.isEmpty()) {
-            label->setText(QFileInfo(masterPath).fileName());
-            label->setToolTip(masterPath);
-        } else if (!rawPaths.isEmpty()) {
-            label->setText(QCoreApplication::translate("Nebulens", "RAW %1 张").arg(rawPaths.size()));
-            label->setToolTip(rawPaths.join(QLatin1Char('\n')));
-        } else {
-            label->setText(QCoreApplication::translate("Nebulens", "未选择"));
-            label->setToolTip(QString());
-        }
-    }
-    if (clearButton) {
-        clearButton->setEnabled(!rawPaths.isEmpty() || !masterPath.isEmpty());
-    }
+void ParamsPanel::clearCalibrationSources() {
+    m_darkFramePaths.clear();
+    m_flatFramePaths.clear();
+    m_biasFramePaths.clear();
+    m_darkFlatFramePaths.clear();
+    m_masterDarkPath.clear();
+    m_masterFlatPath.clear();
+    m_masterBiasPath.clear();
+    m_masterDarkFlatPath.clear();
+    updateCalibrationSource(m_darkFrameCount, m_darkFrameClear, {}, {});
+    updateCalibrationSource(m_flatFrameCount, m_flatFrameClear, {}, {});
+    updateCalibrationSource(m_biasFrameCount, m_biasFrameClear, {}, {});
+    updateCalibrationSource(m_darkFlatFrameCount, m_darkFlatFrameClear, {}, {});
     updateCalibrationStatus();
 }
 
@@ -3003,56 +3107,9 @@ bool ParamsPanel::calibrationPathUsedElsewhere(
 }
 
 void ParamsPanel::updateCalibrationStatus() {
-    if (!m_calibrationStatus) return;
-    const bool ready = deepSkyCalibrationInputsComplete();
-    if (ready) {
-        m_calibrationStatus->setText(QCoreApplication::translate("Nebulens",
-            "校准来源已就绪。处理前仍会检查相机、尺寸、ISO、曝光、"
-            "CFA 和 Master 元数据。"));
-    } else {
-        QStringList missing;
-        auto sourceReady = [](const QStringList& rawPaths,
-                              const QString& masterPath) {
-            return (rawPaths.size() >= 3 && masterPath.isEmpty()) ||
-                (rawPaths.isEmpty() && !masterPath.isEmpty());
-        };
-        if (!sourceReady(m_darkFramePaths, m_masterDarkPath)) {
-            missing.append(QCoreApplication::translate("Nebulens", "Dark（≥3 RAW 或 Master）"));
-        }
-        if (!sourceReady(m_flatFramePaths, m_masterFlatPath)) {
-            missing.append(QCoreApplication::translate("Nebulens", "Flat（≥3 RAW 或 Master）"));
-        }
-        const bool hasBias = !m_biasFramePaths.isEmpty() ||
-            !m_masterBiasPath.isEmpty();
-        const bool hasDarkFlat = !m_darkFlatFramePaths.isEmpty() ||
-            !m_masterDarkFlatPath.isEmpty();
-        if (m_masterFlatPath.isEmpty() && hasBias == hasDarkFlat) {
-            missing.append(QCoreApplication::translate("Nebulens",
-                "生成 Flat 时 Bias / Dark Flat 恰选一种"));
-        } else if (!m_masterFlatPath.isEmpty() && hasDarkFlat) {
-            missing.append(QCoreApplication::translate("Nebulens",
-                "Master Flat 不再搭配 Dark Flat"));
-        }
-        if (!m_masterFlatPath.isEmpty() && m_masterDarkPath.isEmpty() &&
-            hasBias) {
-            missing.append(QCoreApplication::translate("Nebulens",
-                "RAW Dark 含偏置基底，Master Flat 不再搭配 Bias"));
-        }
-        if (hasBias && !sourceReady(m_biasFramePaths, m_masterBiasPath)) {
-            missing.append(QCoreApplication::translate("Nebulens",
-                "Bias（≥3 RAW 或 Master）"));
-        }
-        if (hasDarkFlat &&
-            !sourceReady(m_darkFlatFramePaths, m_masterDarkFlatPath)) {
-            missing.append(QCoreApplication::translate("Nebulens",
-                "Dark Flat（≥3 RAW 或 Master）"));
-        }
-        m_calibrationStatus->setText(
-            missing.isEmpty()
-                ? QCoreApplication::translate("Nebulens", "校准来源尚未就绪，请检查各 RAW 组数量。")
-                : QCoreApplication::translate("Nebulens", "还需要：%1").arg(
-                      missing.join(QCoreApplication::translate("Nebulens", "；"))));
-    }
+    const CalibrationSources sources = calibrationSources(*this);
+    const bool ready = sources.ready();
+    m_calibrationStatus->setText(calibrationHint());
     m_calibrationStatus->setProperty(
         "status", ready ? "ready" : "waiting");
     m_calibrationStatus->setProperty(
@@ -3065,17 +3122,20 @@ void ParamsPanel::updateCalibrationStatus() {
     }
     m_calibrationStatus->update();
 
-    const bool hasRawSources = !m_darkFramePaths.isEmpty() ||
-        !m_flatFramePaths.isEmpty() || !m_biasFramePaths.isEmpty() ||
-        !m_darkFlatFramePaths.isEmpty();
-    if (m_saveGeneratedMastersCheck) {
-        if (!hasRawSources && m_saveGeneratedMastersCheck->isChecked()) {
-            const QSignalBlocker blocker(m_saveGeneratedMastersCheck);
-            m_saveGeneratedMastersCheck->setChecked(false);
-        }
-        m_saveGeneratedMastersCheck->setVisible(hasRawSources);
-        m_saveGeneratedMastersCheck->setEnabled(hasRawSources);
+    const bool expanded = m_calibrationGroup->isChecked();
+    const bool rawFlat = sources.flat.rawCount > 0 && !sources.flat.master;
+    m_biasFrameRow->setVisible(
+        expanded && (rawFlat || sources.dark.master || sources.bias.present()));
+    m_darkFlatFrameRow->setVisible(expanded && (rawFlat || sources.darkFlat.present()));
+    m_calibrationDetails->setVisible(expanded && m_calibrationDetailsButton->isChecked());
+
+    const bool hasRawSources = sources.hasRaw();
+    if (!hasRawSources && m_saveGeneratedMastersCheck->isChecked()) {
+        const QSignalBlocker blocker(m_saveGeneratedMastersCheck);
+        m_saveGeneratedMastersCheck->setChecked(false);
     }
+    m_saveGeneratedMastersCheck->setVisible(expanded && hasRawSources);
+    m_saveGeneratedMastersCheck->setEnabled(hasRawSources);
 }
 
 QString ParamsPanel::upstreamSignature() const {

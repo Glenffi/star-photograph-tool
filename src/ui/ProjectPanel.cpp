@@ -12,6 +12,7 @@
 #include <QPushButton>
 #include <QFileInfo>
 #include <QDir>
+#include <QDateTime>
 #include <QMenu>
 #include <QAction>
 #include <QDesktopServices>
@@ -54,7 +55,6 @@ public:
     explicit RoundedThumbnailLabel(QWidget* parent = nullptr)
         : QLabel(parent) {
         setAttribute(Qt::WA_TransparentForMouseEvents);
-        setFixedSize(96, 76);
     }
 
     void setThumbnail(const QPixmap& thumbnail) {
@@ -175,9 +175,11 @@ FileCard::FileCard(const FileItem& item, QWidget* parent)
     m_nameLabel = new QLabel(this);
     m_nameLabel->setAttribute(Qt::WA_TransparentForMouseEvents);
     m_nameLabel->setObjectName(QStringLiteral("filmstripFileName"));
+    m_nameLabel->setStyleSheet(QStringLiteral("font-size: %1px;")
+        .arg(StyleTokens::Typography::kCaptionSize));
     m_nameLabel->setMinimumWidth(0);
     m_nameLabel->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
-    m_nameLabel->setToolTip(item.fileName);
+    m_nameLabel->setTextFormat(Qt::PlainText);
     setStringProperty(m_nameLabel, StyleTokens::Properties::kTextRole,
                       StyleTokens::Properties::kMono);
     m_nameLabel->setText(m_fileName);
@@ -193,11 +195,13 @@ FileCard::FileCard(const FileItem& item, QWidget* parent)
     m_statusLabel = new QLabel(this);
     m_statusLabel->setAttribute(Qt::WA_TransparentForMouseEvents);
     m_statusLabel->setObjectName(QStringLiteral("filmstripStatus"));
-    m_statusLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+    m_statusLabel->setStyleSheet(QStringLiteral("font-size: %1px;")
+        .arg(StyleTokens::Typography::kCaptionSize));
+    m_statusLabel->setAlignment(Qt::AlignCenter);
     setStringProperty(m_statusLabel, StyleTokens::Properties::kTextRole,
                       StyleTokens::Properties::kCaption);
-    m_opacityEffect = new QGraphicsOpacityEffect(this);
-    setGraphicsEffect(m_opacityEffect);
+    m_opacityEffect = new QGraphicsOpacityEffect(m_thumbnailLabel);
+    m_thumbnailLabel->setGraphicsEffect(m_opacityEffect);
     updateStyle();
 }
 
@@ -205,7 +209,6 @@ void FileCard::updateFromItem(const FileItem& item) {
     m_isReference = item.isReferenceFrame;
     m_isExcluded = item.isExcluded;
     m_fileName = item.fileName;
-    m_nameLabel->setToolTip(m_fileName);
     updateElidedName();
 
     if (!item.thumbnail.isNull() && item.hasThumbnail) {
@@ -225,6 +228,7 @@ void FileCard::updateFromItem(const FileItem& item) {
 }
 
 void FileCard::setSelected(bool selected) {
+    if (m_selected == selected) return;
     m_selected = selected;
     updateStyle();
 }
@@ -245,8 +249,10 @@ void FileCard::updateStyle() {
         m_statusLabel->setText(QCoreApplication::translate(
             "Nebulens", "排除"));
     } else {
-        m_statusLabel->setText("");
+        m_statusLabel->clear();
     }
+    m_statusLabel->setVisible(!m_statusLabel->text().isEmpty());
+    updateStatusGeometry();
 
     m_referenceDot->setVisible(false);
     m_opacityEffect->setOpacity(m_isExcluded ? 0.4 : 1.0);
@@ -256,12 +262,14 @@ void FileCard::updateStyle() {
     if (m_isReference) accessible += QCoreApplication::translate("Nebulens", "，参考帧");
     if (m_isExcluded) accessible += QCoreApplication::translate("Nebulens", "，已排除");
     setAccessibleName(accessible);
+    setToolTip(accessible);
 
     update();
 }
 
 void FileCard::updateElidedName() {
-    const int availableWidth = m_nameLabel->width();
+    // The badge stylesheet reserves four pixels of padding on either side.
+    const int availableWidth = m_nameLabel->width() - 8;
     if (availableWidth <= 0) {
         m_nameLabel->setText(m_fileName);
         return;
@@ -269,6 +277,13 @@ void FileCard::updateElidedName() {
     m_nameLabel->setText(
         m_nameLabel->fontMetrics().elidedText(m_fileName, Qt::ElideMiddle, availableWidth)
     );
+}
+
+void FileCard::updateStatusGeometry() {
+    const QSize preferred = m_statusLabel->sizeHint();
+    const int badgeWidth = std::min(width() - 12, preferred.width());
+    m_statusLabel->setGeometry(width() - 6 - badgeWidth, 6,
+                               badgeWidth, preferred.height());
 }
 
 void FileCard::mousePressEvent(QMouseEvent* event) {
@@ -338,23 +353,24 @@ void FileCard::paintEvent(QPaintEvent* event) {
     if (hasFocus()) {
         painter.setBrush(Qt::NoBrush);
         painter.setPen(QPen(StyleTokens::Colors::fromHex(
-                                StyleTokens::Colors::kAccent),
-                            1.0));
-        painter.drawRect(rect().adjusted(1, 1, -1, -1));
+                                StyleTokens::Colors::kTextPrimary),
+                            2.0));
+        painter.drawRoundedRect(QRectF(rect()).adjusted(1, 1, -1, -1),
+                                StyleTokens::Radius::kSmall,
+                                StyleTokens::Radius::kSmall);
     }
 }
 
 void FileCard::resizeEvent(QResizeEvent* event) {
     QWidget::resizeEvent(event);
-    if (m_thumbnailLabel) m_thumbnailLabel->setGeometry(rect());
+    if (m_thumbnailLabel) m_thumbnailLabel->setGeometry(rect().adjusted(3, 3, -3, -3));
     if (m_nameLabel) {
-        m_nameLabel->setGeometry(5, height() - 21,
-                                 std::max(1, width() - 10), 16);
+        const int nameHeight = std::max(16, m_nameLabel->sizeHint().height());
+        m_nameLabel->setGeometry(6, height() - nameHeight - 5,
+                                 std::max(1, width() - 12), nameHeight);
+        updateElidedName();
     }
-    if (m_statusLabel) {
-        m_statusLabel->setGeometry(width() - 48, 4, 43, 16);
-    }
-    updateElidedName();
+    if (m_statusLabel) updateStatusGeometry();
 }
 
 // ==================== ProjectPanel ====================
@@ -511,6 +527,8 @@ QWidget* ProjectPanel::setupHeader() {
     auto* titleLabel = new QLabel(
         QCoreApplication::translate("Nebulens", "亮场素材"), header);
     titleLabel->setObjectName(QStringLiteral("filmstripKicker"));
+    titleLabel->setStyleSheet(QStringLiteral("font-size: %1px; letter-spacing: 0px;")
+        .arg(StyleTokens::Typography::kCaptionSize));
     titleRow->addWidget(titleLabel);
 
     titleRow->addStretch();
@@ -801,6 +819,7 @@ void ProjectPanel::addFileCard(const FileItem& item, int index) {
 void ProjectPanel::clearFiles() {
     if (!m_editingEnabled) return;
 
+    const bool hadReference = !referenceFramePath().isEmpty();
     for (auto* card : m_cards) {
         card->deleteLater();
     }
@@ -815,6 +834,7 @@ void ProjectPanel::clearFiles() {
     showEmptyState();
     updateBottomBar();
     emit filesChanged();
+    if (hadReference) emit referenceFrameChanged();
 }
 
 void ProjectPanel::removeSelected() {
@@ -855,8 +875,8 @@ void ProjectPanel::removeAt(int idx) {
         updateAllCardStyles();
     }
     updateBottomBar();
-    if (removedReference) emit referenceFrameChanged();
     emit filesChanged();
+    if (removedReference) emit referenceFrameChanged();
 }
 
 bool ProjectPanel::undoLastRemoval() {
@@ -880,8 +900,8 @@ bool ProjectPanel::undoLastRemoval() {
     setCurrentIndex(index);
     updateBottomBar();
     emit undoAvailabilityChanged(false, QString());
-    if (item.isReferenceFrame) emit referenceFrameChanged();
     emit filesChanged();
+    if (item.isReferenceFrame) emit referenceFrameChanged();
     return true;
 }
 
@@ -902,19 +922,28 @@ void ProjectPanel::toggleExclusionAt(int index) {
 void ProjectPanel::setReferenceFrame(const QString& filePath) {
     if (!m_editingEnabled) return;
 
+    const int target = filePath.isEmpty() ? -1 : findIndexByPath(filePath);
+    if (target < 0 && !filePath.isEmpty()) return;
+
     bool changed = false;
+    bool inclusionChanged = false;
     for (int i = 0; i < m_fileItems.size(); ++i) {
-        const bool isReference = m_fileItems[i].filePath == filePath;
-        changed = changed || m_fileItems[i].isReferenceFrame != isReference;
-        m_fileItems[i].isReferenceFrame = isReference;
-        if (isReference && m_fileItems[i].isExcluded) {
-            m_fileItems[i].isExcluded = false;
-            changed = true;
+        FileItem& item = m_fileItems[i];
+        const bool isReference = i == target;
+        const bool include = isReference && item.isExcluded;
+        if (item.isReferenceFrame == isReference && !include) continue;
+        item.isReferenceFrame = isReference;
+        if (include) {
+            item.isExcluded = false;
+            inclusionChanged = true;
         }
+        changed = true;
         updateCard(i);
     }
     if (!changed) return;
     updateBottomBar();
+    // The reference selector needs the restored source in its candidate list first.
+    if (inclusionChanged) emit filesChanged();
     emit referenceFrameChanged();
 }
 
@@ -951,6 +980,13 @@ QString ProjectPanel::processingSourceSignature() const {
         hash.addData(QByteArray::number(encoded.size()));
         hash.addData(QByteArrayView(":", 1));
         hash.addData(encoded);
+        // Detect same-path replacements without opening or hashing RAW data.
+        const QDateTime modified = info.lastModified();
+        hash.addData(QByteArrayView(":", 1));
+        hash.addData(QByteArray::number(info.size()));
+        hash.addData(QByteArrayView(":", 1));
+        hash.addData(modified.isValid()
+            ? QByteArray::number(modified.toMSecsSinceEpoch()) : QByteArray("missing"));
         hash.addData(QByteArrayView("\n", 1));
     }
     return QString::fromLatin1(hash.result().toHex());

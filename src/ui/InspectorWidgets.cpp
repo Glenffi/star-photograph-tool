@@ -28,6 +28,7 @@
 namespace {
 
 constexpr int kToggleThumbDiameter = StyleTokens::Controls::kSliderHandleSize;
+constexpr int kToggleFocusInset = 3;
 
 QColor interpolateColor(const QColor& from, const QColor& to, qreal position) {
     const qreal amount = std::clamp(position, 0.0, 1.0);
@@ -388,14 +389,12 @@ void ValueSlider::updateValueLabel(int value) {
 }
 
 CompactToggle::CompactToggle(const QString& text, QWidget* parent)
-    : QCheckBox(text, parent),
-      m_animation(new QPropertyAnimation(this, "thumbPosition", this)) {
+    : QCheckBox(text, parent) {
     setObjectName(QStringLiteral("compactToggle"));
     setProperty("component", QStringLiteral("compactToggle"));
     setProperty(
         StyleTokens::Properties::kControlRole,
         QString::fromLatin1(StyleTokens::Properties::kToggle));
-    setProperty("state", QStringLiteral("off"));
     setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
     setFocusPolicy(Qt::StrongFocus);
     setCursor(Qt::PointingHandCursor);
@@ -417,28 +416,23 @@ CompactToggle::CompactToggle(const QString& text, QWidget* parent)
     m_textColor = StyleTokens::Colors::fromHex(
         StyleTokens::Colors::kTextPrimary);
 
+    m_animation = new QPropertyAnimation(this, "thumbPosition", this);
     m_animation->setDuration(StyleTokens::Motion::kFastMs);
     m_animation->setEasingCurve(QEasingCurve::OutCubic);
 
-    connect(this, &QCheckBox::toggled, this, [this](bool checked) {
-        setProperty("state", checked ? QStringLiteral("on")
-                                      : QStringLiteral("off"));
-        style()->unpolish(this);
-        style()->polish(this);
-        animateToCheckedState(checked);
-    });
+    connect(this, &QCheckBox::toggled, this, &CompactToggle::animateToCheckedState);
 }
 
 QSize CompactToggle::sizeHint() const {
     const int textWidth = text().isEmpty() ? 0
         : fontMetrics().horizontalAdvance(text()) + StyleTokens::Spacing::kBase;
-    return QSize(textWidth + StyleTokens::Controls::kToggleWidth,
-                 StyleTokens::Controls::kCompactHeight);
+    return QSize(textWidth + StyleTokens::Controls::kToggleWidth + 2 * kToggleFocusInset,
+                 std::max(StyleTokens::Controls::kCompactHeight, fontMetrics().height() + 4));
 }
 
 QSize CompactToggle::minimumSizeHint() const {
-    return QSize(StyleTokens::Controls::kToggleWidth,
-                 StyleTokens::Controls::kCompactHeight);
+    return QSize(StyleTokens::Controls::kToggleWidth + 2 * kToggleFocusInset,
+                 sizeHint().height());
 }
 
 QColor CompactToggle::trackOffColor() const { return m_trackOffColor; }
@@ -494,7 +488,7 @@ void CompactToggle::paintEvent(QPaintEvent* event) {
 
     const QRect bounds = contentsRect();
     const QRectF track(
-        bounds.right() - StyleTokens::Controls::kToggleWidth + 1,
+        bounds.right() - StyleTokens::Controls::kToggleWidth + 1 - kToggleFocusInset,
         bounds.center().y() - StyleTokens::Controls::kToggleHeight / 2.0,
         StyleTokens::Controls::kToggleWidth,
         StyleTokens::Controls::kToggleHeight);
@@ -514,7 +508,7 @@ void CompactToggle::paintEvent(QPaintEvent* event) {
         thumbOn = thumbOff;
     }
 
-    const qreal position = std::clamp(m_thumbPosition, 0.0, 1.0);
+    const qreal position = thumbPosition();
     const QColor trackColor = interpolateColor(trackOff, trackOn, position);
     const QColor thumbColor = interpolateColor(thumbOff, thumbOn, position);
 
@@ -552,7 +546,7 @@ void CompactToggle::paintEvent(QPaintEvent* event) {
     if (hasFocus()) {
         const QColor ring = resolvedColor(
             m_focusColor, QPalette::Highlight, QPalette::Active);
-        QPen pen(ring, 1.5);
+        QPen pen(ring, 2.0);
         painter.setPen(pen);
         painter.setBrush(Qt::NoBrush);
         painter.drawRoundedRect(track.adjusted(-2, -2, 2, 2),
@@ -580,8 +574,16 @@ void CompactToggle::changeEvent(QEvent* event) {
     }
 }
 
+QString CompactToggle::visualState() const {
+    return isChecked() ? QStringLiteral("on") : QStringLiteral("off");
+}
+
 qreal CompactToggle::thumbPosition() const {
-    return m_thumbPosition;
+    const qreal target = isChecked() ? 1.0 : 0.0;
+    // Blocked checkbox signals can change the target without starting an animation.
+    return m_animation && m_animation->state() == QAbstractAnimation::Running &&
+            m_animation->endValue().toReal() == target
+        ? m_thumbPosition : target;
 }
 
 void CompactToggle::setThumbPosition(qreal position) {
@@ -597,8 +599,12 @@ void CompactToggle::animateToCheckedState(bool checked) {
         return;
     }
 
+    const qreal previousTarget = 1.0 - target;
+    const qreal start = m_animation->state() == QAbstractAnimation::Running &&
+            m_animation->endValue().toReal() == previousTarget
+        ? m_thumbPosition : previousTarget;
     m_animation->stop();
-    m_animation->setStartValue(m_thumbPosition);
+    m_animation->setStartValue(start);
     m_animation->setEndValue(target);
     m_animation->start();
 }

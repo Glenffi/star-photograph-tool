@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QImage>
 #include <QString>
 #include <functional>
 #include <cstdint>
@@ -48,6 +49,10 @@ public:
                             const QString& path,
                             Format format = Tiff16,
                             const std::function<bool()>& cancelled = {});
+
+    // Display proof from final linear sRGB pixels, with a 1600 px long-side cap.
+    static QImage makeRgb16Proof(const std::vector<uint16_t>& rgb,
+                                 int width, int height);
 
     // Publish in preferredPath's existing directory without replacing a file.
     // On collision, append a number before the extension. actualPath is empty

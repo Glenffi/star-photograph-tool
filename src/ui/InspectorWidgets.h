@@ -103,6 +103,7 @@ class CompactToggle final : public QCheckBox {
     Q_PROPERTY(QColor thumbOnColor READ thumbOnColor WRITE setThumbOnColor)
     Q_PROPERTY(QColor focusColor READ focusColor WRITE setFocusColor)
     Q_PROPERTY(QColor textColor READ textColor WRITE setTextColor)
+    Q_PROPERTY(QString state READ visualState)
     Q_PROPERTY(qreal thumbPosition READ thumbPosition WRITE setThumbPosition)
 
 public:
@@ -132,6 +133,7 @@ protected:
     void changeEvent(QEvent* event) override;
 
 private:
+    QString visualState() const;
     qreal thumbPosition() const;
     void setThumbPosition(qreal position);
     void animateToCheckedState(bool checked);

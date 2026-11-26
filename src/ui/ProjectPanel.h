@@ -64,6 +64,7 @@ protected:
 private:
     void updateStyle();
     void updateElidedName();
+    void updateStatusGeometry();
     bool m_selected = false;
     bool m_hovered = false;
     bool m_isReference = false;

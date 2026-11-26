@@ -2,6 +2,7 @@
 #include "workers/ExportWorker.h"
 
 #include <QColor>
+#include <QColorSpace>
 #include <QCoreApplication>
 #include <QDir>
 #include <QFileInfo>
@@ -262,6 +263,40 @@ void testExportWorkerReceipt() {
           "A failed worker must not report a path or leave any extra file");
 }
 
+void testBoundedDeliveryProof() {
+    QTemporaryDir root;
+    check(root.isValid(), "A proof comparison directory should be available");
+    if (!root.isValid()) return;
+
+    const std::vector<uint16_t> rgb{0, 32768, 65535, 2048, 32768, 1024};
+    const QString path = root.filePath("proof.png");
+    check(ImageExporter::exportRgb16(rgb, 2, 1, path, ImageExporter::Png8),
+          "Cannot write reference PNG for the proof");
+    const QImage proof = ImageExporter::makeRgb16Proof(rgb, 2, 1);
+    check(proof.size() == QSize(2, 1) && proof.colorSpace() == QColorSpace(QColorSpace::SRgb) &&
+              proof.pixel(0, 0) == qRgb(0, 188, 255) &&
+              proof == QImage(path).convertToFormat(QImage::Format_RGB888),
+          "An unscaled proof must match the saved sRGB PNG pixel for pixel");
+    check(ImageExporter::makeRgb16Proof(rgb, 1, 1).isNull() &&
+              ImageExporter::makeRgb16Proof(rgb, 0, 1).isNull(),
+          "The proof must reject invalid geometry and buffer length");
+
+    constexpr int width = 3200;
+    constexpr int height = 4;
+    std::vector<uint16_t> stripes(width * height * 3);
+    for (int i = 0; i < width * height; ++i) {
+        const uint16_t red = i % 2 == 0 ? 0 : 65535;
+        stripes[i * 3] = red;
+        stripes[i * 3 + 1] = 32768;
+        stripes[i * 3 + 2] = 65535 - red;
+    }
+    const QImage bounded = ImageExporter::makeRgb16Proof(stripes, width, height);
+    const QImage portrait = ImageExporter::makeRgb16Proof(stripes, height, width);
+    check(bounded.size() == QSize(1600, 2) && portrait.size() == QSize(2, 1600) &&
+              bounded.pixel(800, 1) == qRgb(188, 188, 188),
+          "Landscape and portrait proofs must be bounded and resample in linear light");
+}
+
 } // namespace
 
 int main(int argc, char* argv[]) {
@@ -276,6 +311,7 @@ int main(int argc, char* argv[]) {
     if (publicationPoll > 0) testCrossProcessCompetition(publicationPoll);
     testExplicitPathCompatibility();
     testExportWorkerReceipt();
+    testBoundedDeliveryProof();
     if (failures != 0) return 1;
     std::cout << "All output delivery tests passed.\n";
     return 0;

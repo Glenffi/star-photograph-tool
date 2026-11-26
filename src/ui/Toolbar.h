@@ -25,6 +25,7 @@ public:
     void setProjectSummary(const QString& summary);
 
 signals:
+    void printOrderRequested();
     void sceneChanged(ProcessingScene scene);
     void importFilesClicked();
     void importFolderClicked();

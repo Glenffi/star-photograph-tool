@@ -21,6 +21,7 @@ class QLineEdit;
 class QTabWidget;
 class QListWidget;
 class QPropertyAnimation;
+class QToolButton;
 
 class ParamsPanel : public QWidget {
     Q_OBJECT
@@ -50,9 +51,11 @@ public:
     bool starReduceEnabled() const;
     int starReduceStrength() const;
     QString outputFormat() const;
+    void setOutputFormat(const QString& format);  // tiff16 or png8
     QString outputPath() const;
     QString selectedReferenceFrame() const;
 
+    void clearProjectSources();
     void updateRefFrameList(const QStringList& fileNames);
     void setSelectedReferenceFrame(const QString& filePath);
     void recommendStackMethod(int frameCount);
@@ -83,6 +86,7 @@ public:
     QString masterBiasPath() const;
     QString masterDarkFlatPath() const;
     bool deepSkyCalibrationInputsComplete() const;
+    QString calibrationHint() const;
     bool saveGeneratedMasters() const;
     QString upstreamSignature() const;
     QString finishingSignature() const;
@@ -99,6 +103,7 @@ public:
 
 signals:
     void paramsChanged();  // 参数发生任何变化时触发
+    void referenceChoiceChanged(const QString& filePath);  // User activation; empty is automatic.
     void maskPreviewRequested(); // 用户点击"检测地景"时发射
     void modifiedCameraGrayPointRequested();
     void recentResultRequested(const QString& path);
@@ -134,14 +139,12 @@ private:
                                  QStringList& rawPaths,
                                  QLabel* sourceLabel,
                                  QPushButton* clearButton,
-                                 const QString& roleName,
-                                 bool confirmNormalizedFlat = false);
+                                 const QString& roleName);
     void clearCalibrationSource(QStringList& paths, QString& masterPath,
                                 QLabel* sourceLabel,
                                 QPushButton* clearButton);
-    void updateCalibrationSource(QLabel* label, QPushButton* clearButton,
-                                 const QStringList& rawPaths,
-                                 const QString& masterPath);
+    void clearCalibrationSources();
+    void clearUserMask();
     void updateCalibrationStatus();
     QString* masterPathForRawGroup(const QStringList& paths);
     QString calibrationPathIdentity(const QString& path) const;
@@ -172,6 +175,8 @@ private:
     // 对齐组
     QGroupBox* m_alignGroup = nullptr;
     QComboBox* m_refFrame = nullptr;
+    QString m_referenceChoice;
+    QStringList m_referenceFiles;
 
     // 堆栈组
     QGroupBox* m_stackGroup = nullptr;
@@ -206,6 +211,10 @@ private:
     QLabel* m_biasFrameCount = nullptr;
     QLabel* m_darkFlatFrameCount = nullptr;
     QLabel* m_calibrationStatus = nullptr;
+    QWidget* m_biasFrameRow = nullptr;
+    QWidget* m_darkFlatFrameRow = nullptr;
+    QToolButton* m_calibrationDetailsButton = nullptr;
+    QLabel* m_calibrationDetails = nullptr;
     QPushButton* m_darkFrameClear = nullptr;
     QPushButton* m_flatFrameClear = nullptr;
     QPushButton* m_biasFrameClear = nullptr;

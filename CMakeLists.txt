@@ -6,7 +6,7 @@ if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Darwin" AND
         "Minimum supported macOS version")
 endif()
 
-project(StarProcessor VERSION 0.13.0 LANGUAGES CXX)
+project(StarProcessor VERSION 0.14.0 LANGUAGES CXX)
 
 include(CTest)
 option(BUILD_SAMPLE_TOOLS "Build local RAW sample regression tools" ON)
@@ -125,7 +125,10 @@ set(CORE_SOURCES
 )
 
 set(APP_SOURCES
-    src/main.cpp
+    src/app/MainWindow.cpp
+    src/app/MainWindowOrder.cpp
+    src/ui/PrintOrderPanel.cpp
+    resources/print-order.qrc
     resources/branding.qrc
     resources/translations.qrc
     src/i18n/AppLocalization.cpp
@@ -176,6 +179,8 @@ set(CORE_HEADERS
 )
 
 set(APP_HEADERS
+    src/app/MainWindow.h
+    src/ui/PrintOrderPanel.h
     src/i18n/AppLocalization.h
     src/core/ThumbnailGenerator.h
     src/ui/ProjectPanel.h
@@ -202,7 +207,7 @@ if(APPLE)
         MACOSX_PACKAGE_LOCATION "Resources")
     set_source_files_properties(${NEBULENS_PRIVACY_MANIFEST} PROPERTIES
         MACOSX_PACKAGE_LOCATION "Resources")
-    list(APPEND APP_SOURCES
+    list(APPEND APP_BUNDLE_FILES
         ${STARPROCESSOR_MAC_ICON}
         ${NEBULENS_PRIVACY_MANIFEST})
 elseif(WIN32)
@@ -210,7 +215,7 @@ elseif(WIN32)
         "${CMAKE_SOURCE_DIR}/cmake/StarProcessor.rc.in"
         "${CMAKE_CURRENT_BINARY_DIR}/StarProcessor.rc"
         @ONLY)
-    list(APPEND APP_SOURCES "${CMAKE_CURRENT_BINARY_DIR}/StarProcessor.rc")
+    list(APPEND APP_BUNDLE_FILES "${CMAKE_CURRENT_BINARY_DIR}/StarProcessor.rc")
 endif()
 
 # 核心库不依赖 Widgets；ImageExporter、PresetManager 和 SkyGroundMask
@@ -249,18 +254,34 @@ add_library(StarProcessorWorkers STATIC
 target_include_directories(StarProcessorWorkers PUBLIC ${CMAKE_SOURCE_DIR}/src)
 target_link_libraries(StarProcessorWorkers PUBLIC StarProcessorCore Qt6::Core Qt6::Gui)
 
-add_executable(${PROJECT_NAME} ${APP_SOURCES} ${APP_HEADERS})
-target_include_directories(${PROJECT_NAME} PRIVATE ${CMAKE_SOURCE_DIR}/src)
-target_link_libraries(${PROJECT_NAME} PRIVATE
+add_library(NebulensDesktop OBJECT ${APP_SOURCES} ${APP_HEADERS})
+target_include_directories(NebulensDesktop PUBLIC ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(NebulensDesktop PUBLIC
     StarProcessorWorkers
     Qt6::Widgets
     Qt6::Network
 )
-target_compile_definitions(${PROJECT_NAME} PRIVATE
+target_compile_definitions(NebulensDesktop PUBLIC
     STARPROCESSOR_VERSION="${PROJECT_VERSION}"
+    PRIVATE
     STARPROCESSOR_UPDATE_MANIFEST_URL="https://di.nexusgen.net/starprocessor/update.json")
 
+add_executable(${PROJECT_NAME} src/main.cpp ${APP_BUNDLE_FILES})
+target_link_libraries(${PROJECT_NAME} PRIVATE NebulensDesktop)
+
 if(BUILD_TESTING)
+    find_package(Python3 REQUIRED COMPONENTS Interpreter)
+    add_executable(NebulensWindowTests tests/MainWindowFlowTests.cpp)
+    target_link_libraries(NebulensWindowTests PRIVATE NebulensDesktop)
+    add_test(NAME print_order_flow
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/WindowFlowTests.py
+                $<TARGET_FILE:NebulensWindowTests>)
+    set_tests_properties(print_order_flow PROPERTIES TIMEOUT 150)
+    add_executable(NebulensPrintOrderPanelTests tests/PrintOrderPanelTests.cpp)
+    target_link_libraries(NebulensPrintOrderPanelTests PRIVATE NebulensDesktop)
+    add_test(NAME print_order_panel COMMAND NebulensPrintOrderPanelTests)
+    set_tests_properties(print_order_panel PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
     add_executable(NebulensLocalizationTests
         tests/LocalizationCatalogTests.cpp
         src/i18n/AppLocalization.cpp
@@ -306,6 +327,10 @@ if(BUILD_TESTING)
     add_executable(StarProcessorWorkerTests tests/WorkerTests.cpp)
     target_link_libraries(StarProcessorWorkerTests PRIVATE StarProcessorWorkers)
     add_test(NAME worker_lifecycle COMMAND StarProcessorWorkerTests)
+
+    add_executable(StarProcessorOutputDeliveryTests tests/OutputDeliveryTests.cpp)
+    target_link_libraries(StarProcessorOutputDeliveryTests PRIVATE StarProcessorWorkers)
+    add_test(NAME output_delivery COMMAND StarProcessorOutputDeliveryTests)
 
     add_executable(StarProcessorFinishingPipelineTests
         tests/FinishingPipelineTests.cpp)
@@ -409,6 +434,16 @@ if(BUILD_SAMPLE_TOOLS)
     target_compile_definitions(StarProcessorPipelineRunner PRIVATE
         STARPROCESSOR_VERSION="${PROJECT_VERSION}")
     target_link_libraries(StarProcessorPipelineRunner PRIVATE StarProcessorWorkers)
+    if(BUILD_TESTING)
+        add_test(NAME timelapse_cli
+            COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/TimelapseCliTests.py
+                    $<TARGET_FILE:StarProcessorPipelineRunner>)
+        if(WIN32)
+            add_test(NAME timelapse_windows_volume
+                COMMAND ${Python3_EXECUTABLE} -B ${CMAKE_SOURCE_DIR}/tests/TimelapseWindowsVolumeTests.py
+                        $<TARGET_FILE:StarProcessorPipelineRunner>)
+        endif()
+    endif()
 endif()
 
 # macOS 特定设置

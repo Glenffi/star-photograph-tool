@@ -7,6 +7,7 @@
 #include <QEnterEvent>
 #include <QFocusEvent>
 #include <QFont>
+#include <QFontMetrics>
 #include <QLabel>
 #include <QLinearGradient>
 #include <QPainter>
@@ -31,6 +32,10 @@ constexpr std::array<StageText, 6> kStageText{{
     {"06", QT_TRANSLATE_NOOP("Nebulens", "输出")}
 }};
 
+constexpr int kRailInset = 6;
+constexpr int kStageButtonHeight = 57;
+constexpr int kStageLabelInset = 4;
+
 int stageIndex(WorkflowStage stage) {
     return std::clamp(static_cast<int>(stage), 0, 5);
 }
@@ -44,10 +49,12 @@ public:
         setCheckable(true);
         setCursor(Qt::PointingHandCursor);
         setFocusPolicy(Qt::StrongFocus);
-        setFixedSize(76, 57);
+        setFixedSize(StyleTokens::Layout::kWorkflowRailWidth - 2 * kRailInset,
+                     kStageButtonHeight);
         const StageText& text = kStageText[stageIndex(stage)];
         const QString label = QCoreApplication::translate(
             "Nebulens", text.source);
+        setText(label);
         setAccessibleName(label);
         setToolTip(label);
     }
@@ -148,22 +155,21 @@ protected:
         QString monoFamily = StyleTokens::Typography::monoFontFamily();
         monoFamily.remove(QLatin1Char('"'));
         numberFont.setFamily(monoFamily);
-        numberFont.setPixelSize(8);
+        numberFont.setPixelSize(StyleTokens::Typography::kCaptionSize);
         painter.setFont(numberFont);
         painter.setPen(isChecked() ? primary : faint);
-        painter.drawText(QRect(8, 0, 20, height()), Qt::AlignVCenter,
+        painter.drawText(QRect(8, 5, 28, 16), Qt::AlignVCenter,
                          QString::fromLatin1(text.number));
 
-        const QString localizedLabel = QCoreApplication::translate(
-            "Nebulens", text.source);
         QFont labelFont = font();
-        labelFont.setPixelSize(localizedLabel.size() > 6 ? 8 : 11);
+        labelFont.setPixelSize(StyleTokens::Typography::kBodySize - 1);
         labelFont.setWeight(QFont::DemiBold);
+        const QRect labelRect = rect().adjusted(kStageLabelInset, 21, -kStageLabelInset, -5);
         painter.setFont(labelFont);
         painter.setPen(primary);
-        painter.drawText(QRect(27, 18, 46, 20),
-                         Qt::AlignLeft | Qt::AlignVCenter,
-                         localizedLabel);
+        painter.drawText(labelRect, Qt::AlignCenter,
+                         QFontMetrics(labelFont).elidedText(
+                             this->text(), Qt::ElideRight, labelRect.width()));
 
         QColor dot = StyleTokens::Colors::fromHex(
             StyleTokens::Colors::kTextFaint);
@@ -178,14 +184,14 @@ protected:
         }
         painter.setPen(Qt::NoPen);
         painter.setBrush(dot);
-        painter.drawEllipse(QRectF(width() - 10.0, 7.0, 4.0, 4.0));
+        constexpr int dotSize = StyleTokens::Controls::kStatusDotSize;
+        painter.drawEllipse(QRectF(width() - 8 - dotSize, 10, dotSize, dotSize));
 
         if (hasFocus() && m_keyboardFocus) {
-            QColor focus = StyleTokens::Colors::fromHex(
-                StyleTokens::Colors::kAccentStrong);
-            focus.setAlpha(180);
+            const QColor focus = StyleTokens::Colors::fromHex(
+                StyleTokens::Colors::kTextPrimary);
             painter.setBrush(Qt::NoBrush);
-            painter.setPen(QPen(focus, 1.0));
+            painter.setPen(QPen(focus, 2.0));
             painter.drawRoundedRect(body.adjusted(1.0, 1.0, -1.0, -1.0),
                                     5.0, 5.0);
         }
@@ -205,15 +211,17 @@ WorkflowRail::WorkflowRail(QWidget* parent) : QWidget(parent) {
 
 void WorkflowRail::setupUi() {
     setObjectName(QStringLiteral("workflowRail"));
-    setFixedWidth(96);
+    setFixedWidth(StyleTokens::Layout::kWorkflowRailWidth);
 
     auto* layout = new QVBoxLayout(this);
-    layout->setContentsMargins(10, 14, 10, 10);
+    layout->setContentsMargins(kRailInset, 14, kRailInset, 10);
     layout->setSpacing(7);
 
     auto* kicker = new QLabel(
         QCoreApplication::translate("Nebulens", "工作流"), this);
     kicker->setObjectName(QStringLiteral("workflowKicker"));
+    kicker->setStyleSheet(QStringLiteral("font-size: %1px; letter-spacing: 0px;")
+        .arg(StyleTokens::Typography::kCaptionSize));
     kicker->setAlignment(Qt::AlignCenter);
     layout->addWidget(kicker);
 

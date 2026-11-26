@@ -62,27 +62,14 @@ void Toolbar::setupUI() {
     layout->setContentsMargins(18, 0, 14, 0);
     layout->setSpacing(10);
 
-    auto* logo = new QLabel(this);
-    logo->setObjectName(QStringLiteral("brandLogo"));
-    logo->setFixedSize(32, 32);
-    logo->setPixmap(UiAssets::logoMark(30));
-    logo->setAlignment(Qt::AlignCenter);
-    layout->addWidget(logo);
-
-    auto* brand = new QWidget(this);
-    brand->setObjectName(QStringLiteral("brandBlock"));
-    brand->setFixedWidth(142);
-    auto* brandLayout = new QVBoxLayout(brand);
-    brandLayout->setContentsMargins(0, 8, 0, 7);
-    brandLayout->setSpacing(1);
-    auto* brandName = new QLabel(QStringLiteral("Nebulens"), brand);
-    brandName->setObjectName(QStringLiteral("brandName"));
-    brandLayout->addWidget(brandName);
-    auto* brandTag = new QLabel(
-        QCoreApplication::translate("Nebulens", "星空影像工作台"), brand);
-    brandTag->setObjectName(QStringLiteral("brandTag"));
-    brandLayout->addWidget(brandTag);
-    layout->addWidget(brand);
+    auto* orderButton = createActionButton(
+        toolbarIcon(UiAssets::Glyph::ChevronLeft, StyleTokens::Colors::kTextPrimary,
+                    StyleTokens::Colors::kTextSecondary),
+        QCoreApplication::translate("Nebulens", "返回冲印单"),
+        StyleTokens::Properties::kSecondaryButton);
+    orderButton->setObjectName(QStringLiteral("returnToPrintOrder"));
+    connect(orderButton, &QPushButton::clicked, this, &Toolbar::printOrderRequested);
+    layout->addWidget(orderButton);
 
     auto* divider = new QFrame(this);
     divider->setObjectName(QStringLiteral("toolbarVerticalDivider"));

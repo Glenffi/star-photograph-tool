@@ -7,9 +7,13 @@
 #include <QApplication>
 #include <QAbstractButton>
 #include <QColor>
+#include <QFontMetrics>
+#include <QImage>
 #include <QLabel>
 #include <QProgressBar>
+#include <QSignalBlocker>
 #include <QString>
+#include <QTranslator>
 
 #include <algorithm>
 #include <cmath>
@@ -43,6 +47,35 @@ bool require(bool condition, const char* message) {
     return false;
 }
 
+class RailTranslator final : public QTranslator {
+public:
+    bool isEmpty() const override { return false; }
+
+    QString translate(const char* context, const char* sourceText,
+                      const char*, int) const override {
+        if (qstrcmp(context, "Nebulens") == 0 && qstrcmp(sourceText, "校准") == 0) {
+            return QStringLiteral("Calibration");
+        }
+        return {};
+    }
+};
+
+int stageLabelInkWidth(QAbstractButton* stage) {
+    const QImage image = stage->grab().toImage().scaled(stage->size());
+    int left = image.width();
+    int right = -1;
+    // Skip the number and the status dot in the upper part of the button.
+    for (int y = 22; y < image.height() - 5; ++y) {
+        for (int x = 5; x < image.width() - 5; ++x) {
+            if (relativeLuminance(image.pixelColor(x, y)) > 0.25) {
+                left = std::min(left, x);
+                right = std::max(right, x);
+            }
+        }
+    }
+    return right - left + 1;
+}
+
 } // namespace
 
 int main(int argc, char* argv[]) {
@@ -54,6 +87,7 @@ int main(int argc, char* argv[]) {
                        "Application stylesheet is empty");
     success &= require(!styleSheet.contains(QStringLiteral("{{")),
                        "Application stylesheet contains an unresolved token");
+    app.setStyleSheet(styleSheet);
 
     const QColor background = StyleTokens::Colors::fromHex(
         StyleTokens::Colors::kBackgroundBase);
@@ -112,6 +146,36 @@ int main(int argc, char* argv[]) {
                            && toggle->minimumSizeHint().width()
                                >= StyleTokens::Controls::kToggleWidth,
                        "Compact toggle state or geometry is incorrect");
+    section.resize(340, 100);
+    section.show();
+    QApplication::processEvents();
+    toggle->setAnimationEnabled(false);
+    const QImage on = toggle->grab().toImage();
+    toggle->setChecked(false);
+    const QImage off = toggle->grab().toImage();
+    int toggles = 0;
+    QObject::connect(toggle, &QCheckBox::toggled, toggle, [&](bool) { ++toggles; });
+    QCheckBox* baseToggle = toggle;
+    {
+        const QSignalBlocker blocker(baseToggle);
+        baseToggle->setChecked(true);
+    }
+    success &= require(on != off && toggle->grab().toImage() == on &&
+                           toggle->property("state").toString() == QStringLiteral("on") &&
+                           toggles == 0,
+                       "A blocked setChecked must repaint the correct state without a signal");
+
+    toggle->setChecked(false);
+    toggle->setAnimationEnabled(true);
+    toggle->setChecked(true);
+    {
+        const QSignalBlocker blocker(baseToggle);
+        baseToggle->setCheckState(Qt::Unchecked);
+    }
+    success &= require(toggles == 2 && !toggle->isChecked() &&
+                           toggle->grab().toImage() == off &&
+                           toggle->property("thumbPosition").toReal() == 0.0,
+                       "A blocked check state must override an animation still in flight");
 
     TaskStatusBar statusBar;
     statusBar.resize(640, StyleTokens::Layout::kStatusBarHeight);
@@ -123,6 +187,8 @@ int main(int argc, char* argv[]) {
                                StyleTokens::Controls::kProgressHeight,
                        "Task progress line should span the status bar");
 
+    RailTranslator translator;
+    app.installTranslator(&translator);
     WorkflowRail rail;
     rail.show();
     QApplication::processEvents();
@@ -137,6 +203,22 @@ int main(int argc, char* argv[]) {
                           return button->isChecked();
                       }) == 1,
         "Workflow rail should expose exactly one selected stage");
+    const auto calibrationButton = std::find_if(
+        workflowButtons.cbegin(), workflowButtons.cend(), [](QAbstractButton* button) {
+            return button->text() == QStringLiteral("Calibration");
+        });
+    success &= require(calibrationButton != workflowButtons.cend() &&
+                           stageLabelInkWidth(*calibrationButton) >= 50,
+                       "English calibration should occupy a readable full-width label");
+    if (calibrationButton != workflowButtons.cend()) {
+        QFont labelFont = (*calibrationButton)->font();
+        labelFont.setPixelSize(StyleTokens::Typography::kBodySize - 1);
+        labelFont.setWeight(QFont::DemiBold);
+        success &= require(
+            QFontMetrics(labelFont).horizontalAdvance((*calibrationButton)->text()) <=
+                (*calibrationButton)->width() - 8,
+            "The full English calibration label must fit at the intended font size");
+    }
     if (!workflowButtons.isEmpty()) {
         auto* firstButton = workflowButtons.first();
         firstButton->setFocus(Qt::ActiveWindowFocusReason);
@@ -144,11 +226,13 @@ int main(int argc, char* argv[]) {
         success &= require(
             !firstButton->property("keyboardFocusVisible").toBool(),
             "Window activation must not draw a second workflow outline");
+        const QImage inactiveFocus = firstButton->grab().toImage();
         firstButton->clearFocus();
         firstButton->setFocus(Qt::TabFocusReason);
         QApplication::processEvents();
         success &= require(
-            firstButton->property("keyboardFocusVisible").toBool(),
+            firstButton->property("keyboardFocusVisible").toBool() &&
+                firstButton->grab().toImage() != inactiveFocus,
             "Keyboard navigation should retain an accessible focus outline");
     }
     int stageChanges = 0;
