@@ -158,7 +158,7 @@ cmake_arguments=(
     -DCMAKE_BUILD_TYPE=Release
     "-DCMAKE_OSX_DEPLOYMENT_TARGET=${DEPLOYMENT_TARGET}"
     -DBUILD_TESTING=ON
-    -DBUILD_SAMPLE_TOOLS=OFF
+    -DBUILD_SAMPLE_TOOLS=ON
 )
 if [[ -n "${CMAKE_TOOLCHAIN_FILE:-}" ]]; then
     cmake_arguments+=("-DCMAKE_TOOLCHAIN_FILE=${CMAKE_TOOLCHAIN_FILE}")
@@ -240,6 +240,12 @@ fi
 cmake -E make_directory "${STAGED_APP}/Contents/Resources/translations"
 ditto "${QTBASE_ZH}" \
     "${STAGED_APP}/Contents/Resources/translations/qtbase_zh_CN.qm"
+
+# macdeployqt does not write qt.conf with -no-plugins. Keep plugin discovery
+# inside the bundle even when the build machine has a Qt installation.
+printf '%s\n' '[Paths]' 'Prefix = .' 'Plugins = PlugIns' \
+    'Translations = Resources/translations' \
+    > "${STAGED_APP}/Contents/Resources/qt.conf"
 
 # macdeployqt follows Qt's dependency graph but can miss non-Qt @rpath
 # dependencies of bundled libraries. LibRaw's optional LittleCMS dependency is
@@ -323,19 +329,21 @@ fi
 codesign --force --deep --sign - --timestamp=none "${STAGED_APP}"
 codesign --verify --deep --strict --verbose=2 "${STAGED_APP}"
 
-# This always runs, including headless CI. It enters main only after dyld has
-# loaded every linked runtime library, so a missing transitive dylib fails the
-# package before it can be published.
-runtime_check_output="$("${STAGED_APP}/Contents/MacOS/StarProcessor" --runtime-check)"
+# Run both checks without development environment overrides. Neither needs
+# a window server: the second also loads the bundled JPEG decoder.
+packaged_command=(/usr/bin/env -i PATH=/usr/bin:/bin:/usr/sbin:/sbin
+    "HOME=${HOME}" "TMPDIR=${TMPDIR:-/tmp}"
+    "${STAGED_APP}/Contents/MacOS/StarProcessor")
+runtime_check_output="$("${packaged_command[@]}" --runtime-check)"
 if [[ "${runtime_check_output}" != "StarProcessor ${VERSION}" ]]; then
     echo "Packaged application runtime check returned: ${runtime_check_output}" >&2
     exit 6
 fi
+"${packaged_command[@]}" --platform-runtime-check
 
 if [[ "${SKIP_LAUNCH_TEST:-0}" != "1" ]]; then
     SCREENSHOT="${STAGING_DIR}/launch-check.png"
-    "${STAGED_APP}/Contents/MacOS/StarProcessor" \
-        "--screenshot=${SCREENSHOT}"
+    "${packaged_command[@]}" "--screenshot=${SCREENSHOT}"
     if [[ ! -s "${SCREENSHOT}" ]]; then
         echo "Packaged application did not create its launch-check screenshot" >&2
         exit 7

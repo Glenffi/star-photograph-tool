@@ -2,7 +2,7 @@
 
 跨平台 RAW 图像处理软件，专注于星空摄影领域。
 
-> **当前开发版本**：v0.13.0。桌面界面采用暗房仪器设计：顶部品牌与场景工具带、左侧六阶段工作流、中央影像画布、底部素材胶片带和右侧阶段检查器。用户界面品牌统一为 Nebulens。
+> **当前开发版本**：v0.14.0。Nebulens 默认打开原生羊皮纸冲印单，按「成品 → 素材 → 保存」处理 RAW；六阶段工作台保留在「高级暗房」。
 
 > 为保证 v0.11.0 用户可以继续升级并保留参数，内部 CMake 目标、设置空间、更新地址、安装包协议和 `.spmaster` 魔数暂时沿用 `StarProcessor` 技术标识；这些名称不会出现在新版主界面。
 
@@ -18,7 +18,7 @@
 - 帧间光度匹配：稳健估计共享曝光增益与 RGB 背景偏移，并回到序列中位光度
 - 自动镜头横向色差校正：从参考帧未饱和星点估计红、蓝相对绿色通道的径向尺度；只有星点数量、画面分布和残差同时通过门限才启用，并与几何对齐合并为一次重采样
 - 天空对齐、地景固定的天地分离堆栈；每帧天空有效区随对齐变换，避免移动地景在山脊上方形成重影；地景支持平均降噪、参考单帧和中值三种策略
-- 延时 RAW 序列滑动窗口降噪：逐帧星空对齐、MAD 异常值抑制、动态内容保护、跨帧亮度/色偏平滑和固定地景双路处理，并按原顺序批量输出图片
+- 延时 RAW 序列滑动窗口降噪：逐帧星空对齐、MAD 异常值抑制、动态内容保护、跨帧亮度/色偏平滑和固定地景双路处理，按拍摄时间（缺失时按自然文件名）编号输出图片
 - 固定机位星轨合成：原坐标 RGB16 Lighten、按时间半衰期渐隐的正向/反向 Comet、帧间背景匹配，以及天空星轨与原位平均地景融合
 - 连续地平线自动蒙版或用户蒙版；自动结果漏掉山体/建筑时，可用“修补地景”粗略涂抹，算法沿预览中的颜色与亮度边缘重新贴合精确边界；多尺度降噪、缩星和细节恢复均受天空/地景区域约束
 - 线性 RGB 多尺度降噪，亮度与色度分离处理并保护强结构
@@ -28,15 +28,15 @@
 - 亮度通道阈值锐化：保护深阴影与亮星核心，重建 RGB 时保持色相；默认关闭，建议在线性降噪之后以 10–35 的保守强度使用
 - 可独立启用的星点去紫边：比较星核与星翼色度，只校正向外突增的彩色边，不改变星点尺寸；缩星继续使用局部 RGB 背景重建的 Starless/Stars 分离、亚像素圆形 Minimum 和弱残留清理
 - 线性 sRGB 16-bit TIFF（嵌入 ICC）和 sRGB 8-bit PNG 导出
-- 完整分辨率手动导出在独立任务中执行；TIFF 扫描行和 PNG 转换支持协作取消，取消的 TIFF 不保留未完成文件
+- 正式处理直接写出完整分辨率成品；单图再次导出在独立任务中执行。同名单图另取文件名，延时每次写入独立子目录
 - 内嵌 RAW 缩略图优先、half-size 快速回退的浏览预览
 - 磁盘缓存分块堆栈、基于实时可用内存的处理前资源门禁，以及受控分辨率结果预览
 - 基于全部对齐变换的共同有效区域自动裁切，避免少帧覆盖边界进入成片
-- 面向六类拍摄任务的暗房工作台：顶部切换场景，左侧按“素材 / 校准 / 对齐 / 合成 / 调整 / 输出”导航，中央专注影像，底部管理 Light 胶片带，右侧只显示当前阶段参数
+- 冲印单提供单图成片、星轨和延时照片三种交付选择，并用冲印回执显示实际保存位置；高级暗房保留六类场景的素材管理、校准、堆栈与调整
 - 简体中文 / English 完整本地化：设置中选择语言，重启后统一更新菜单、参数、处理状态、错误提示和 Qt 文件对话框；旧用户默认保持简体中文
 - 有界内存的“处理前 / 处理后 / 同坐标滑动分屏”比较；素材、正式结果与快速预览分别保存缩放、滚动、对比和蒙版状态，返回检查位置时不会重置
-- 主窗口内任务反馈：状态栏 2px 真实进度线、处理/取消主按钮、5 秒素材删除撤销、结果失效但保留可看、可复制处理报告
-- 输出目录最近 5 个 Nebulens TIFF 结果；后台使用 libtiff 读取并生成 2400px 只读预览，不把历史文件误认为当前可导出结果
+- 主窗口内显示任务进度与取消；高级暗房支持 5 秒素材删除撤销，并可复制处理报告
+- 高级暗房的「输出」页最多列出 5 个历史 Nebulens TIFF；后台生成 2400 px 只读预览，不把历史文件当作当前可导出结果
 - HTTPS 客户端更新检查：遵循 Windows/macOS 系统代理配置，按平台读取版本清单，流式下载到系统“下载”目录，并在打开安装包前校验文件大小和 SHA-256
 
 ## 规划中
@@ -71,7 +71,10 @@
 ```
 Nebulens/
 ├── src/
-│   ├── main.cpp                 # 主入口、MainWindow 与后台处理编排
+│   ├── main.cpp                 # 应用入口与启动参数
+│   ├── app/
+│   │   ├── MainWindow.h/cpp      # 主窗口、共享项目状态与后台任务
+│   │   └── MainWindowOrder.cpp   # 冲印单、暗房切换与交付回执
 │   ├── core/
 │   │   ├── ImageBufferUtils.h/cpp     # RGB 校验、亮度提取、通道转换与天地融合
 │   │   ├── MinimumFilter.h/cpp        # 去雾暗通道的线性时间方形最小值滤波
@@ -96,6 +99,7 @@ Nebulens/
 │   │   ├── UpdateManifest.h/cpp       # 更新清单校验与语义版本比较
 │   │   └── PresetManager.h/cpp        # 内置预设与用户预设持久化
 │   ├── ui/
+│   │   ├── PrintOrderPanel.h/cpp      # 默认冲印单、印样与纸面光影
 │   │   ├── ProjectPanel.h/cpp         # 底部 Light 素材胶片带
 │   │   ├── PreviewPanel.h/cpp         # 中央画布：图像、滑动分屏与蒙版
 │   │   ├── ParamsPanel.h/cpp          # 右侧六阶段检查器
@@ -119,6 +123,8 @@ Nebulens/
 ├── translations/
 │   └── nebulens_en.ts            # 可审阅的英文翻译源
 ├── tests/
+│   ├── MainWindowFlowTests.cpp  # 冲印单、暗房与真实输出联动
+│   ├── OutputDeliveryTests.cpp # 输出冲突、写入与取消
 │   ├── LocalizationCatalogTests.cpp # 翻译完整性、占位符与 QM 加载
 │   ├── LocalizationDialogTests.cpp  # 中英文 Qt 文件对话框回归
 │   ├── CoreTests.cpp            # 核心算法与 TIFF ICC 回归测试
@@ -138,15 +144,20 @@ Nebulens/
 
 ## 界面工作流
 
-应用启动后直接进入暗房工作台。顶部 MODE 在“单张精修、银河星景、深空天体、天地分离、星轨合成、延时序列”之间切换，素材不会因切换场景丢失；左侧六阶段导航切换右侧检查器，中央显示源照片、结果、滑动分屏、蒙版和灰点采样，底部胶片带管理 Light。“开始处理”按当前门槛激活，处理中显示真实百分比并可取消，导出只在结果签名与当前参数完全一致时开放。
+![Nebulens 0.14.0 原生冲印单，右侧为可在暗底查看的黄石银河示例印样](docs/images/v014-print-order.webp)
 
-场景会改变素材门槛、参数基线和可见阶段。单张精修只要求 1 张 RAW，并隐藏校准、对齐和合成；银河和天地运行各自的堆栈流程。深空把胶片带素材视为 Light，Dark、Flat、Bias、Dark Flat 在校准阶段管理。星轨要求至少 3 张固定机位 RAW；延时以 3/5 帧窗口逐张输出，并隐藏没有用户设置的校准、对齐和调整阶段。堆栈算法下方持续显示适用场景、优势与代价，非 Kappa-Sigma 模式禁用 κ 控件。
+1. **成品**：打开 Nebulens 后选择「一张成片」「一张星轨」或「一组延时照片」，再点「核对素材」。未导入素材时，右侧显示示例印样，不是待处理照片。
+2. **素材**：用「导入文件」或「导入文件夹」加入 RAW，查看「选用素材」的张数。「一张成片」选「星景」时，1 张自动走单张精修，2 张起走银河星景堆栈；「天地分离」至少需要 2 张固定机位 RAW，「深空天体」至少需要 2 张 Light，并从「补齐校准」添加校准来源。星轨至少需要 3 张同尺寸的固定机位 RAW，延时至少需要 3 张 RAW，只交付编号图片，不生成视频。
+3. **保存**：点「交付设置」，确认「TIFF · 16 位」或「PNG · 8 位」和「保存到」，可用「选择目录…」更改。点「保存成品」即开始处理并写盘，不必再点一次导出。处理中可点「取消」；任务取消或失败不会显示本次成功回执，已完整写出的延时帧仍保留。
+4. **冲印回执**：完成后查看实际交付张数与「实际保存位置」。「打开目录」为单图打开文件所在目录，为延时打开本次序列子目录。已有成品不会被覆盖；同名单图另取文件名，延时每次新建子目录。「重新开单」清空当前项目，不删除已写出的文件。
 
-处理结束后可查看处理前、处理后，或在同一坐标系拖动 Before/After 分割线；切回某张 RAW 检查后，可用浮动工具条“结果”或 R 键返回。素材、正式结果和快速预览各自保留 fit/manual、缩放、滚动、分割位置与比较状态。参数、素材或场景改变后，上次成片保留可看但不可导出；新正式任务开始时才释放旧结果。
+点右侧印样的「查看大图」可在中性背景查看当前预览，再点「返回冲印单」。顶部「纸面光影」提供常驻的「柔光」（默认，14 秒一循环）、「流光」（9 秒一循环）和「静止」。检测到系统减弱动态效果时自动使用「静止」；光影不改变照片或导出文件。
 
-完成一次正式处理后，应用缓存最长边 2400 px 的线性 RGB16 堆栈和对应天地蒙版。收尾参数停止变化 400 ms 后启动快速预览，过期任务协作取消；上游参数变化要求完整重算。处理期间素材仍可浏览，但导入、删除、排除、参考帧、场景和参数编辑被锁定。状态栏显示真实进度和阶段，完成后输出页提供对齐、光度、筛选、蒙版与耗时报告，并扫描最近 5 个 TIFF 供后台只读预览。
+点「高级设置」，或从「视图 → 高级暗房」进入暗房。这里可以管理胶片带的素材和参考帧、检查蒙版、调整堆栈与收尾参数，并看处理前后或拖动同坐标分屏。切回某张 RAW 后，可用浮动工具条的「结果」或 `R` 回到会话结果。点工具带的「返回冲印单」，或用「视图 → 冲印单」回到同一项目，无需重新导入。
 
-界面结构、视觉变量和离屏截图方法见 [`docs/ui-workflow.md`](docs/ui-workflow.md)。
+支持快速预览的单图结果在改动收尾参数后会用有界缓存更新画面，不写盘；要按新参数保存，仍需正式处理。高级暗房的「输出」页可查处理报告和历史 TIFF；只有与当前素材和参数相符的正式单图结果可以再次导出。
+
+素材门槛、光影行为、取消后的文件去向及离屏检查见 [UI 工作流](docs/ui-workflow.md)。
 
 ## 客户端更新
 
@@ -158,7 +169,7 @@ Nebulens/
 
 ### 快速开始（macOS）
 
-使用提供的一键构建脚本：
+一键构建脚本会配置测试目标，因此除 CMake、Qt 6、LibRaw 和 libtiff 外，还需要 Python 3。
 
 ```bash
 # 增量编译（推荐日常开发）
@@ -178,14 +189,14 @@ Nebulens/
 
 ```bash
 # 1. 安装依赖（需 Homebrew）
-brew install cmake qt@6 libraw libtiff
+brew install cmake qt@6 libraw libtiff python
 
 # 2. 配置环境变量
 export PATH=/opt/homebrew/bin:$PATH
 export CMAKE_PREFIX_PATH=$(brew --prefix qt@6)
 
 # 3. 构建
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON -DBUILD_SAMPLE_TOOLS=ON
 cmake --build build --parallel
 ctest --test-dir build --output-on-failure
 
@@ -196,13 +207,15 @@ ctest --test-dir build --output-on-failure
 ### Windows
 
 ```powershell
-# 使用 vcpkg 安装 Qt6 和 LibRaw
-vcpkg install qtbase qtdeclarative libraw tiff
+# 确保 Python 3 在 PATH 上，且 VCPKG_ROOT 指向 vcpkg 目录
+vcpkg install qtbase:x64-windows libraw:x64-windows tiff:x64-windows
 
-mkdir build; cd build
-cmake .. -DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT\scripts\buildsystems\vcpkg.cmake -G "Visual Studio 17 2022"
-cmake --build . --config Release
-.\Release\StarProcessor.exe
+cmake -S . -B build -G "Visual Studio 17 2022" -A x64 `
+  "-DCMAKE_TOOLCHAIN_FILE=$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" `
+  -DBUILD_TESTING=ON -DBUILD_SAMPLE_TOOLS=ON
+cmake --build build --config Release --parallel
+ctest --test-dir build -C Release --output-on-failure
+.\build\Release\StarProcessor.exe
 ```
 
 从 v0.8.1 起，RAW 输入、用户蒙版和 TIFF/PNG 输出均保留 Qt Unicode
@@ -210,22 +223,29 @@ cmake --build . --config Release
 中文父目录和中文文件名不需要改名；不支持或损坏的 RAW 会明确显示“RAW
 读取失败”，不再一直停留在元数据加载状态。
 
+### 冲印单定向测试
+
+按上面的命令配置并构建后，可单独运行冲印单交互、无覆盖交付和延时 CLI 回归。测试使用生成的素材，不需要下载真实 RAW 样片：
+
+```bash
+ctest --test-dir build -C Release --output-on-failure -R '^(print_order_flow|print_order_panel|output_delivery|timelapse_cli)$'
+```
+
 > **注意**：当前处理链路为：RAW AHD 与裁剪高光混合 → 自动镜头横向色差校正 → 对齐 → 帧间光度匹配 → RGB 联动堆栈 → 改机色彩还原 → 线性降噪 → 去雾/自动拉伸 → 基础调色 → 地景细节 → 亮度锐化 → 星点去紫边 → Starless/Stars 缩星 → 导出。未启用的阶段会直接跳过。
 
 ## 客户端打包
 
-macOS 可在安装 Homebrew 依赖后生成自包含 DMG：
+macOS 可在安装上述 Homebrew 依赖后生成自包含 DMG：
 
 ```bash
 ./scripts/package-macos.sh
 ```
 
 输出位于 `dist/StarProcessor-v<version>-macOS-<arch>.dmg`，同时生成
-SHA-256 校验文件。脚本会运行 Release 构建、CTest、`macdeployqt`、包内
-依赖审计、ad-hoc 签名和启动截图检查。当前没有 Apple Developer 证书，
-因此本地发行包尚未公证，首次打开时可能需要在 Finder 中右键选择“打开”。
-打包脚本还会检测所有随包动态库的真实系统要求并写入应用信息；若 Homebrew
-依赖高于源码的 macOS 14 目标，最终 DMG 会以依赖的较高版本为准。
+SHA-256 校验文件。脚本会运行 Release 构建、打包配置中的 CTest、`macdeployqt`、包内
+依赖审计、ad-hoc 签名和运行时自检；有图形会话时再做启动截图检查。本地包未做 Developer ID
+签名和公证。若随包依赖的最低系统要求高于源码的 macOS 14 目标，脚本默认中止；本机兼容性
+构建的例外见[客户端打包](docs/release-packaging.md)。
 
 需要像普通应用一样安装到本机“应用程序”目录时，可运行：
 
@@ -326,14 +346,14 @@ Windows Server 2022 上使用 MSVC 原生构建。推送与 CMake 版本一致�
   --ground-method average --ground-detail-strength 40 \
   --denoise-strength 35 --stretch --star-reduce-strength 90
 
-# 从排序后的第 7 张开始取 14 张，复现目录中间的连续拍摄段
+# 按路径字典序跳过前 6 张再取 14 张，复现同一选片段
 ./build/StarProcessorPipelineRunner \
   --input ../star-photograph-tool-samples/star-raw-2 \
   --output build/normal-galaxy-segment --start-index 6 --limit 14 \
   --method kappa-sigma --sky-ground --denoise-strength 35 \
   --stretch --star-reduce-strength 70
 
-# 星空延时：每张输入 RAW 对应一张输出，5 帧窗口、动态保护并固定地景
+# 星空延时：按路径选出前 15 张，再在片段内排序并逐张输出
 ./build/StarProcessorPipelineRunner \
   --input ../star-photograph-tool-samples/star-raw \
   --output build/timelapse-output --limit 15 --timelapse \
@@ -349,9 +369,17 @@ Windows Server 2022 上使用 MSVC 原生构建。推送与 CMake 版本一致�
 
 命令行回归工具与 GUI 使用同一套校准组合：`--dark-dir`、`--flat-dir`、`--bias-dir`、`--dark-flat-dir` 接收 RAW 目录；`--master-dark`、`--master-flat`、`--master-bias`、`--master-dark-flat` 接收 `.spmaster`，同一角色的 RAW 组与 Master 不可同时指定。`--save-generated-masters` 会把本次由 RAW 生成并通过完整校验的 Master 原子提交到输出目录。校准素材必须与 Light 来自同一机身、ISO、传感器有效区和 Bayer 布局；Dark 还必须匹配 Light 曝光，Dark Flat 必须匹配 Flat 曝光，Bias 必须为短曝光。正式解包 CFA 前会聚合报告重复素材及相机/尺寸/ISO/曝光不匹配；像素相关的 Flat 欠曝、接近饱和和 CFA 布局仍在正式校准阶段继续检查。
 
-工具会生成完整分辨率 TIFF、固定全范围的 `result-preview.png` 和 `pipeline-report.json`。报告分别记录全流程耗时、纯堆栈耗时、每帧质量评分、结构化跳帧原因、光度模型、自动裁切偏移、输出直方图和画质选项；镜头横向色差部分还会记录红蓝通道的测量星点、内点、径向尺度、边缘位移及径向/切向残差。`--no-auto-lens-ca` 可关闭该自动步骤，用于同一素材的 A/B 检查。当整组素材的中位星点椭率达到 0.22 时，报告还会写入 `starShapeWarning`，提示检查单帧曝光拖线或镜头像差。`--start-index` 先跳过指定数量的已排序 RAW，再由 `--limit` 限制数量，`--reference-index` 始终相对于最终选中的片段。`--restore-modified-camera-color` 在线性 RGB 阶段自动估计并校正 BCF/天文改机的通道响应，`--modified-camera-color-strength` 接受 `0–100`，`--modified-camera-gray-point x,y` 以归一化坐标改用手动稳健邻域；报告会记录模式、强度、中性样本、RGB 增益和高光截断数量。普通相机不应默认启用。天地分离模式还会保存本次实际使用的 `sky-ground-mask.png`，并记录蒙版来源与天空占比，便于检查自动检测是否可靠；`--sky-ground-mask /path/to/mask.png` 可改用白色天空、黑色地景的用户蒙版。`--ground-method` 接受 `average`、`reference` 或 `median`，默认 `average`；`--ground-detail-strength` 接受 `0–70`，默认 40。天地模式下，多尺度降噪和缩星只作用于天空，地景由原坐标多帧合成及可选细节恢复处理。延时模式为每张输入生成一张同名序号输出；`--timelapse-window` 接受 `3` 或 `5`，`--timelapse-strength` 和 `--timelapse-motion-protection` 接受 `0–100`，后者默认为 75；`--timelapse-no-ground` 可关闭固定地景保护。延时管线会根据天空区域估计整段序列的亮度与色偏曲线，并以受限的 5 帧中值平滑抑制孤立闪烁，不会强行拉平日出、月升等连续曝光趋势。`--reference-index -1` 默认自动选择参考帧；`--no-quality-rejection` 保留严重质量离群帧，但仍执行自动参考帧选择。帧间光度匹配默认开启；`--no-photometric-normalization` 可关闭帧间匹配和延时防闪烁，用于 A/B 检查。`--denoise-strength` 接受 `0–70`；`--stretch` 先进行背景校正，再根据背景中值和高光端自动求解 RGB 联动 Arcsinh 曲线，亮度高光继续使用剩余输出空间，高饱和像素在 90% 以上通过保色与最低亮度约束的混合肩部收敛到 99.5%，避免直接夹到 65535；`--dehaze-strength` 和 `--star-reduce-strength` 接受 `0–100`。处理期间，完整帧写入任务专属系统临时目录；任务正常、失败或取消后都会自动清理临时缓存。
+工具会生成完整分辨率 TIFF（延时为一个 TIFF 子目录）、`result-preview.png` 和 `pipeline-report.json`。启用单图收尾时预览使用固定全范围；延时预览使用自动范围。报告分别记录全流程耗时、纯堆栈耗时、每帧质量评分、结构化跳帧原因、光度模型、自动裁切偏移、输出直方图和画质选项；镜头横向色差部分还会记录红蓝通道的测量星点、内点、径向尺度、边缘位移及径向/切向残差。`--no-auto-lens-ca` 可关闭该自动步骤，用于同一素材的 A/B 检查。当整组素材的中位星点椭率达到 0.22 时，报告还会写入 `starShapeWarning`，提示检查单帧曝光拖线或镜头像差。
 
-基础调色参数与 GUI 使用同一引擎：`--temperature`、`--tint`、`--contrast`、`--highlights`、`--shadows`、`--whites`、`--blacks`、`--vibrance` 和 `--saturation` 接受 `-100..100`，`--exposure` 接受 `-5.0..5.0 EV`，`--sharpening` 接受 `0..100`。`--star-defringe-strength` 可在不缩星时单独校正星翼色边，`--star-reduce-strength` 继续控制星点尺寸；两者接受 `0..100`。这些参数及结果统计会写入 `pipeline-report.json`，便于同一 RAW 的 A/B 对照。延时逐帧输出当前不支持这组收尾参数。
+命令行先递归收集 RAW，按完整路径做不区分大小写的字典排序。`--start-index` 先跳过指定张数，`--limit` 再限制张数（`0` 表示不限）。延时和星轨只在选片后重排选中的片段：拍摄时间齐全时按时间升序，同秒按自然文件名升序；任一入选帧缺时间时，整段改按自然文件名升序。
+
+堆栈的 `--reference-index` 是选中片段内从 0 开始的索引；默认为 `-1`，由质量评估自动选参考。`--no-quality-rejection` 保留严重质量离群帧，但仍执行自动参考帧选择。延时的预览和光度基准固定使用排序后的中间帧（偶数张时取靠后的一张），所以 `--reference-index` 只能省略或设为 `-1`；星轨报告中的参考固定为排序后的首帧。报告用 `requestedReferenceIndex` 记录 CLI 请求，用 `referenceIndex` 和 `frameQuality[].index` 记录 worker 最终顺序中的零基索引，`referencePath` 和 `frameQuality[].sourcePath` 则能区分同名素材。已写出的延时帧才有从 1 开始的 `frameQuality[].outputNumber`，对应 `outputFile` 子目录内的 `0001_<源文件名去扩展名>_denoised.tiff` 等文件，编号至少补足四位。
+
+延时支持 `--timelapse-window`（`3` 或 `5`）、`--timelapse-strength` 和 `--timelapse-motion-protection`（均为 `0–100`，动态保护默认 75）。`--timelapse-no-ground` 可关闭固定地景保护，开启地景保护时可用 `--sky-ground-feather` 调整自动蒙版羽化。管线会根据天空区域估计整段序列的亮度与色偏曲线，并以受限的 5 帧中值平滑抑制孤立闪烁，不会强行拉平日出、月升等连续曝光趋势。帧间光度匹配默认开启；`--no-photometric-normalization` 可关闭帧间匹配和延时防闪烁，用于 A/B 检查。延时不接受单图收尾、普通堆栈或校准选项（包括显式传入的零值和默认值）；例如 `--denoise-strength`、`--dehaze-strength`、`--stretch`、改机色彩还原、基础调色与锐化、星点去紫边和缩星。命令会列出不支持的参数并返回退出码 `2`。
+
+`--restore-modified-camera-color` 在线性 RGB 阶段自动估计并校正 BCF/天文改机的通道响应，`--modified-camera-color-strength` 接受 `0–100`，`--modified-camera-gray-point x,y` 以归一化坐标改用手动稳健邻域；报告会记录模式、强度、中性样本、RGB 增益和高光截断数量。普通相机不应默认启用。天地分离模式还会保存本次实际使用的 `sky-ground-mask.png`，并记录蒙版来源与天空占比，便于检查自动检测是否可靠；`--sky-ground-mask /path/to/mask.png` 可改用白色天空、黑色地景的用户蒙版。`--ground-method` 接受 `average`、`reference` 或 `median`，默认 `average`；`--ground-detail-strength` 接受 `0–70`，默认 40。天地模式下，多尺度降噪和缩星只作用于天空，地景由原坐标多帧合成及可选细节恢复处理。`--denoise-strength` 接受 `0–70`；`--stretch` 先进行背景校正，再根据背景中值和高光端自动求解 RGB 联动 Arcsinh 曲线，亮度高光继续使用剩余输出空间，高饱和像素在 90% 以上通过保色与最低亮度约束的混合肩部收敛到 99.5%，避免直接夹到 65535；`--dehaze-strength` 和 `--star-reduce-strength` 接受 `0–100`。处理期间，完整帧写入任务专属系统临时目录；任务正常、失败或取消后都会自动清理临时缓存。
+
+基础调色参数与 GUI 使用同一引擎：`--temperature`、`--tint`、`--contrast`、`--highlights`、`--shadows`、`--whites`、`--blacks`、`--vibrance` 和 `--saturation` 接受 `-100..100`，`--exposure` 接受 `-5.0..5.0 EV`，`--sharpening` 接受 `0..100`。`--star-defringe-strength` 可在不缩星时单独校正星翼色边，`--star-reduce-strength` 继续控制星点尺寸；两者接受 `0..100`。这些参数及结果统计会写入 `pipeline-report.json`，便于同一 RAW 的 A/B 对照。
 
 `--memory-budget-mib` 可为测试或受控运行设置更低的内存上限。该值只能收紧平台安全预算，不能绕过实时内存门禁；传 `0` 或省略参数时使用自动预算。
 
@@ -365,7 +393,7 @@ Windows Server 2022 上使用 MSVC 原生构建。推送与 CMake 版本一致�
 - **结果预览**：16-bit 处理结果会映射为最长边不超过 4096 px 的 8-bit 显示缓存；处理前和参数快速预览最长边不超过 2400 px。快速预览复用正式收尾算法，但缩放后星点与噪声的像素尺度仍可能和完整分辨率略有差异；TIFF/PNG 导出始终使用重新处理后的完整分辨率结果
 - **场景与预设**：银河广角和深空天体保留可编辑预设；单张精修、星轨合成和延时序列使用各自的专用管线，序列工具不显示无关的普通堆栈预设
 - **星轨合成**：当前面向固定机位、同尺寸且按拍摄顺序排列的 RAW。Lighten 会保留飞机、卫星和车灯等亮轨；Comet 只衰减高于稳健背景的信号，并以首帧的低频背景作为合成基准。跨越月升、日出或剧烈光污染变化的长序列建议先分段合成。尚未提供断点修补和用户地景蒙版，长间隔或掉帧产生的空隙会原样保留
-- **延时序列**：当前只输出 TIFF/PNG 图片序列，不编码视频；处理前优先按 RAW 拍摄时间升序排列，时间缺失或相同时按文件名自然升序兜底，导出的补零编号可直接按文件名顺序导入剪映等编辑器。序列边缘会使用实际可用的较小窗口。元数据、RAW 解码、邻帧对齐和光度预分析均提供单调进度，窗口处理与逐行导出会响应取消。同一素材即使被多个滑动窗口复用，光度统计仍只按源帧计一次。动态保护可以减少云层、草木和灯光拖影，但快速大范围变化仍应降低时域强度。固定地景依赖自动地平线检测，复杂前景检测失败时会退回纯天空处理；取消任务时已经导出的图片会保留，尚不支持断点续跑
+- **延时序列**：当前只输出 TIFF/PNG 图片序列，不编码视频；整段拍摄时间齐全时按时间升序、同秒按自然文件名升序，缺少任一帧的时间时整段按自然文件名升序。导出的补零编号可直接按文件名顺序导入剪映等编辑器。序列边缘会使用实际可用的较小窗口。元数据、RAW 解码、邻帧对齐和光度预分析均提供单调进度，窗口处理与逐行导出会响应取消。同一素材即使被多个滑动窗口复用，光度统计仍只按源帧计一次。动态保护可以减少云层、草木和灯光拖影，但快速大范围变化仍应降低时域强度。固定地景依赖自动地平线检测，复杂前景检测失败时会退回纯天空处理；取消任务时已经导出的图片会保留，尚不支持断点续跑
 - **天地检测**：自动模式在相机内嵌预览上寻找连续地平线，并在比例异常或预览不可用时回退线性图；漏检地景可用橙色粗笔迹作为地景种子，松手后自动沿颜色/亮度梯度贴边。复杂树冠孔洞、透明枝叶或无明确边缘时仍可能需要用户蒙版
 - **地景清晰度**：默认地景 Average 已提供多帧降噪，后续空间降噪和缩星不会再处理地景；默认 40 强度分别恢复小尺度纹理和中尺度清晰度，中尺度权重从地平线向近处前景递减。风吹草叶、人物移动、单帧失焦、景深不足或明显机位移动仍应改用 Median、参考单帧或重新拍摄
 - **自动优化**：背景校正使用低分辨率鲁棒网格拟合加性光污染与色偏，色度校正为连续有符号偏移，亮度校正使用平滑肩部后再进入 RGB 联动 Arcsinh 拉伸；它避免旧版逐通道硬阈值在强拉伸后显出环状色阶。DCP 暗通道使用与旧方形邻域逐像素等价的可分离线性最小值滤波，并复用 Guided Filter 工作平面以控制大图峰值内存。去雾只适合明显薄雾，银河暗尘丰富时应关闭

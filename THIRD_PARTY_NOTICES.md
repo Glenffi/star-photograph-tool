@@ -22,3 +22,10 @@ available from:
 Additional transitive runtime libraries may be listed in the package directory.
 Their copyright and license terms remain with their respective authors. Nothing
 in the StarProcessor MIT License replaces or limits those terms.
+
+## Bundled Sample Proof
+
+The print order's example proof, `resources/print-order/lake-complete.jpg`,
+shows the Milky Way reflected in a lake at Yellowstone National Park. Credit:
+Neal Herbert / NPS. The [NPS source record](https://npgallery.nps.gov/AssetDetail/2ef91b9f-ad6d-4c60-9a57-d2386724aeb7)
+identifies the photograph as public domain.

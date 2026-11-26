@@ -80,7 +80,7 @@ jobs:
             -DVCPKG_TARGET_TRIPLET="$env:VCPKG_DEFAULT_TRIPLET" `
             -DVCPKG_INSTALLED_DIR="$env:VCPKG_INSTALLED_DIR" `
             -DBUILD_TESTING=ON `
-            -DBUILD_SAMPLE_TOOLS=OFF
+            -DBUILD_SAMPLE_TOOLS=ON
           if ($LASTEXITCODE -ne 0) {
             throw "CMake configuration failed with exit code $LASTEXITCODE"
           }
@@ -144,11 +144,16 @@ jobs:
             --release `
             --no-translations `
             --compiler-runtime `
+            --include-plugins qjpeg `
             --dir $packageRoot `
             $exe
           if ($LASTEXITCODE -ne 0) {
             throw "windeployqt failed with exit code $LASTEXITCODE"
           }
+
+          # windeployqt puts plugin directories beside the executable.
+          @("[Paths]", "Prefix = .", "Plugins = .", "Translations = translations") |
+            Set-Content -LiteralPath (Join-Path $packageRoot "qt.conf") -Encoding ascii
 
           $qtRoot = Split-Path (Split-Path $windeployqt -Parent) -Parent
           $qtBaseChinese = Join-Path $qtRoot "translations\qtbase_zh_CN.qm"
@@ -179,18 +184,28 @@ jobs:
             throw "Qt Windows platform plugin was not deployed"
           }
 
-          Push-Location $packageRoot
-          try {
-            & $exe --runtime-check
-            if ($LASTEXITCODE -ne 0) {
-              throw "Packaged executable runtime check failed with exit code $LASTEXITCODE"
+      - name: Smoke-test packaged Windows runtime
+        shell: pwsh
+        timeout-minutes: 3
+        run: |
+          $packageRoot = Join-Path $env:GITHUB_WORKSPACE "dist\${{ steps.package.outputs.name }}"
+          $exe = Join-Path $packageRoot "StarProcessor.exe"
+
+          # Do not let the Qt SDK or vcpkg satisfy missing package dependencies.
+          $env:PATH = "$env:SystemRoot\System32;$env:SystemRoot"
+          Get-ChildItem Env: | Where-Object { $_.Name -match '^(QT_|QML)' } |
+            ForEach-Object { Remove-Item -LiteralPath "Env:$($_.Name)" }
+          $env:QT_QPA_PLATFORM = "windows"
+
+          foreach ($check in @("--runtime-check", "--platform-runtime-check")) {
+            $log = Join-Path $env:RUNNER_TEMP "StarProcessor$check"
+            $process = Start-Process -FilePath $exe -WorkingDirectory $packageRoot `
+              -ArgumentList $check -Wait -PassThru `
+              -RedirectStandardOutput "$log.stdout" -RedirectStandardError "$log.stderr"
+            Get-Content -LiteralPath "$log.stdout", "$log.stderr"
+            if ($process.ExitCode -ne 0) {
+              throw "Packaged StarProcessor $check failed with exit code $($process.ExitCode)"
             }
-            & $exe --platform-runtime-check
-            if ($LASTEXITCODE -ne 0) {
-              throw "Qt platform runtime check failed with exit code $LASTEXITCODE"
-            }
-          } finally {
-            Pop-Location
           }
 
       - name: Create ZIP archive

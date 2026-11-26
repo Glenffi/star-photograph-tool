@@ -23,7 +23,7 @@ env:
 jobs:
   package:
     name: Build macOS 14 arm64 package
-    runs-on: macos-14
+    runs-on: macos-15
     timeout-minutes: 120
 
     steps:
@@ -83,6 +83,7 @@ jobs:
           MACOSX_DEPLOYMENT_TARGET: "14.0"
           BUILD_DIR: ${{ github.workspace }}/build/macos-release
           DIST_DIR: ${{ github.workspace }}/dist
+          # Skip only the Cocoa screenshot, not the headless bundle checks.
           SKIP_LAUNCH_TEST: "1"
         run: |
           set -euo pipefail
@@ -110,7 +111,8 @@ jobs:
           test -n "${app}"
           test -f "${app}/Contents/Frameworks/liblcms2.2.dylib"
           version="$(sed -nE 's/project\(StarProcessor VERSION ([0-9.]+).*/\1/p' CMakeLists.txt)"
-          "${app}/Contents/MacOS/StarProcessor" --runtime-check \
+          env -i PATH=/usr/bin:/bin \
+            "${app}/Contents/MacOS/StarProcessor" --runtime-check \
             | grep -F "StarProcessor ${version}"
 
       - name: Read package metadata

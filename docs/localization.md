@@ -26,20 +26,36 @@ QCoreApplication::translate("Nebulens", "选择 RAW 文件")
 ```
 
 品牌名、RAW、RGB、TIFF、Light、Dark、Flat、Bias 和算法专有名词可以保留英文；
-其他标签不应使用未纳入目录的裸字符串。添加或修改文本后运行：
+其他用户可见的标签、提示和后台错误都应纳入目录。添加或移动界面文本后，先从
+`src` 提取到临时目录，避免把测试字符串或无关的行号变化写进正式 TS：
 
 ```bash
-$(brew --prefix qt@6)/bin/lupdate src \
-  -ts translations/nebulens_en.ts \
-  -source-language zh_CN -target-language en_US -no-obsolete
-
-$(brew --prefix qt@6)/bin/lrelease translations/nebulens_en.ts \
-  -qm resources/i18n/nebulens_en.qm
+qt_bin="$(brew --prefix qt@6)/bin"
+extract_dir="$(mktemp -d)"
+"$qt_bin/lupdate" src -ts "$extract_dir/nebulens_en.ts" \
+  -source-language zh_CN -target-language en_US -no-obsolete -locations absolute
 ```
 
-翻译必须保留 `%1`、`%2`、`%n` 等占位符及必要的 HTML 标签。CTest 的
-`localization_catalog` 会拒绝未完成、空白、残留中文或占位符不一致的英文翻译；
-`localization_dialogs` 会实际切换中英文并检查 Qt 文件对话框标准按钮。
+按翻译上下文、原文和消歧注释（如有）对照正式目录，只合入缺少的消息或有意修改的译文。
+原文的空格和换行是翻译键的一部分；相邻 C++ 字面量应使用提取后的完整原文。
+版本号等可变内容通过占位符插入，不要把版本宏拼进翻译键。
+搬动主窗口代码不会改变 `Nebulens` 上下文，不需要刷新既有消息的文件和行号。
+保留兼容条目，例如旧 `Toolbar` 上下文的“选择”和历史路径 `/星炼/Output`。
+
+翻译须保留 `%1`、`%2`、`%n` 等占位符及必要的 HTML 标签。修改完成后重新生成
+应用实际加载的 QM，并运行本地化测试：
+
+```bash
+"$qt_bin/lrelease" translations/nebulens_en.ts \
+  -qm resources/i18n/nebulens_en.qm
+cmake --build build --target NebulensLocalizationTests NebulensLocalizationDialogTests
+ctest --test-dir build --output-on-failure -R '^localization_(catalog|dialogs)$'
+```
+
+`localization_catalog` 会拒绝未完成、空白、残留中文（历史路径除外）或占位符
+不一致的译文，并逐条检查 QM 与 TS 一致。回归样例覆盖冲印三步、回执和目录、纸面
+光影及磁盘空间和裁切错误。`localization_dialogs` 会切换语言并检查 Qt 文件对话框
+的标题和标准按钮。
 
 ## 视觉检查
 
@@ -52,4 +68,6 @@ $(brew --prefix qt@6)/bin/lrelease translations/nebulens_en.ts \
 ```
 
 对应中文参数为 `--language=zh_CN`。两种语言都应检查 920×540 最小窗口与
-1440×900 标准窗口，重点观察顶部品牌区、工作流名称、检查器标题、参数标签和数值列。
+1440×900 标准窗口。去掉 `--workflow=adjust` 从冲印单开始，依次检查三步菜单、
+冲印回执和实际保存位置、纸面光影选项与减弱动态效果提示，以及失败时的重试文案。
+进入高级工作台后，重点观察工作流名称、检查器标题、参数标签和数值列。

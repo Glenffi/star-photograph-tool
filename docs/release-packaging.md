@@ -13,7 +13,7 @@
 
 ## macOS
 
-依赖：CMake、Qt 6、LibRaw 和 libtiff。使用 Homebrew 安装后可生成本机测试包：
+依赖：CMake、Qt 6、LibRaw、libtiff 和供回归测试使用的 Python 3。使用 Homebrew 安装后可生成本机测试包：
 
 ```bash
 ./scripts/package-macos.sh
@@ -22,7 +22,7 @@
 脚本依次执行：
 
 1. 以 Release、macOS 14 deployment target 配置并编译。
-2. 运行全部 CTest。
+2. 运行本次打包配置启用的 CTest，包括冲印单流程和无覆盖交付。
 3. 用 `macdeployqt` 复制 Qt、LibRaw 和 libtiff，仅保留 Cocoa 平台、macOS 样式与 JPEG 三个实际使用的 Qt 插件；另复制 `qtbase_zh_CN.qm`，让非原生 Qt 文件对话框跟随应用语言。
 4. 递归扫描所有 Mach-O 的 `@rpath` 依赖，从 vcpkg/Homebrew 运行库目录补齐非 Qt 传递依赖；随后逐项解析 `@rpath`、`@loader_path` 和 `@executable_path`，禁止缺失文件及残留 Homebrew 或用户目录依赖。
 5. 扫描 bundle 内全部 Mach-O，读取依赖真实的最低系统版本并回写 `Info.plist`。
@@ -32,7 +32,7 @@
 
 设置 `SKIP_LAUNCH_TEST=1` 只会跳过需要图形会话的截图检查，不会跳过 dyld 运行时自检；设置 `SKIP_DMG_CREATE=1` 可只生成完成部署和签名的 staging 目录。当本机依赖高于目标系统版本时脚本默认中止；`ALLOW_HIGHER_DEPLOYMENT_TARGET=1` 只允许用于本地兼容性验证，不得用于公开发布。当前包没有 Apple Developer ID 签名和 notarization；这不影响本机测试，但不等同于面向公众的正式签名发行。
 
-> 源码目标是 macOS 14，但客户端最终兼容范围由打包机上的预编译依赖共同决定。脚本会取 bundle 内所有 Mach-O 的最高最低版本；默认要求它不高于目标版本，否则立即失败。显式允许本地兼容性构建时，真实要求会写入 `LSMinimumSystemVersion` 和 `BUILD-INFO.txt`。正式 arm64 包由 `.github/workflows/macos-package.yml` 在 macOS 14 runner 上构建，Qt 固定为 6.8.3，LibRaw/libtiff 使用项目内 `arm64-osx-dynamic` vcpkg triplet 从源码构建；只要任一 bundle 依赖高于 14.0，工作流就会失败而不是发布错误标记的包。
+> 源码目标是 macOS 14，但客户端最终兼容范围由打包机上的预编译依赖共同决定。脚本会取 bundle 内所有 Mach-O 的最高最低版本；默认要求它不高于目标版本，否则立即失败。显式允许本地兼容性构建时，真实要求会写入 `LSMinimumSystemVersion` 和 `BUILD-INFO.txt`。正式 arm64 包由 `.github/workflows/macos-package.yml` 在 macOS 15 arm64 runner 上以 macOS 14.0 为目标构建，Qt 固定为 6.8.3，LibRaw/libtiff 使用项目内 `arm64-osx-dynamic` vcpkg triplet 从源码构建；只要任一 bundle 依赖高于 14.0，工作流就会失败而不是发布错误标记的包。
 
 ## Windows
 
@@ -48,13 +48,19 @@
 
 Windows 包必须由 Windows runner 验证，macOS 上不使用 MinGW 交叉编译替代 MSVC 发行结果。
 
+## 发布前核对
+
+- macOS 和 Windows 的打包配置均启用 `BUILD_TESTING`，关闭 `BUILD_SAMPLE_TOOLS`，因此不会运行依赖样片工具的 `timelapse_cli`。发版前另用 `-DBUILD_SAMPLE_TOOLS=ON` 构建，按 [README 的冲印单定向测试](../README.md#冲印单定向测试) 运行 `print_order_flow`、`output_delivery` 和 `timelapse_cli`。
+- 在各平台启动打包后的应用，确认默认进入冲印单。用 RAW 保存一张成片和一组延时照片，核对回执中的张数、实际路径和「打开目录」的去向。核对取消不显示成功回执，并检查「静止」、系统减弱动态效果和高级暗房的返回入口。离屏回归不能代替这一步。
+
 ## 发布标签
 
 确认主分支干净、Release 构建通过后：
 
 ```bash
-git tag -a v0.13.0 -m "发布：Nebulens v0.13.0"
-git push origin v0.9.1
+tag=v0.14.0
+git tag -a "$tag" -m "发布：Nebulens $tag" &&
+  git push origin "refs/tags/$tag"
 ```
 
 标签推送后查看 GitHub Actions 的 `Package Windows` 与 `Package macOS` 任务。成功后 Release 页面会同时出现 Windows ZIP、macOS DMG 和校验文件。当前 macOS 包仍为 ad-hoc 签名；获得 Apple Developer 证书后再接入 Developer ID 签名与公证。
