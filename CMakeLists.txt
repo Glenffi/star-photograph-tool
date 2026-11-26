@@ -128,9 +128,6 @@ set(APP_SOURCES
     src/app/MainWindow.cpp
     src/app/MainWindowOrder.cpp
     src/ui/PrintOrderPanel.cpp
-    resources/print-order.qrc
-    resources/branding.qrc
-    resources/translations.qrc
     src/i18n/AppLocalization.cpp
     src/core/ThumbnailGenerator.cpp
     src/ui/ProjectPanel.cpp
@@ -266,18 +263,24 @@ target_compile_definitions(NebulensDesktop PUBLIC
     PRIVATE
     STARPROCESSOR_UPDATE_MANIFEST_URL="https://di.nexusgen.net/starprocessor/update.json")
 
-add_executable(${PROJECT_NAME} src/main.cpp ${APP_BUNDLE_FILES})
+# Visual Studio 多配置下，AUTORCC 的 .obj 路径不能由对象库的消费者推断。
+# 让最终程序直接拥有资源，应用和离屏测试都能注册同一套图像与翻译。
+set(DESKTOP_RESOURCES
+    resources/print-order.qrc
+    resources/branding.qrc
+    resources/translations.qrc)
+add_executable(${PROJECT_NAME} src/main.cpp ${APP_BUNDLE_FILES} ${DESKTOP_RESOURCES})
 target_link_libraries(${PROJECT_NAME} PRIVATE NebulensDesktop)
 
 if(BUILD_TESTING)
     find_package(Python3 REQUIRED COMPONENTS Interpreter)
-    add_executable(NebulensWindowTests tests/MainWindowFlowTests.cpp)
+    add_executable(NebulensWindowTests tests/MainWindowFlowTests.cpp ${DESKTOP_RESOURCES})
     target_link_libraries(NebulensWindowTests PRIVATE NebulensDesktop)
     add_test(NAME print_order_flow
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/WindowFlowTests.py
                 $<TARGET_FILE:NebulensWindowTests>)
     set_tests_properties(print_order_flow PROPERTIES TIMEOUT 150)
-    add_executable(NebulensPrintOrderPanelTests tests/PrintOrderPanelTests.cpp)
+    add_executable(NebulensPrintOrderPanelTests tests/PrintOrderPanelTests.cpp ${DESKTOP_RESOURCES})
     target_link_libraries(NebulensPrintOrderPanelTests PRIVATE NebulensDesktop)
     add_test(NAME print_order_panel COMMAND NebulensPrintOrderPanelTests)
     set_tests_properties(print_order_panel PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")

@@ -259,11 +259,9 @@ SHA-256 校验文件。脚本会运行 Release 构建、打包配置中的 CTest
 Bundle ID 被系统注册多次。它是本机开发安装流程，不代替 Developer ID
 签名与 Apple 公证。
 
-Windows x64 客户端由 `.github/workflows/windows-package.yml` 在
-Windows Server 2022 上使用 MSVC 原生构建。推送与 CMake 版本一致的
-`v*` 标签后，Windows 与 macOS 工作流会分别运行测试、封装依赖并把 ZIP/DMG
-及 SHA-256 文件发布到 GitHub Releases。macOS 正式包在 macOS 14 arm64 runner
-上生成，构建会拒绝任何实际最低系统版本高于 14.0 的依赖。
+日常编译、测试和打包使用本机，不占 GitHub Actions 额度。Windows x64 使用 Windows
+上的 MSVC 原生构建。推送代码、创建 PR 或推送 `v*` 标签都不会触发本项目的打包工作流；
+只有明确要求在线构建时才手动启用并运行。macOS 公开包会拒绝实际最低系统版本高于 14.0 的依赖。
 
 客户端打包流程见 [`docs/release-packaging.md`](docs/release-packaging.md)，更新服务器发布流程见 [`docs/update-distribution.md`](docs/update-distribution.md)。
 双语文本规范、翻译更新命令和视觉检查方法见 [`docs/localization.md`](docs/localization.md)。
