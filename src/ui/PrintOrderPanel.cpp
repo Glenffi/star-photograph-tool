@@ -32,7 +32,6 @@
 #include <QStyleOptionFrame>
 #include <QStylePainter>
 #include <QTimer>
-#include <QToolButton>
 #include <QVariantAnimation>
 #include <QVBoxLayout>
 #include <QWindow>
@@ -396,6 +395,48 @@ private:
     bool m_animate = false;
 };
 
+class FilmFrameButton final : public QAbstractButton {
+public:
+    FilmFrameButton(int ordinal, const QImage& photo, QWidget* parent)
+        : QAbstractButton(parent), m_thumbnail(QPixmap::fromImage(
+              photo.scaled(120, 80, Qt::KeepAspectRatio, Qt::SmoothTransformation))) {
+        setText(QStringLiteral("%1").arg(ordinal, 2, 10, QLatin1Char('0')));
+        setCheckable(true);
+        setAutoExclusive(true);
+        setFocusPolicy(Qt::StrongFocus);
+        setCursor(Qt::PointingHandCursor);
+        setFixedSize(49, 42);
+    }
+protected:
+    void paintEvent(QPaintEvent*) override {
+        QPainter painter(this);
+        painter.fillRect(rect(), QColor(StyleTokens::Colors::kBackgroundRaised));
+        painter.setPen(QPen(QColor(isChecked() || hasFocus() ? StyleTokens::Colors::kAccent
+                                                              : StyleTokens::Colors::kLineSubtle),
+                            isChecked() || hasFocus() ? 2 : 1));
+        painter.drawRect(rect().adjusted(1, 1, -2, -2));
+        QFont indexFont = font();
+        indexFont.setPixelSize(11);
+        indexFont.setWeight(isChecked() ? QFont::Bold : QFont::Normal);
+        painter.setFont(indexFont);
+        // Reserve the caption in logical pixels before fitting the image. Native
+        // macOS tool buttons otherwise truncate TextUnderIcon to their toolbar height.
+        const int line = painter.fontMetrics().height();
+        const QRect index(3, height() - 3 - line, width()-6, line);
+        const QRect well(4, 3, width()-8, index.top()-4);
+        if (!m_thumbnail.isNull()) {
+            QRect thumb(QPoint(), m_thumbnail.size().scaled(well.size(), Qt::KeepAspectRatio));
+            thumb.moveCenter(well.center());
+            painter.setRenderHint(QPainter::SmoothPixmapTransform);
+            painter.drawPixmap(thumb, m_thumbnail);
+        }
+        painter.setPen(QColor(StyleTokens::Colors::kTextPrimary));
+        painter.drawText(index, Qt::AlignCenter | Qt::TextSingleLine, text());
+    }
+private:
+    QPixmap m_thumbnail;
+};
+
 class ProofPrint final : public QAbstractButton {
 public:
     explicit ProofPrint(QWidget* parent) : QAbstractButton(parent) {
@@ -651,14 +692,6 @@ constexpr auto kStyle = R"qss(
     color: #30382d; background: #f9f4e7; border: 1px solid #938b75;
     selection-color: #223b31; selection-background-color: #dce1d2;
 }
-#printOrderPanel QToolButton[frameThumbnail="true"] {
-    padding: 0; margin: 0; border: 1px solid #a89b80; background: #f3eddd;
-    color: #3b493e; font-size: 10px;
-}
-#printOrderPanel QToolButton[frameThumbnail="true"]:checked {
-    border: 2px solid #315747; background: #eff1e2;
-}
-#printOrderPanel QToolButton[frameThumbnail="true"]:focus { border: 2px solid #936e37; }
 #printOrderPanel QDoubleSpinBox { color: #30382d; background: #f3edde; border: 1px solid #938b75; }
 #printOrderPanel QProgressBar {
     color: transparent; background: #d0c6ae; border: 0; min-height: 5px; max-height: 5px;
@@ -803,7 +836,7 @@ struct PrintOrderPanel::Ui : QObject {
     bool productSampleChosen = false;
     QWidget* sampleTools = nullptr;
     QWidget* frameStrip = nullptr;
-    QList<QToolButton*> frameButtons;
+    QList<QAbstractButton*> frameButtons;
     QPushButton* sampleToggle = nullptr;
     QImage proofImage;
     QString proofCaption;
@@ -1040,22 +1073,11 @@ struct PrintOrderPanel::Ui : QObject {
         strip->setSpacing(4);
         const int frames = ProductProofSamples::count(ProcessingScene::Timelapse);
         for (int i = 0; i < frames; ++i) {
-            auto* button = new QToolButton(frameStrip);
+            auto* button = new FilmFrameButton(i+1, ProductProofSamples::frame(ProcessingScene::Timelapse, i), frameStrip);
             button->setObjectName(QStringLiteral("printOrderSampleFrame%1").arg(i+1));
-            button->setProperty("frameThumbnail", true);
-            button->setCheckable(true);
-            button->setAutoExclusive(true);
-            button->setFocusPolicy(Qt::StrongFocus);
-            button->setFixedSize(47, 41);
-            button->setIconSize(QSize(41, 23));
-            button->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
-            button->setText(QStringLiteral("%1").arg(i+1, 2, 10, QLatin1Char('0')));
-            const auto frame = ProductProofSamples::frame(ProcessingScene::Timelapse, i);
-            button->setIcon(QPixmap::fromImage(frame.scaled(button->iconSize()*2,
-                                      Qt::KeepAspectRatio, Qt::SmoothTransformation)));
             frameButtons.append(button);
             strip->addWidget(button);
-            connect(button, &QToolButton::clicked, this, [this, i] {
+            connect(button, &QAbstractButton::clicked, this, [this, i] {
                 if (scene == ProcessingScene::Timelapse && wantsSample()) {
                     loadSample(i);
                     refresh();

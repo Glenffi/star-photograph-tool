@@ -68,6 +68,31 @@ QString copy(bool english, const char* en, const char* zh) {
     return QString::fromUtf8(english ? en : zh);
 }
 
+QImage render(QWidget& widget);
+
+void checkVisibleFrameNumbers(PrintOrderPanel& panel) {
+    for (int i=1; i<=5; ++i) {
+        auto* button = panel.findChild<QAbstractButton*>(QStringLiteral("printOrderSampleFrame%1").arg(i));
+        check(button && button->isVisible(), "Missing visible frame in the contact strip");
+        const QString number = button->text();
+        check(number == QStringLiteral("%1").arg(i, 2, 10, QLatin1Char('0')), "Missing printed frame number");
+        const QImage inked = render(*button);
+        button->setText({});
+        const QImage blank = render(*button);
+        button->setText(number);
+        QRect ink;
+        for (int y=0; y<inked.height(); ++y) for (int x=0; x<inked.width(); ++x)
+            if (inked.pixel(x,y)!=blank.pixel(x,y)) ink |= QRect(x,y,1,1);
+        QFont font = button->font();
+        font.setPixelSize(11);
+        font.setWeight(button->isChecked() ? QFont::Bold : QFont::Normal);
+        const QRect glyphs = QFontMetrics(font).tightBoundingRect(number);
+        check(ink.height() >= std::max(7, glyphs.height()-1) && ink.width() >= glyphs.width()-2 &&
+              ink.top() > button->height()/2 && ink.bottom() <= button->height()-3,
+              "Frame number is clipped or overprinted: " + number);
+    }
+}
+
 void showWindow(QWidget& window) {
     window.resize(kWindowSize);
     window.show();
@@ -245,6 +270,7 @@ void testWorkflow(bool english) {
     check(!firstFrame.isNull() && firstFrame != stillImage && firstFrame != trailImage &&
           trailPaint != paintedPhoto(), "The sequence must have its own physical print");
     click(panel, "printOrderSampleFrame2");
+    checkVisibleFrameNumbers(panel);
     check(panel.proofImage() != firstFrame &&
           child<QAbstractButton>(panel, "printOrderSampleFrame2").isChecked(),
           "Selecting a numbered exposure must show the next real photograph");
