@@ -18,6 +18,9 @@ QStringList getOpenFileNames(QWidget* parent, const QString& caption,
                              const QString& filter);
 QString getOpenFileName(QWidget* parent, const QString& caption,
                         const QString& directory, const QString& filter);
+QString getSaveFileName(QWidget* parent, const QString& caption,
+                        const QString& suggested, const QString& filter,
+                        const QString& defaultSuffix);
 QString getExistingDirectory(QWidget* parent, const QString& caption,
                              const QString& directory);
 

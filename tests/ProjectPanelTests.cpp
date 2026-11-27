@@ -1,13 +1,18 @@
+#include "core/ThumbnailGenerator.h"
 #include "ui/ProjectPanel.h"
 #include "ui/StyleTokens.h"
 
 #include <QApplication>
 #include <QDateTime>
+#include <QEventLoop>
 #include <QFile>
+#include <QImage>
 #include <QLabel>
 #include <QScrollArea>
+#include <QSet>
 #include <QString>
 #include <QTemporaryDir>
+#include <QTimer>
 
 #include <cstdlib>
 #include <iostream>
@@ -48,6 +53,79 @@ void checkSourceSignature() {
     modify("changed again", secondTime.addSecs(10));
     check(panel.processingSourceSignature() == excluded,
           "Changes to excluded paths must not invalidate the signature");
+}
+
+void checkOrderRestore() {
+    QTemporaryDir directory;
+    check(directory.isValid(), "Order fixture needs a writable directory");
+    const QString reference = directory.filePath(QStringLiteral("light-z.dng"));
+    const QString selected = directory.filePath(QStringLiteral("light-a.dng"));
+    const QString third = directory.filePath(QStringLiteral("light-m.dng"));
+    const QStringList lights{reference, selected, third};
+
+    ProjectPanel panel;
+    panel.resize(1000, StyleTokens::Layout::kFilmstripHeight);
+    panel.show();
+    QApplication::processEvents();
+    panel.clearFiles();
+
+    int projectEvents = 0;
+    QObject::connect(&panel, &ProjectPanel::fileSelected, &panel,
+                     [&] { ++projectEvents; });
+    QObject::connect(&panel, &ProjectPanel::filesChanged, &panel,
+                     [&] { ++projectEvents; });
+    QObject::connect(&panel, &ProjectPanel::referenceFrameChanged, &panel,
+                     [&] { ++projectEvents; });
+    QObject::connect(&panel, &ProjectPanel::undoAvailabilityChanged, &panel,
+                     [&] { ++projectEvents; });
+
+    auto* thumbnails = panel.findChild<ThumbnailGenerator*>();
+    check(thumbnails, "Order restore must reuse the filmstrip thumbnail generator");
+    QStringList generated;
+    QEventLoop pendingThumbnails;
+    QObject::connect(thumbnails, &ThumbnailGenerator::thumbnailReady, &pendingThumbnails,
+                     [&](const QString& path) {
+                         generated.append(path);
+                         if (generated.size() >= 2) pendingThumbnails.quit();
+                     });
+
+    QString excludedBinding = selected;
+    QString referenceBinding = reference;
+#ifdef Q_OS_WIN
+    excludedBinding = selected.toUpper();
+    referenceBinding = reference.toUpper();
+#endif
+    panel.restoreOrderFiles(lights, {excludedBinding}, excludedBinding, referenceBinding);
+    check(panel.allFilePaths() == lights && panel.totalFileCount() == 3 &&
+              panel.includedFilePaths() == QStringList{reference, third} &&
+              panel.filePaths() == panel.includedFilePaths() &&
+              panel.excludedFilePaths() == QStringList{selected} &&
+              panel.currentFilePath() == selected && panel.referenceFramePath() == reference &&
+              projectEvents == 0,
+          "Reopening must restore the whole ordered filmstrip silently, including an excluded selection");
+    const auto cards = panel.findChildren<FileCard*>();
+    check(cards.size() == 3 && cards[0]->property("reference").toBool() &&
+              cards[1]->property("selected").toBool() && cards[1]->property("excluded").toBool() &&
+              !cards[0]->property("selected").toBool() && !cards[2]->property("selected").toBool(),
+          "The reopened filmstrip should mark the reference and selected excluded card");
+
+    QApplication::processEvents();
+    check(generated.isEmpty(), "The central preview must keep priority over background thumbnails");
+    QImage preview(8, 8, QImage::Format_RGB32);
+    preview.fill(Qt::red);
+    panel.applyPreviewData(selected, preview, 100, 1.0, 2.8, 24);
+    QTimer::singleShot(3000, &pendingThumbnails, &QEventLoop::quit);
+    pendingThumbnails.exec();
+    check(generated.size() == 2 &&
+              QSet<QString>(generated.cbegin(), generated.cend()) == QSet<QString>{reference, third} &&
+              projectEvents == 0 && panel.currentFilePath() == selected,
+          "Preview completion must dispatch only the other thumbnails without changing selection");
+
+    panel.restoreOrderFiles({third, reference}, {}, {}, {});
+    check(panel.allFilePaths() == QStringList{third, reference} &&
+              panel.excludedFilePaths().isEmpty() && panel.currentFilePath().isEmpty() &&
+              panel.referenceFramePath().isEmpty() && projectEvents == 0,
+          "Reopening again should replace stale cards and respect an empty selection and automatic reference");
 }
 
 } // namespace
@@ -166,6 +244,7 @@ int main(int argc, char* argv[]) {
           "An excluded card should keep legible labels and disclose the full filename");
 
     checkSourceSignature();
+    checkOrderRestore();
 
     std::cout << "Project panel tests passed\n";
     return 0;

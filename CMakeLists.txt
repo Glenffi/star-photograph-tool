@@ -115,6 +115,7 @@ set(CORE_SOURCES
     src/core/FrameQualityEvaluator.cpp
     src/core/FinishingPipeline.cpp
     src/core/PresetManager.cpp
+    src/core/PrintOrderDocument.cpp
     src/core/RawCalibrationEngine.cpp
     src/core/StarReducer.cpp
     src/core/StarTrailEngine.cpp
@@ -127,7 +128,9 @@ set(CORE_SOURCES
 set(APP_SOURCES
     src/app/MainWindow.cpp
     src/app/MainWindowOrder.cpp
+    src/app/MainWindowDocument.cpp
     src/ui/PrintOrderPanel.cpp
+    src/ui/RidgeComparisonDialog.cpp
     src/i18n/AppLocalization.cpp
     src/core/ThumbnailGenerator.cpp
     src/ui/ProjectPanel.cpp
@@ -166,6 +169,7 @@ set(CORE_HEADERS
     src/core/FrameQualityEvaluator.h
     src/core/FinishingPipeline.h
     src/core/PresetManager.h
+    src/core/PrintOrderDocument.h
     src/core/RawCalibrationEngine.h
     src/core/StarReducer.h
     src/core/StarTrailEngine.h
@@ -274,7 +278,23 @@ target_link_libraries(${PROJECT_NAME} PRIVATE NebulensDesktop)
 
 if(BUILD_TESTING)
     find_package(Python3 REQUIRED COMPONENTS Interpreter)
-    add_executable(NebulensWindowTests tests/MainWindowFlowTests.cpp ${DESKTOP_RESOURCES})
+    # 对照生成器是本机样片工具；桌面应用和核心测试不需要 Python 图像依赖。
+    if(BUILD_SAMPLE_TOOLS AND Python3_VERSION VERSION_GREATER_EQUAL 3.10)
+        execute_process(COMMAND ${Python3_EXECUTABLE} -c "import numpy; from PIL import ImageFont; ImageFont.load_default(size=20)"
+            RESULT_VARIABLE has_example_deps OUTPUT_QUIET ERROR_QUIET)
+        if(has_example_deps EQUAL 0)
+            add_test(NAME ridge_example COMMAND ${Python3_EXECUTABLE} -B
+                     ${CMAKE_SOURCE_DIR}/tests/LakeExampleTests.py
+                     --runner $<TARGET_FILE:StarProcessorPipelineRunner>)
+        endif()
+    endif()
+    add_executable(NebulensOrderDocumentTests tests/PrintOrderDocumentTests.cpp)
+    target_link_libraries(NebulensOrderDocumentTests PRIVATE StarProcessorCore)
+    add_test(NAME print_order_document COMMAND NebulensOrderDocumentTests)
+    add_test(NAME print_order_reopen
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/WindowFlowTests.py
+                $<TARGET_FILE:NebulensWindowTests> --reopen)
+    add_executable(NebulensWindowTests tests/MainWindowFlowTests.cpp tests/PrintOrderReopenTests.cpp ${DESKTOP_RESOURCES})
     target_link_libraries(NebulensWindowTests PRIVATE NebulensDesktop)
     add_test(NAME print_order_flow
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/WindowFlowTests.py

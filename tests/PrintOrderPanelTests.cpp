@@ -1,16 +1,25 @@
 #include "ui/PrintOrderPanel.h"
+#include "ui/RidgeComparisonDialog.h"
 
 #include <QAbstractButton>
+#include <QAbstractScrollArea>
+#include <QAction>
 #include <QApplication>
 #include <QComboBox>
+#include <QCoreApplication>
 #include <QDir>
 #include <QEventLoop>
+#include <QFile>
 #include <QKeyEvent>
 #include <QLabel>
 #include <QLineEdit>
+#include <QMenu>
+#include <QPointer>
 #include <QProgressBar>
 #include <QProxyStyle>
+#include <QPushButton>
 #include <QRegion>
+#include <QScrollBar>
 #include <QStackedWidget>
 #include <QTemporaryDir>
 #include <QTimer>
@@ -18,6 +27,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cstdlib>
 #include <iostream>
 #include <stdexcept>
 
@@ -290,6 +300,90 @@ void testWorkflow(bool english) {
     verifyReceipt(panel, QDir(folder.filePath("sequence")), 2, true, english);
 }
 
+void testOrderEntryPoints() {
+    PrintOrderPanel panel;
+    int opened = 0;
+    int saved = 0;
+    int compared = 0;
+    int processed = 0;
+    QObject observer;
+    QObject::connect(&panel, &PrintOrderPanel::openOrderRequested, &observer, [&] { ++opened; });
+    QObject::connect(&panel, &PrintOrderPanel::saveOrderRequested, &observer, [&] { ++saved; });
+    QObject::connect(&panel, &PrintOrderPanel::ridgeComparisonRequested, &observer, [&] { ++compared; });
+    QObject::connect(&panel, &PrintOrderPanel::processRequested, &observer, [&] { ++processed; });
+    showWindow(panel);
+
+    auto& files = child<QPushButton>(panel, "printOrderFileButton");
+    auto& menu = child<QMenu>(panel, "printOrderFileMenu");
+    auto& open = child<QAction>(menu, "printOrderOpen");
+    auto& save = child<QAction>(menu, "printOrderSave");
+    auto& ridge = child<QAbstractButton>(panel, "printOrderRidgeComparison");
+    usable(files);
+    check(files.menu() == &menu && menu.actions() == QList<QAction*>{&open, &save} &&
+              open.text() == QCoreApplication::translate("Nebulens", "打开冲印单") &&
+              save.text() == QCoreApplication::translate("Nebulens", "保存冲印单"),
+          "The page header must offer opening and saving the order separately from rendering");
+    bool popupShown = false;
+    QTimer::singleShot(0, &menu, [&] {
+        popupShown = menu.isVisible() && menu.actionGeometry(&open).isValid();
+        menu.setActiveAction(&open);
+        QKeyEvent key(QEvent::KeyPress, Qt::Key_Return, Qt::NoModifier);
+        QApplication::sendEvent(&menu, &key);
+        menu.close();
+    });
+    files.showMenu();
+    QApplication::processEvents();
+    save.trigger();
+    ridge.click();
+    check(popupShown && opened == 1 && saved == 1 && processed == 0 && compared == 0 && !ridge.isVisible(),
+          "Order file actions must emit distinct signals; an order without references cannot compare");
+
+    panel.setScene(ProcessingScene::SkyGround);
+    panel.setProject(0, 4, "Reopened capture set", true, {});
+    panel.setRidgeComparisonAvailable(true);
+    panel.showReopenedOrder();
+    QApplication::processEvents();
+    expectPage(panel, Page::Assets);
+    check(ridge.text() == QCoreApplication::translate("Nebulens", "山脊对照"),
+          "Reference comparison must be labeled");
+    click(panel, "printOrderRidgeComparison");
+    check(compared == 1, "A reopened order with a reference must support comparison");
+
+    panel.setTask(true, 40, {});
+    QApplication::processEvents();
+    expectPage(panel, Page::Output);
+    fits(ridge);
+    check(!files.isEnabled() && !open.isEnabled() && !save.isEnabled() && !ridge.isEnabled(),
+          "File actions and reference comparison must be locked during processing");
+    open.trigger();
+    save.trigger();
+    ridge.click();
+    panel.showReopenedOrder();
+    panel.setTask(false, -1, {});
+    QApplication::processEvents();
+    expectPage(panel, Page::Output);
+    check(opened == 1 && saved == 1 && compared == 1 && processed == 0,
+          "Locked controls and a reopen request cannot change a running order");
+
+    panel.setReceipt("delivery.tiff", 1);
+    QApplication::processEvents();
+    expectPage(panel, Page::Receipt);
+    usable(files);
+    usable(ridge);
+    save.trigger();
+    check(saved == 2 && processed == 0, "Saving an order from the receipt must not trigger a render");
+    panel.showReopenedOrder();
+    QApplication::processEvents();
+    expectPage(panel, Page::Assets);
+    check(child<QLineEdit>(panel, "printOrderResultPath").text().isEmpty() && ridge.isVisible(),
+          "Reopening clears the previous receipt while keeping the loaded comparison");
+    panel.resetOrder();
+    panel.showReopenedOrder();
+    QApplication::processEvents();
+    expectPage(panel, Page::Product);
+    check(!ridge.isVisible(), "A reset or empty order must not keep the previous comparison");
+}
+
 constexpr std::array<QRgb, 4> kSwatches{
     qRgb(209, 15, 92), qRgb(12, 148, 218), qRgb(11, 193, 66), qRgb(230, 104, 18)
 };
@@ -310,6 +404,181 @@ QImage render(QWidget& widget) {
     image.fill(Qt::transparent);
     widget.render(&image);
     return image;
+}
+
+constexpr std::array kRidgeFiles{"ridge-single.png", "ridge-stack.png", "ridge-separated.png"};
+constexpr std::array kRidgeLabels{"ridgeComparisonSingleTitle", "ridgeComparisonStackTitle",
+                                  "ridgeComparisonSeparatedTitle"};
+constexpr std::array kRidgeChannels{41, 119, 207};
+
+QRgb ridgePixel(int x, int y, int channel) {
+    return qRgb(x % 256, y % 256, channel);
+}
+
+void writeRidgeCrops(const QDir& directory, const QSize& size) {
+    QImage crop(size, QImage::Format_RGB32);
+    for (std::size_t i = 0; i < kRidgeFiles.size(); ++i) {
+        for (int y = 0; y < size.height(); ++y) {
+            auto* row = reinterpret_cast<QRgb*>(crop.scanLine(y));
+            for (int x = 0; x < size.width(); ++x) row[x] = ridgePixel(x, y, kRidgeChannels[i]);
+        }
+        check(crop.save(directory.filePath(QString::fromLatin1(kRidgeFiles[i]))),
+              "Cannot write a reference crop");
+    }
+}
+
+void expectRidgePixels(QAbstractScrollArea& view, const QSize& crop, bool actualSize) {
+    const auto& horizontal = *view.horizontalScrollBar();
+    const auto& vertical = *view.verticalScrollBar();
+    const int width = horizontal.pageStep();
+    const int height = vertical.pageStep();
+    check(width > 0 && height > 0 &&
+              horizontal.maximum() == (actualSize ? std::max(0, crop.width() - width) : 0) &&
+              vertical.maximum() == (actualSize ? std::max(0, crop.height() - height) : 0),
+          "Each shared scroll range must match the visible span at the chosen zoom");
+    const QImage image = render(*view.viewport());
+    const int x = width / 2;
+    const int y = height / 2;
+    const int top = image.height() - height;
+    int lastLeft = -1;
+    for (std::size_t i = 0; i < kRidgeLabels.size(); ++i) {
+        auto& heading = child<QLabel>(view, kRidgeLabels[i]);
+        fits(heading);
+        const int left = heading.geometry().left();
+        check(left > lastLeft && heading.width() == width &&
+                  heading.heightForWidth(heading.width()) <= heading.height(),
+              "The three comparison headings must fit above equal-width columns");
+        lastLeft = left;
+        const QRgb pixel = image.pixel(left + x, top + y);
+        if (actualSize) {
+            const int sourceX = horizontal.value() + x - std::max(0, (width - crop.width()) / 2);
+            const int sourceY = vertical.value() + y - std::max(0, (height - crop.height()) / 2);
+            check(pixel == ridgePixel(sourceX, sourceY, kRidgeChannels[i]),
+                  "The actual-size panes must paint the same source coordinate without tonal changes");
+        } else {
+            check(std::abs(qBlue(pixel) - kRidgeChannels[i]) <= 1,
+                  "Fit must paint all three distinct crops");
+        }
+    }
+}
+
+void testRidgeViewport(QWidget& parent, const QString& manifest, const QSize& crop) {
+    QString error = QStringLiteral("Old error");
+    check(RidgeComparisonDialog::openForManifest(manifest, &parent, error) && error.isEmpty(),
+          "A complete fixed-file reference bundle must open: " + error);
+    auto& dialog = child<QDialog>(parent, "ridgeComparisonDialog");
+    showWindow(dialog);
+    auto& view = child<QAbstractScrollArea>(dialog, "ridgeComparisonView");
+    auto& fit = child<QAbstractButton>(dialog, "ridgeComparisonFit");
+    auto& actual = child<QAbstractButton>(dialog, "ridgeComparisonActualSize");
+    usable(fit);
+    usable(actual);
+    check(fit.isChecked() && dialog.isModal(), "The modal comparison must initially show the whole crop");
+    expectRidgePixels(view, crop, false);
+
+    actual.click();
+    QApplication::processEvents();
+    view.horizontalScrollBar()->setValue(41);
+    view.verticalScrollBar()->setValue(73);
+    expectRidgePixels(view, crop, true);
+    dialog.resize(360, 260);
+    QApplication::processEvents();
+    check(dialog.size() == QSize(360, 260), "The comparison must remain usable in a smaller window");
+    usable(fit);
+    usable(actual);
+    expectRidgePixels(view, crop, true);
+    view.horizontalScrollBar()->setValue(view.horizontalScrollBar()->maximum());
+    view.verticalScrollBar()->setValue(view.verticalScrollBar()->maximum());
+    expectRidgePixels(view, crop, true);
+    const QPoint offset(view.horizontalScrollBar()->value(), view.verticalScrollBar()->value());
+    fit.click();
+    QApplication::processEvents();
+    expectRidgePixels(view, crop, false);
+    actual.click();
+    QApplication::processEvents();
+    expectRidgePixels(view, crop, true);
+    check(offset == QPoint(view.horizontalScrollBar()->value(), view.verticalScrollBar()->value()),
+          "Switching back from Fit must return to the previous shared inspection location");
+    const QPointer<QDialog> guard(&dialog);
+    dialog.close();
+    QApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+    check(!guard, "Closing comparison must release its decoded crops");
+}
+
+void testRidgeComparison() {
+    QTemporaryDir temp;
+    check(temp.isValid(), "Cannot create a temporary reference folder");
+    const QDir directory(temp.path());
+    const QString manifest = directory.filePath(QStringLiteral("comparison.json"));
+    QString error;
+    check(!RidgeComparisonDialog::openForManifest(QStringLiteral("https://example.invalid/comparison.json"),
+                                                 nullptr, error) && !error.isEmpty(),
+          "Comparison must not open a remote manifest");
+    check(!RidgeComparisonDialog::openForManifest(manifest, nullptr, error) && !error.isEmpty(),
+          "Comparison must reject a missing manifest");
+    const auto writeManifest = [&](const QByteArray& bytes) {
+        QFile anchor(manifest);
+        check(anchor.open(QIODevice::WriteOnly) && anchor.write(bytes) == bytes.size(),
+              "Cannot write a temporary reference manifest");
+    };
+    constexpr auto schema = R"({"schema":"nebulens.ridge-comparison","version":1})";
+    writeManifest(schema);
+
+    const QString first = directory.filePath(QString::fromLatin1(kRidgeFiles.front()));
+    const auto failsAt = [&](const char* name) {
+        return !RidgeComparisonDialog::openForManifest(manifest, nullptr, error) &&
+               error.contains(QString::fromLatin1(name));
+    };
+    check(failsAt(kRidgeFiles.front()), "A missing crop must be reported by filename");
+    for (const QSize size : {QSize(4097, 1), QSize(2300, 2000)}) {
+        QImage oversized(size, QImage::Format_Grayscale8);
+        oversized.fill(0);
+        check(oversized.save(first) && failsAt(kRidgeFiles.front()) &&
+                  error == QCoreApplication::translate("Nebulens", "对照图片尺寸过大：%1")
+                               .arg(QString::fromLatin1(kRidgeFiles.front())),
+              "Crop width and total pixels must be bounded before decoding");
+    }
+
+    constexpr int w = 720;
+    constexpr int h = 620;
+    const QString second = directory.filePath(QString::fromLatin1(kRidgeFiles[1]));
+    const QString third = directory.filePath(QString::fromLatin1(kRidgeFiles[2]));
+    QImage crop(w, h, QImage::Format_RGB32);
+    crop.fill(Qt::black);
+    check(crop.save(first, "BMP") && failsAt(kRidgeFiles.front()),
+          "Only PNG data is accepted under a fixed crop filename");
+    const auto mismatchAt = [&](const char* name) {
+        return failsAt(name) && error == QCoreApplication::translate("Nebulens", "对照图片的裁片尺寸不一致：%1")
+                                           .arg(QString::fromLatin1(name));
+    };
+    check(crop.save(first) && crop.copy(0, 0, w - 1, h).save(second) && mismatchAt(kRidgeFiles[1]),
+          "Mismatched width must be reported for the second crop: " + error);
+    check(crop.save(second) && failsAt(kRidgeFiles[2]), "A missing third crop must be reported by filename");
+    check(crop.copy(0, 0, w, h - 1).save(third) && mismatchAt(kRidgeFiles[2]),
+          "Mismatched height must be reported for the third crop: " + error);
+
+    // Invalid manifests must still fail when all three correctly named PNGs are present.
+    writeRidgeCrops(directory, QSize(w, h));
+    for (const auto* invalid : {"{ invalid JSON", "[]", "{}", R"({"schema":"Other","version":1})",
+                                R"({"schema":"nebulens.ridge-comparison"})",
+                                R"({"schema":"nebulens.ridge-comparison","version":"1"})",
+                                R"({"schema":"nebulens.ridge-comparison","version":2})"}) {
+        writeManifest(invalid);
+        check(!RidgeComparisonDialog::openForManifest(manifest, nullptr, error) && !error.isEmpty(),
+              "A wrong JSON schema/version must not authorize adjacent crops");
+    }
+    writeManifest(QByteArray(schema).leftJustified(1024 * 1024 + 1, ' '));
+    check(!RidgeComparisonDialog::openForManifest(manifest, nullptr, error) && !error.isEmpty(),
+          "Comparison must not parse a manifest larger than its read limit");
+    writeManifest(schema);
+
+    QWidget parent;
+    showWindow(parent);
+    testRidgeViewport(parent, manifest, QSize(w, h));
+    for (const QSize size : {QSize(640, 384), QSize(95, 71)}) {
+        writeRidgeCrops(directory, size);
+        testRidgeViewport(parent, manifest, size);
+    }
 }
 
 void checkIdlePixels(PrintOrderPanel& panel) {
@@ -481,11 +750,15 @@ int main(int argc, char* argv[]) {
         check(!(moving && reduced), "Choose only one strict motion expectation");
 
         testWorkflow(false);
+        testOrderEntryPoints();
         QTranslator english;
         check(english.load(QStringLiteral(":/i18n/nebulens_en.qm")) && app.installTranslator(&english),
               "The test target must link the real English translation resource");
         testWorkflow(true);
+        testOrderEntryPoints();
         std::cout << "[PASS] Chinese and English workflow, 920x540 layout, and file/sequence receipts\n";
+        testRidgeComparison();
+        std::cout << "[PASS] Order file actions, reopened orders, and synchronized local comparison crops\n";
 
         testMotion(moving ? Motion::Moving : reduced ? Motion::Reduced : Motion::Auto);
         return 0;

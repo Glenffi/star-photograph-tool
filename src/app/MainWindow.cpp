@@ -155,6 +155,10 @@ MainWindow::~MainWindow() {
 }
 
 void MainWindow::closeEvent(QCloseEvent* event) {
+    if (!m_orderFilePath.isEmpty() && !processingActive() && !confirmOrderReplacement()) {
+        event->ignore();
+        return;
+    }
     if (m_paramsPanel) m_paramsPanel->saveCurrentSettings();
     QMainWindow::closeEvent(event);
 }
@@ -182,6 +186,11 @@ void MainWindow::dropEvent(QDropEvent* event) {
     }
 
     if (!filePaths.isEmpty()) {
+        if (filePaths.size() == 1 && filePaths.first().endsWith(QStringLiteral(".nebprint"), Qt::CaseInsensitive)) {
+            requestOpenPrintOrder(filePaths.first());
+            event->acceptProposedAction();
+            return;
+        }
         importFiles(filePaths);
         statusBar()->showMessage(
             QCoreApplication::translate("Nebulens", "拖放导入 %1 个文件").arg(filePaths.size()),
@@ -477,6 +486,8 @@ void MainWindow::setupMenuBar() {
     // 文件菜单
     auto* fileMenu = menuBar()->addMenu(
         QCoreApplication::translate("Nebulens", "文件"));
+    addDocumentActions(fileMenu);
+    fileMenu->addSeparator();
 
     auto* importAction = new QAction(
         QCoreApplication::translate("Nebulens", "导入 RAW..."), this);
@@ -494,7 +505,9 @@ void MainWindow::setupMenuBar() {
 
     auto* clearAction = new QAction(
         QCoreApplication::translate("Nebulens", "清空项目"), this);
-    connect(clearAction, &QAction::triggered, this, &MainWindow::resetProject);
+    connect(clearAction, &QAction::triggered, this, [this] {
+        if (m_orderFilePath.isEmpty() || confirmOrderReplacement()) resetProject();
+    });
     fileMenu->addAction(clearAction);
 
     fileMenu->addSeparator();
@@ -671,7 +684,9 @@ void MainWindow::setupConnections() {
     // Toolbar 信号
     connect(m_toolbar, &Toolbar::importFilesClicked, this, &MainWindow::onImportClicked);
     connect(m_toolbar, &Toolbar::importFolderClicked, this, &MainWindow::onImportFolderClicked);
-    connect(m_toolbar, &Toolbar::clearProjectClicked, this, &MainWindow::resetProject);
+    connect(m_toolbar, &Toolbar::clearProjectClicked, this, [this] {
+        if (m_orderFilePath.isEmpty() || confirmOrderReplacement()) resetProject();
+    });
     connect(m_toolbar, &Toolbar::startProcessClicked, this, &MainWindow::onProcessClicked);
     connect(m_toolbar, &Toolbar::exportResultClicked, this, &MainWindow::onExportClicked);
     connect(m_toolbar, &Toolbar::settingsClicked, this, [this]() {

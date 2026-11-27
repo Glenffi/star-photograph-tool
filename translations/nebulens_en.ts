@@ -4,6 +4,134 @@
     <context>
         <name>Nebulens</name>
         <message>
+            <source>100%</source>
+            <translation>100%</translation>
+        </message>
+        <message>
+            <source>Nebulens 冲印单 (*.nebprint)</source>
+            <translation>Nebulens print orders (*.nebprint)</translation>
+        </message>
+        <message>
+            <source>不支持此对照清单版本。</source>
+            <translation>This comparison manifest version is not supported.</translation>
+        </message>
+        <message>
+            <source>任务进行中，无法替换冲印单。</source>
+            <translation>Wait for the current task to finish before opening another order.</translation>
+        </message>
+        <message>
+            <source>保存冲印单</source>
+            <translation>Save Print Order</translation>
+        </message>
+        <message>
+            <source>冲印单参数无效：%1</source>
+            <translation>Invalid print order setting: %1</translation>
+        </message>
+        <message>
+            <source>冲印单另存为…</source>
+            <translation>Save Print Order As…</translation>
+        </message>
+        <message>
+            <source>单张</source>
+            <translation>Single frame</translation>
+        </message>
+        <message>
+            <source>单据</source>
+            <translation>Orders</translation>
+        </message>
+        <message>
+            <source>对照图片尺寸过大：%1</source>
+            <translation>Comparison crop dimensions exceed the limit: %1</translation>
+        </message>
+        <message>
+            <source>对照图片文件过大：%1</source>
+            <translation>Comparison file is too large: %1</translation>
+        </message>
+        <message>
+            <source>对照图片的裁片尺寸不一致：%1</source>
+            <translation>The comparison crops must have identical dimensions: %1</translation>
+        </message>
+        <message>
+            <source>对照清单不是有效的 JSON 对象。</source>
+            <translation>The comparison manifest is not a valid JSON object.</translation>
+        </message>
+        <message>
+            <source>对照清单文件过大。</source>
+            <translation>The comparison manifest is too large.</translation>
+        </message>
+        <message>
+            <source>山脊对照</source>
+            <translation>Ridge comparison</translation>
+        </message>
+        <message>
+            <source>所选目录不能重新关联素材：%1</source>
+            <translation>The selected folder could not reconnect this file: %1</translation>
+        </message>
+        <message>
+            <source>打开冲印单</source>
+            <translation>Open Print Order</translation>
+        </message>
+        <message>
+            <source>打开冲印单…</source>
+            <translation>Open Print Order…</translation>
+        </message>
+        <message>
+            <source>找不到或无法读取本地对照清单。</source>
+            <translation>The local comparison manifest is missing or unreadable.</translation>
+        </message>
+        <message>
+            <source>找不到素材：%1</source>
+            <translation>Source file not found: %1</translation>
+        </message>
+        <message>
+            <source>无法识别对照清单格式。</source>
+            <translation>Unrecognized comparison manifest format.</translation>
+        </message>
+        <message>
+            <source>无法识别这份冲印单的场景。</source>
+            <translation>Unrecognized scene in this print order.</translation>
+        </message>
+        <message>
+            <source>无法读取对照图片：%1</source>
+            <translation>Cannot read comparison image: %1</translation>
+        </message>
+        <message>
+            <source>普通堆栈</source>
+            <translation>Standard stack</translation>
+        </message>
+        <message>
+            <source>缺少本地对照图片：%1</source>
+            <translation>Missing local comparison image: %1</translation>
+        </message>
+        <message>
+            <source>要保存当前冲印单的修改吗？</source>
+            <translation>Save changes to the current print order?</translation>
+        </message>
+        <message>
+            <source>请在任务结束后保存为 .nebprint 文件。</source>
+            <translation>Save to a .nebprint file after the current task finishes.</translation>
+        </message>
+        <message>
+            <source>请选择本地对照清单。</source>
+            <translation>Choose a local comparison manifest.</translation>
+        </message>
+        <message>
+            <source>适合窗口</source>
+            <translation>Fit to window</translation>
+        </message>
+        <message>
+            <source>重新定位包含 %1 的文件夹</source>
+            <translation>Locate the folder containing %1</translation>
+        </message>
+        <message>
+            <source>保存失败，原文件未被替换。</source>
+            <translation>The order could not be saved. The original file was not replaced.</translation>
+        </message>
+        <message>
+            <source>未能打开冲印单，当前工作已保留。</source>
+            <translation>The order could not be opened. Your current work is unchanged.</translation>
+        </message>
+        <message>
             <location filename='../src/core/DeepSkyCalibrationPreflight.cpp' line='72'/>
             <source>[必须修复] </source>
             <translation>[REQUIRED] </translation>

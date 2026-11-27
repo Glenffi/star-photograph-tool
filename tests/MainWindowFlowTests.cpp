@@ -77,7 +77,7 @@ T& child(QObject& parent, const char* name = nullptr) {
     return *found;
 }
 
-bool waitFor(const std::function<bool()>& ready) {
+bool waitFor(const std::function<bool()>& ready, int timeoutMs = 30000) {
     if (ready()) return true;
     QEventLoop loop;
     QTimer poll;
@@ -85,7 +85,7 @@ bool waitFor(const std::function<bool()>& ready) {
         if (ready()) loop.quit();
     });
     poll.start(10);
-    QTimer::singleShot(30000, &loop, &QEventLoop::quit);
+    QTimer::singleShot(timeoutMs, &loop, &QEventLoop::quit);
     loop.exec();
     return ready();
 }
@@ -283,12 +283,12 @@ struct Flow {
               "Assets step must lead to the real output step");
     }
 
-    QString process(int expectedCount) {
+    QString process(int expectedCount, int timeoutMs = 30000) {
         const auto before = dialogs.messages().size();
         click(next);
         const bool finished = waitFor([&] {
             return params.isEnabled() || dialogs.messages().size() != before;
-        });
+        }, timeoutMs);
         check(finished && receipt.isVisible() && dialogs.messages().size() == before,
               "Processing did not show a successful receipt. Page: " +
                   child<QStackedWidget>(order, "printOrderPages").currentWidget()->objectName() +
@@ -791,7 +791,39 @@ void testSequence(const QDir& root) {
           "Starting a new order must reset the receipt without deleting the delivered sequence");
 }
 
+void replayLocalExample(const QDir& root, const QString& order, const QString& baseline) {
+    const QDir out(root.filePath("replay-output"));
+    prepareOutput(out);
+    Flow flow;
+    QString error;
+    check(flow.window.openPrintOrderFrom(order, error), error);
+    check(waitFor([&] { return !flow.order.proofImage().isNull(); }),
+          "The reopened real RAW must supply a source proof");
+    click(child<QAbstractButton>(flow.order, "printOrderRidgeComparison"));
+    auto* comparison = flow.window.findChild<QDialog*>(QStringLiteral("ridgeComparisonDialog"));
+    check(comparison && comparison->isVisible(), "The generated manifest must open the three-panel viewer");
+    const QString snapshot = qEnvironmentVariable("NEBULENS_TEST_RIDGE_SCREENSHOT");
+    if (!snapshot.isEmpty()) check(comparison->grab().save(snapshot), "Cannot capture the comparison window");
+    comparison->reject();
+    flow.params.setOutputPath(out.absolutePath());
+    check(child<QWidget>(flow.order, "printOrderAssetsPage").isVisible(), "Reopen must land on assets");
+    click(flow.next);
+    const QString actual = flow.process(1, 600000);
+    std::vector<uint16_t> actualPixels, expectedPixels;
+    int w = 0, h = 0, expectedW = 0, expectedH = 0;
+    check(ImageExporter::loadTiffRgb16(actual, actualPixels, w, h) &&
+          ImageExporter::loadTiffRgb16(baseline, expectedPixels, expectedW, expectedH),
+          "Cannot compare formal TIFF pixels");
+    check(w == expectedW && h == expectedH && actualPixels == expectedPixels,
+          QStringLiteral("Reopened GUI pixels differ from the original TIFF (%1x%2 vs %3x%4)")
+              .arg(w).arg(h).arg(expectedW).arg(expectedH));
+    std::cout << "Local example: " << flow.project.totalFileCount() << " RAW inputs, "
+              << w << 'x' << h << " RGB16 pixels identical after GUI replay\n";
+}
+
 } // namespace
+
+void testOrderAcrossLaunches(const QDir& root, bool write);
 
 int main(int argc, char* argv[]) {
     QApplication::setAttribute(Qt::AA_DontUseNativeDialogs);
@@ -801,13 +833,24 @@ int main(int argc, char* argv[]) {
     app.setStyleSheet(StyleTokens::appStyleSheet());
     try {
         const auto arguments = app.arguments();
-        check(arguments.size() == 2, "Usage: NebulensWindowTests <fixture-directory>");
+        const bool replay = arguments.size() == 5 && arguments[2] == "--replay-example";
+        check(arguments.size() == 2 || arguments.size() == 3 || replay,
+              "Usage: NebulensWindowTests <fixture-directory> [--order-write|--order-read]");
         const QDir root(arguments.at(1));
 #ifdef Q_OS_WIN
         TestRegistry registry;
         registry.install();
 #endif
         configureSettings(root);
+        if (replay) {
+            replayLocalExample(root, arguments[3], arguments[4]);
+            return 0;
+        }
+        if (arguments.size() == 3) {
+            check(arguments[2] == "--order-write" || arguments[2] == "--order-read", "Invalid phase");
+            testOrderAcrossLaunches(root, arguments[2] == "--order-write");
+            return 0;
+        }
         int failures = 0;
         for (const auto& test : {
                  std::make_pair("Explicit scene and reference selection", testExplicitSceneAndReference),

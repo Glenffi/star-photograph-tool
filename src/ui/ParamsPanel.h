@@ -22,6 +22,7 @@ class QTabWidget;
 class QListWidget;
 class QPropertyAnimation;
 class QToolButton;
+struct PrintOrderDocument;
 
 class ParamsPanel : public QWidget {
     Q_OBJECT
@@ -60,6 +61,11 @@ public:
     void setSelectedReferenceFrame(const QString& filePath);
     void recommendStackMethod(int frameCount);
     void saveCurrentSettings();
+    void captureOrderSettings(PrintOrderDocument& document) const;
+    static bool validateOrderSettings(const PrintOrderDocument& document,
+                                      QString& error);
+    // 调用方先激活场景，并更新参与处理的参考候选。
+    void restoreOrderSettings(const PrintOrderDocument& document);
     void setOutputPath(const QString& path);
     void setAssetSummary(int total, int available,
                          const QString& reference, bool ready);
@@ -319,4 +325,5 @@ private:
     
     // 用户是否手动修改过堆栈算法（避免智能推荐覆盖用户选择）
     bool m_userChangedStackMethod = false;
+    bool m_orderSettingsRestored = false;
 };

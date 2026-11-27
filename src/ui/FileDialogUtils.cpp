@@ -86,6 +86,18 @@ QString getOpenFileName(QWidget* parent, const QString& caption,
     return files.isEmpty() ? QString() : files.first();
 }
 
+QString getSaveFileName(QWidget* parent, const QString& caption,
+                        const QString& suggested, const QString& filter,
+                        const QString& defaultSuffix) {
+    QFileDialog dialog(parent, caption, suggested, filter);
+    dialog.setOption(QFileDialog::DontUseNativeDialog, true);
+    dialog.setAcceptMode(QFileDialog::AcceptSave);
+    dialog.setFileMode(QFileDialog::AnyFile);
+    dialog.setDefaultSuffix(defaultSuffix);
+    prepareToolbarIcons(dialog);
+    return dialog.exec() == QDialog::Accepted ? dialog.selectedFiles().value(0) : QString();
+}
+
 QString getExistingDirectory(QWidget* parent, const QString& caption,
                              const QString& directory) {
     QFileDialog dialog(parent, caption, directory);

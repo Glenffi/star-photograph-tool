@@ -5,11 +5,33 @@
 
 #include <QApplication>
 #include <QFileInfo>
+#include <QFileOpenEvent>
 #include <QNetworkProxyFactory>
 #include <QSet>
 #include <QTimer>
 #include <cstring>
 #include <iostream>
+
+namespace {
+// Finder may deliver its document before the main window exists.
+class DesktopApplication final : public QApplication {
+public:
+    using QApplication::QApplication;
+    MainWindow* window = nullptr;
+    QString pendingOrder;
+    bool event(QEvent* event) override {
+        if (event->type() == QEvent::FileOpen) {
+            const QString path = static_cast<QFileOpenEvent*>(event)->file();
+            if (path.endsWith(QStringLiteral(".nebprint"), Qt::CaseInsensitive)) {
+                if (window) window->requestOpenPrintOrder(path);
+                else pendingOrder = path;
+                return true;
+            }
+        }
+        return QApplication::event(event);
+    }
+};
+}
 
 int main(int argc, char* argv[]) {
     // This path deliberately avoids QApplication. The packaging job uses it
@@ -55,7 +77,7 @@ int main(int argc, char* argv[]) {
         Qt::HighDpiScaleFactorRoundingPolicy::PassThrough
     );
 
-    QApplication app(argc, argv);
+    DesktopApplication app(argc, argv);
     // Keep the technical application identity for settings/update migration;
     // all user-facing surfaces use the new product name.
     app.setApplicationName("StarProcessor");
@@ -74,6 +96,7 @@ int main(int argc, char* argv[]) {
 
     MainWindow window;
     window.show();
+    app.window = &window;
 
     for (const QString& argument : app.arguments()) {
         if (argument == "--scene=single") {
@@ -124,14 +147,20 @@ int main(int argc, char* argv[]) {
         "nef", "cr2", "arw", "dng", "raw", "orf", "raf", "pef", "cr3"
     };
     QStringList startupFiles;
+    QString orderPath = app.pendingOrder;
     for (const QString& argument : app.arguments().mid(1)) {
         if (argument.startsWith("--")) continue;
         const QFileInfo info(argument);
+        if (argument.endsWith(QStringLiteral(".nebprint"), Qt::CaseInsensitive)) {
+            orderPath = info.absoluteFilePath();
+            continue;
+        }
         if (info.isFile() && rawExtensions.contains(info.suffix().toLower())) {
             startupFiles.append(info.absoluteFilePath());
         }
     }
-    window.importFiles(startupFiles);
+    if (orderPath.isEmpty()) window.importFiles(startupFiles);
+    else window.requestOpenPrintOrder(orderPath);
 
     // Offscreen screenshot mode keeps visual regression checks reproducible
     // without requiring macOS screen-recording permission.
@@ -150,5 +179,7 @@ int main(int argc, char* argv[]) {
         break;
     }
 
-    return app.exec();
+    const int result = app.exec();
+    app.window = nullptr;
+    return result;
 }

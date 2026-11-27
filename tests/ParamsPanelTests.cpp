@@ -1,3 +1,4 @@
+#include "core/PrintOrderDocument.h"
 #include "ui/InspectorWidgets.h"
 #include "ui/ParamsPanel.h"
 #include "ui/StyleTokens.h"
@@ -5,6 +6,7 @@
 #include <QApplication>
 #include <QComboBox>
 #include <QDir>
+#include <QEventLoop>
 #include <QFile>
 #include <QFileDialog>
 #include <QKeyEvent>
@@ -230,6 +232,166 @@ void checkCalibrationAndProjectClear(ParamsPanel& panel, const QTemporaryDir& di
     QObject::disconnect(referenceConnection);
 }
 
+void checkOrderRoundTrip(const QTemporaryDir& directory) {
+    PrintOrderDocument source;
+    source.scene = QStringLiteral("deep-sky");
+    source.reference = directory.filePath(QStringLiteral("light2.dng"));
+    source.selected = directory.filePath(QStringLiteral("light1.dng"));
+    source.lights = {source.reference, source.selected};
+    source.excluded = {source.selected};
+    source.flat = {directory.filePath(QStringLiteral("flat-3.dng")),
+                   directory.filePath(QStringLiteral("flat-1.dng")),
+                   directory.filePath(QStringLiteral("flat-2.dng"))};
+    source.masterDark = directory.filePath(QStringLiteral("dark.spmaster"));
+    source.masterBias = directory.filePath(QStringLiteral("bias.spmaster"));
+    source.masterDarkFlat = directory.filePath(QStringLiteral("dark-flat.spmaster"));
+    source.userMask = directory.filePath(QStringLiteral("order-mask.png"));
+    source.outputDirectory = directory.filePath(QStringLiteral("order-output"));
+    source.params = {
+        {"stackMethod", "kappa-sigma"}, {"kappa", 3.7},
+        {"autoReject", false}, {"photometric", false},
+        {"dewarpEnabled", true}, {"dewarpStrength", 52},
+        {"noiseReductionEnabled", false}, {"noiseReductionStrength", 42},
+        {"modifiedCameraColorEnabled", true}, {"modifiedCameraColorStrength", 73},
+        {"modifiedCameraColorMode", "manual"},
+        {"modifiedCameraGrayPointX", 0.23}, {"modifiedCameraGrayPointY", 0.71},
+        {"stretchEnabled", false},
+        {"temperature", 12}, {"tint", -6}, {"exposureTenths", -23}, {"contrast", 17},
+        {"highlights", -31}, {"shadows", 30}, {"whites", 22}, {"blacks", -3},
+        {"vibrance", 25}, {"saturation", -14}, {"sharpening", 26},
+        {"starDefringeEnabled", true}, {"starDefringeStrength", 64},
+        {"starReduceEnabled", true}, {"starReduceStrength", 45},
+        {"outputFormat", "png8"}, {"skyGround", true}, {"skyGroundMode", "user-mask"},
+        {"feather", 34}, {"groundMethod", "reference"}, {"groundDetail", 19},
+        {"timelapseWindow", 3}, {"timelapseStrength", 52},
+        {"timelapseMotionProtection", 23}, {"timelapseProtectGround", false},
+        {"starTrailCometStrength", 31}, {"starTrailReverse", true},
+        {"starTrailProtectGround", false}, {"saveGeneratedMasters", true}
+    };
+
+    QString error;
+    check(ParamsPanel::validateOrderSettings(source, error), "All supported order values should validate");
+    ParamsPanel original;
+    original.applySceneProfile(ProcessingScene::DeepSky);
+    original.updateRefFrameList({source.reference});
+    original.restoreOrderSettings(source);
+    PrintOrderDocument saved;
+    saved.scene = source.scene;
+    saved.lights = source.lights;
+    saved.excluded = source.excluded;
+    saved.reference = source.reference;
+    saved.selected = source.selected;
+    original.captureOrderSettings(saved);
+    check(saved.params == source.params && saved.flat == source.flat &&
+              saved.masterDark == source.masterDark && saved.masterBias == source.masterBias &&
+              saved.masterDarkFlat == source.masterDarkFlat && saved.userMask == source.userMask &&
+              saved.outputDirectory == source.outputDirectory,
+          "Capture must encode every control and use only dedicated fields for paths");
+
+    const auto path = directory.filePath(QStringLiteral("params-roundtrip.nebprint"));
+    check(saved.save(path, error), "Captured parameters should save to an order file");
+    PrintOrderDocument loaded;
+    check(PrintOrderDocument::load(path, loaded, error), "Captured parameters should reopen from disk");
+
+    ParamsPanel reopened;
+    reopened.applySceneProfile(ProcessingScene::DeepSky);
+    reopened.updateRefFrameList({source.reference});
+    QSettings settings("StarProcessor", "App");
+    const auto readPreferences = [&settings] {
+        settings.sync();
+        QVariantMap snapshot;
+        for (const QString& key : settings.allKeys()) snapshot.insert(key, settings.value(key));
+        return snapshot;
+    };
+    const auto preferences = readPreferences();
+    int changes = 0;
+    int referenceChanges = 0;
+    int grayPointRequests = 0;
+    QObject::connect(&reopened, &ParamsPanel::paramsChanged, &reopened,
+                     [&] { ++changes; });
+    QObject::connect(&reopened, &ParamsPanel::referenceChoiceChanged, &reopened,
+                     [&] { ++referenceChanges; });
+    QObject::connect(&reopened, &ParamsPanel::modifiedCameraGrayPointRequested, &reopened,
+                     [&] { ++grayPointRequests; });
+    reopened.restoreOrderSettings(loaded);
+    reopened.recommendStackMethod(25);
+    reopened.saveCurrentSettings();
+    check(reopened.processingSignature() == original.processingSignature() &&
+              reopened.outputFormat() == source.params.value("outputFormat").toString() &&
+              reopened.outputPath() == source.outputDirectory &&
+              reopened.deepSkyCalibrationInputsComplete() && reopened.saveGeneratedMasters() &&
+              reopened.selectedReferenceFrame() == source.reference &&
+              control<QLabel>(reopened, "calibrationFlatSource")->toolTip() == source.flat.join('\n') &&
+              control<QLabel>(reopened, "calibrationDarkSource")->toolTip() == source.masterDark,
+          "The reopened order must restore effective processing, output and calibration controls");
+    check(readPreferences() == preferences,
+          "Restore and automatic settings persistence must leave global preferences unchanged");
+
+    PrintOrderDocument recaptured;
+    reopened.captureOrderSettings(recaptured);
+    check(recaptured.params == saved.params,
+          "The recreated controls must also preserve inactive slider values and exact gray point coordinates");
+    QEventLoop debounce;
+    QTimer::singleShot(StyleTokens::Motion::kPreviewDebounceMs + 20,
+                       &debounce, &QEventLoop::quit);
+    debounce.exec();
+    check(changes == 1 && referenceChanges == 0 && grayPointRequests == 0,
+          "Restoring should publish one completed change without user events or deferred emissions");
+}
+
+void checkPartialAndInvalidOrders() {
+    ParamsPanel panel;
+    panel.applySceneProfile(ProcessingScene::SkyGround, false);
+    panel.setModifiedCameraGrayPoint(0.2, 0.9);
+    PrintOrderDocument empty;
+    empty.scene = QStringLiteral("sky-ground");
+    QString error = QStringLiteral("stale error");
+    check(ParamsPanel::validateOrderSettings(empty, error) && error.isEmpty(),
+          "An empty parameter object must be valid");
+    panel.restoreOrderSettings(empty);
+    panel.recommendStackMethod(21);
+    check(panel.stackMethod() == QStringLiteral("median") && panel.kappaValue() == 2.5 &&
+              panel.skyGroundSeparationEnabled() && panel.skyGroundMode() == SkyGroundMask::AutoDetect &&
+              panel.featherRadius() == 20 && panel.groundStackMethod() == QStringLiteral("average") &&
+              panel.groundDetailStrength() == 40 && panel.outputFormat() == QStringLiteral("tiff16") &&
+              panel.outputPath() == QDir::homePath() + "/Nebulens/Output" && panel.userMaskPath().isEmpty() &&
+              panel.noiseReductionEnabled() && panel.noiseReductionStrength() == 30 && panel.stretchEnabled() &&
+              !panel.modifiedCameraColorEnabled() && !panel.hasModifiedCameraGrayPoint() &&
+              panel.basicAdjustmentOptions().exposureTenths == 0 &&
+              !panel.starReduceEnabled() && panel.starReduceStrength() == 70,
+          "Empty params must use scene defaults instead of machine or prior panel settings");
+
+    PrintOrderDocument partial;
+    partial.scene = QStringLiteral("timelapse");
+    partial.params = {{"timelapseWindow", 3}, {"photometric", false}, {"futureParam", true}};
+    panel.applySceneProfile(ProcessingScene::Timelapse, false);
+    check(ParamsPanel::validateOrderSettings(partial, error), "Known partial parameters must be valid");
+    panel.restoreOrderSettings(partial);
+    check(panel.stackMethod() == QStringLiteral("average") && !panel.autoRejectLowQualityFrames() &&
+              !panel.photometricNormalizationEnabled() && !panel.stretchEnabled() &&
+              !panel.skyGroundSeparationEnabled() && panel.timelapseWindowSize() == 3 &&
+              panel.timelapseStrength() == 80 && panel.timelapseMotionProtection() == 75 &&
+              panel.timelapseProtectGround(),
+          "Partial params must override only their own scene defaults");
+
+    const auto unchanged = panel.processingSignature();
+    const std::pair<const char*, QJsonValue> invalidValues[] = {
+        {"stackMethod", 2}, {"autoReject", "false"}, {"photometric", QJsonValue::Null},
+        {"kappa", 5.1}, {"kappa", 2.55}, {"timelapseWindow", 4}, {"groundDetail", 71},
+        {"skyGroundMode", "unsupported"}, {"outputFormat", "jpeg"}, {"exposureTenths", 0.5},
+        {"modifiedCameraGrayPointX", 0.2}, {"modifiedCameraGrayPointY", -0.1},
+        {"modifiedCameraColorMode", "manual"}
+    };
+    for (const auto& [key, value] : invalidValues) {
+        partial.params = {{"timelapseStrength", 12}, {QLatin1String(key), value}};
+        check(!ParamsPanel::validateOrderSettings(partial, error) && !error.isEmpty(),
+              "Invalid known fields must produce a validation error");
+        panel.restoreOrderSettings(partial);
+        check(panel.processingSignature() == unchanged,
+              "An invalid order must not apply any controls");
+    }
+}
+
 } // namespace
 
 int main(int argc, char* argv[]) {
@@ -238,10 +400,12 @@ int main(int argc, char* argv[]) {
     QTemporaryDir settingsDirectory;
     check(settingsDirectory.isValid(),
           "Temporary settings directory should be available");
-    QSettings::setPath(QSettings::NativeFormat, QSettings::UserScope,
-                       settingsDirectory.path());
+    // macOS 原生偏好不会采用测试传入的路径。
+    QSettings::setDefaultFormat(QSettings::IniFormat);
     QSettings::setPath(QSettings::IniFormat, QSettings::UserScope,
                        settingsDirectory.path());
+    QSettings::setPath(QSettings::IniFormat, QSettings::SystemScope,
+                       settingsDirectory.filePath(QStringLiteral("system-settings")));
 
     {
         QSettings settings("StarProcessor", "App");
@@ -334,6 +498,8 @@ int main(int argc, char* argv[]) {
     QApplication::processEvents();
     checkReferenceSelection(panel);
     checkCalibrationAndProjectClear(panel, settingsDirectory);
+    checkOrderRoundTrip(settingsDirectory);
+    checkPartialAndInvalidOrders();
 
     panel.showWorkflowStage(WorkflowStage::Adjustment);
     panel.applySceneProfile(ProcessingScene::StarTrail);

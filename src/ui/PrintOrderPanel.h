@@ -26,9 +26,15 @@ public:
     // 本次产物的文件或序列目录；frameCount 是实际交付张数。
     void setReceipt(const QString& path, int frameCount);
     void clearReceipt();
+    void setRidgeComparisonAvailable(bool available);
+    // 在同步重开单据的素材后调用，不保留上一单的回执。
+    void showReopenedOrder();
     void resetOrder();
 
 signals:
+    void openOrderRequested();
+    void saveOrderRequested();
+    void ridgeComparisonRequested();
     void productRequested(ProcessingScene scene);
     void importFilesRequested();
     void importFolderRequested();

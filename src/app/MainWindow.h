@@ -7,16 +7,19 @@
 #include <QMainWindow>
 #include <QSet>
 #include <QStringList>
+#include <functional>
 #include <memory>
 
 class QAction;
 class ExportWorker;
 class HistoryPreviewWorker;
 class QLabel;
+class QMenu;
 class MaskPreviewWorker;
 class ParamsPanel;
 class PreviewPanel;
 class PrintOrderPanel;
+struct PrintOrderDocument;
 class QStackedWidget;
 class ProcessingWorker;
 class ProjectPanel;
@@ -39,6 +42,11 @@ public:
     void selectStartupInspectorOutput();
     void selectStartupWorkflowStage(WorkflowStage stage);
     void loadStartupHistory(const QString& path);
+    using LocateOrderDirectory = std::function<QString(const QString& missingFile)>;
+    bool savePrintOrderTo(const QString& path, QString& error);
+    bool openPrintOrderFrom(const QString& path, QString& error,
+                            const LocateOrderDirectory& locate = {});
+    void requestOpenPrintOrder(const QString& path = {});
     ~MainWindow() override;
 
 protected:
@@ -57,6 +65,11 @@ private:
     bool handleSingleKeyShortcut(QKeyEvent* event);
     void setupCentralWidget();
     void connectPrintOrder();
+    void addDocumentActions(QMenu* menu);
+    bool requestSavePrintOrder(bool saveAs = false);
+    bool confirmOrderReplacement();
+    void capturePrintOrder(PrintOrderDocument& document) const;
+    QString orderEditSignature() const;
     void showPrintOrder();
     void showAdvanced(WorkflowStage stage);
     void inspectProof();
@@ -114,6 +127,12 @@ private:
     QWidget* m_darkroom = nullptr;
     QAction* m_startAction = nullptr;
     QAction* m_exportAction = nullptr;
+    QAction* m_openOrderAction = nullptr;
+    QAction* m_saveOrderAction = nullptr;
+    QAction* m_saveOrderAsAction = nullptr;
+    QString m_orderFilePath;
+    QString m_orderFileBaseline;
+    QString m_comparisonManifest;
     QString m_deliveryPath;
     QString m_taskMessage;
     int m_taskProgress = 0;

@@ -40,6 +40,10 @@ def write_fixtures(root):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("window_tests", type=Path, help="path to the NebulensWindowTests binary")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--reopen", action="store_true")
+    mode.add_argument("--example", nargs=2, type=Path, metavar=("ORDER", "BASELINE_TIFF"),
+                      help="local opt-in: reopen real RAWs and compare GUI delivery against the baseline TIFF")
     args = parser.parse_args()
     with tempfile.TemporaryDirectory(prefix="nebulens-window-flow-") as temp:
         root = Path(temp).resolve()
@@ -52,10 +56,14 @@ def main():
                    XDG_CONFIG_HOME=str(home / "config"), XDG_CACHE_HOME=str(home / "cache"),
                    XDG_DATA_HOME=str(home / "data"))
         try:
-            subprocess.run([str(args.window_tests.resolve()), str(root)],
-                           env=env, check=True, timeout=120)
+            phases = [["--order-write"], ["--order-read"]] if args.reopen else [[]]
+            if args.example:
+                phases = [["--replay-example", *(str(p.resolve()) for p in args.example)]]
+            for extra in phases:
+                subprocess.run([str(args.window_tests.resolve()), str(root), *extra],
+                               env=env, check=True, timeout=660 if args.example else 120)
         except subprocess.TimeoutExpired:
-            parser.exit(1, "NebulensWindowTests timed out after 120 seconds\n")
+            parser.exit(1, "NebulensWindowTests timed out\n")
         except subprocess.CalledProcessError as error:
             parser.exit(1, f"NebulensWindowTests exited with status {error.returncode}\n")
         except OSError as error:

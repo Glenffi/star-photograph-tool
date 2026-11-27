@@ -25,6 +25,7 @@
 #include <QPainterPath>
 #include <QProcess>
 #include <QResizeEvent>
+#include <QSet>
 #include <QSignalBlocker>
 #include <QStyle>
 #include <QTimer>
@@ -37,6 +38,15 @@
 #include <utility>
 
 namespace {
+
+QString orderPathKey(const QString& path) {
+    // 与冲印单文档的路径匹配规则一致；片列保留原始路径拼写。
+#ifdef Q_OS_WIN
+    return path.toCaseFolded();
+#else
+    return path;
+#endif
+}
 
 void setStringProperty(QObject* object, const char* propertyName,
                        const char* value) {
@@ -751,6 +761,59 @@ void ProjectPanel::addFiles(const QStringList& filePaths) {
     }
 }
 
+void ProjectPanel::restoreOrderFiles(const QStringList& lights,
+                                     const QStringList& excluded,
+                                     const QString& selected,
+                                     const QString& reference) {
+    if (!m_editingEnabled) return;
+    // 普通导入和排除会触发场景推荐及参考帧同步；复开时由调用方统一刷新。
+    const QSignalBlocker blocker(this);
+    clearFiles();
+    if (lights.isEmpty()) return;
+
+    QSet<QString> excludedPaths;
+    excludedPaths.reserve(excluded.size());
+    for (const QString& path : excluded) excludedPaths.insert(orderPathKey(path));
+    const QString referenceKey = orderPathKey(reference);
+    const QString selectedKey = orderPathKey(selected);
+    QSet<QString> seen;
+    seen.reserve(lights.size());
+    QStringList thumbnailQueue;
+    int selectedIndex = -1;
+    for (const QString& path : lights) {
+        const QString key = orderPathKey(path);
+        if (key.isEmpty() || seen.contains(key)) continue;
+        seen.insert(key);
+        FileItem item;
+        item.filePath = path;
+        item.fileName = QFileInfo(path).fileName();
+        item.isExcluded = excludedPaths.contains(key);
+        item.isReferenceFrame = !item.isExcluded && key == referenceKey;
+        if (key == selectedKey) {
+            selectedIndex = m_fileItems.size();
+        } else {
+            thumbnailQueue.append(path);
+        }
+        m_fileItems.append(item);
+        addFileCard(item);
+    }
+    if (m_fileItems.isEmpty()) return;
+
+    showFileList();
+    m_currentIndex = selectedIndex;
+    updateAllCardStyles();
+    if (m_currentIndex >= 0) {
+        m_scrollArea->ensureWidgetVisible(m_cards[m_currentIndex]);
+        // 中央预览解码选片；成功或失败后，沿用现有路径派发其余缩略图。
+        m_pendingThumbnailPaths = std::move(thumbnailQueue);
+    } else {
+        for (const QString& path : thumbnailQueue) {
+            m_thumbnailGen->generateAsync(path, 96);
+        }
+    }
+    updateBottomBar();
+}
+
 void ProjectPanel::applyPreviewData(const QString& filePath,
                                     const QImage& image, int iso,
                                     double exposureTime, double aperture,
@@ -820,19 +883,22 @@ void ProjectPanel::clearFiles() {
     if (!m_editingEnabled) return;
 
     const bool hadReference = !referenceFramePath().isEmpty();
-    for (auto* card : m_cards) {
+    for (auto* card : std::exchange(m_cards, {})) {
+        m_listLayout->removeWidget(card);
+        card->hide();
         card->deleteLater();
     }
-    m_cards.clear();
     m_fileItems.clear();
+    m_thumbnailGen->cancelAll();
     m_pendingThumbnailPaths.clear();
     if (m_undoTimer) m_undoTimer->stop();
     m_lastRemovedItem.reset();
     m_lastRemovedIndex = -1;
-    emit undoAvailabilityChanged(false, QString());
     m_currentIndex = -1;
+    m_contextMenuIndex = -1;
     showEmptyState();
     updateBottomBar();
+    emit undoAvailabilityChanged(false, QString());
     emit filesChanged();
     if (hadReference) emit referenceFrameChanged();
 }
@@ -993,11 +1059,22 @@ QString ProjectPanel::processingSourceSignature() const {
 }
 
 QStringList ProjectPanel::filePaths() const {
+    return includedFilePaths();
+}
+
+QStringList ProjectPanel::allFilePaths() const {
+    QStringList paths;
+    paths.reserve(m_fileItems.size());
+    for (const auto& item : m_fileItems) {
+        paths.append(item.filePath);
+    }
+    return paths;
+}
+
+QStringList ProjectPanel::excludedFilePaths() const {
     QStringList paths;
     for (const auto& item : m_fileItems) {
-        if (!item.isExcluded) {
-            paths.append(item.filePath);
-        }
+        if (item.isExcluded) paths.append(item.filePath);
     }
     return paths;
 }

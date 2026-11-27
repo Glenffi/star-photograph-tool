@@ -18,6 +18,21 @@
     <string>Nebulens</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
+    <key>CFBundleDocumentTypes</key>
+    <array><dict>
+        <key>CFBundleTypeName</key><string>Nebulens Print Order</string>
+        <key>CFBundleTypeRole</key><string>Editor</string>
+        <key>LSItemContentTypes</key><array><string>net.nexusgen.nebulens.print-order</string></array>
+    </dict></array>
+    <key>UTExportedTypeDeclarations</key>
+    <array><dict>
+        <key>UTTypeIdentifier</key><string>net.nexusgen.nebulens.print-order</string>
+        <key>UTTypeDescription</key><string>Nebulens Print Order</string>
+        <key>UTTypeConformsTo</key><array><string>public.json</string></array>
+        <key>UTTypeTagSpecification</key><dict>
+            <key>public.filename-extension</key><array><string>nebprint</string></array>
+        </dict>
+    </dict></array>
     <key>CFBundleShortVersionString</key>
     <string>${MACOSX_BUNDLE_SHORT_VERSION_STRING}</string>
     <key>CFBundleVersion</key>

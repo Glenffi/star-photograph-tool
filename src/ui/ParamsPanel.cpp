@@ -5,6 +5,7 @@
 #include "StyleTokens.h"
 #include "UiAssets.h"
 #include "core/PresetManager.h"
+#include "core/PrintOrderDocument.h"
 #include <QCoreApplication>
 #include <QScrollArea>
 #include <QVBoxLayout>
@@ -186,6 +187,169 @@ void updateCalibrationSource(QLabel* label, QPushButton* clearButton,
         label->setAccessibleDescription(QString());
     }
     clearButton->setEnabled(!rawPaths.isEmpty() || !masterPath.isEmpty());
+}
+
+Preset scenePreset(ProcessingScene scene) {
+    switch (scene) {
+    case ProcessingScene::Nightscape:
+    case ProcessingScene::SkyGround:
+        return PresetManager::builtinPresets().value(0);
+    case ProcessingScene::DeepSky:
+        return PresetManager::builtinPresets().value(1);
+    case ProcessingScene::SingleFrame: {
+        Preset preset;
+        preset.stackMethod = "median";
+        preset.autoRejectLowQualityFrames = false;
+        preset.photometricNormalizationEnabled = false;
+        preset.noiseReductionEnabled = true;
+        preset.noiseReductionStrength = 25;
+        preset.stretchEnabled = true;
+        return preset;
+    }
+    case ProcessingScene::StarTrail:
+    case ProcessingScene::Timelapse: {
+        Preset preset;
+        preset.autoRejectLowQualityFrames = false;
+        preset.stretchEnabled = scene == ProcessingScene::StarTrail;
+        return preset;
+    }
+    }
+    return {};
+}
+
+struct OrderSettings {
+    Preset preset;
+    bool skyGround = false;
+    QString skyGroundMode = QStringLiteral("auto");
+    int feather = 20;
+    QString groundMethod = QStringLiteral("average");
+    int groundDetail = 40;
+    int timelapseWindow = 5;
+    int timelapseStrength = 80;
+    int timelapseMotionProtection = 75;
+    bool timelapseProtectGround = true;
+    int starTrailCometStrength = 0;
+    bool starTrailReverse = false;
+    bool starTrailProtectGround = true;
+    bool saveGeneratedMasters = false;
+    QString modifiedCameraColorMode = QStringLiteral("auto");
+    double grayPointX = -1.0;
+    double grayPointY = -1.0;
+};
+
+// 文档只使用固定键和真实单位，不保存翻译后的文字或控件索引。
+template <typename Visitor>
+void visitOrderSettings(OrderSettings& settings, const Visitor& field) {
+    auto& preset = settings.preset;
+    auto& basic = preset.basicAdjustments;
+    field("stackMethod", preset.stackMethod,
+          QStringList{"median", "average", "kappa-sigma", "winsorized"});
+    field("kappa", preset.kappaValue, 1.0, 5.0);
+    field("autoReject", preset.autoRejectLowQualityFrames);
+    field("photometric", preset.photometricNormalizationEnabled);
+    field("dewarpEnabled", preset.dewarpEnabled);
+    field("dewarpStrength", preset.dewarpStrength, 0, 100);
+    field("noiseReductionEnabled", preset.noiseReductionEnabled);
+    field("noiseReductionStrength", preset.noiseReductionStrength, 0, 70);
+    field("modifiedCameraColorEnabled", preset.modifiedCameraColorEnabled);
+    field("modifiedCameraColorStrength", preset.modifiedCameraColorStrength, 0, 100);
+    field("modifiedCameraColorMode", settings.modifiedCameraColorMode,
+          QStringList{"auto", "manual"});
+    field("stretchEnabled", preset.stretchEnabled);
+    field("temperature", basic.temperature, -100, 100);
+    field("tint", basic.tint, -100, 100);
+    field("exposureTenths", basic.exposureTenths, -50, 50);
+    field("contrast", basic.contrast, -100, 100);
+    field("highlights", basic.highlights, -100, 100);
+    field("shadows", basic.shadows, -100, 100);
+    field("whites", basic.whites, -100, 100);
+    field("blacks", basic.blacks, -100, 100);
+    field("vibrance", basic.vibrance, -100, 100);
+    field("saturation", basic.saturation, -100, 100);
+    field("sharpening", basic.sharpening, 0, 100);
+    field("starDefringeEnabled", preset.starDefringeEnabled);
+    field("starDefringeStrength", preset.starDefringeStrength, 0, 100);
+    field("starReduceEnabled", preset.starReduceEnabled);
+    field("starReduceStrength", preset.starReduceStrength, 0, 100);
+    field("outputFormat", preset.outputFormat, QStringList{"tiff16", "png8"});
+    field("skyGround", settings.skyGround);
+    field("skyGroundMode", settings.skyGroundMode, QStringList{"auto", "user-mask"});
+    field("feather", settings.feather, 0, 50);
+    field("groundMethod", settings.groundMethod, QStringList{"average", "reference", "median"});
+    field("groundDetail", settings.groundDetail, 0, 70);
+    field("timelapseWindow", settings.timelapseWindow, 3, 5);
+    field("timelapseStrength", settings.timelapseStrength, 0, 100);
+    field("timelapseMotionProtection", settings.timelapseMotionProtection, 0, 100);
+    field("timelapseProtectGround", settings.timelapseProtectGround);
+    field("starTrailCometStrength", settings.starTrailCometStrength, 0, 100);
+    field("starTrailReverse", settings.starTrailReverse);
+    field("starTrailProtectGround", settings.starTrailProtectGround);
+    field("saveGeneratedMasters", settings.saveGeneratedMasters);
+}
+
+bool readOrderValue(const QJsonValue& value, bool& result) {
+    if (!value.isBool()) return false;
+    result = value.toBool();
+    return true;
+}
+
+bool readOrderValue(const QJsonValue& value, double& result, double min, double max) {
+    if (!value.isDouble()) return false;
+    const double number = value.toDouble();
+    if (!(number >= min && number <= max)) return false;
+    result = number;
+    return true;
+}
+
+bool readOrderValue(const QJsonValue& value, int& result, int min, int max) {
+    double number;
+    if (!readOrderValue(value, number, min, max) || number != std::trunc(number)) {
+        return false;
+    }
+    result = static_cast<int>(number);
+    return true;
+}
+
+bool readOrderValue(const QJsonValue& value, QString& result, const QStringList& choices) {
+    if (!value.isString() || !choices.contains(value.toString())) return false;
+    result = value.toString();
+    return true;
+}
+
+bool decodeOrderSettings(const QJsonObject& params, OrderSettings& settings, QString& error) {
+    error.clear();
+    const auto invalid = [&error](QLatin1String key) {
+        error = QCoreApplication::translate("Nebulens", "冲印单参数无效：%1").arg(key);
+        return false;
+    };
+    const auto field = [&params, &error, &invalid](const char* name, auto& result,
+                                                 const auto&... constraints) {
+        if (!error.isEmpty()) return;
+        const QLatin1String key(name);
+        const auto value = params.value(key);
+        if (!value.isUndefined() && !readOrderValue(value, result, constraints...)) {
+            invalid(key);
+        }
+    };
+    // 只校验当前版本认识的键；缺省项沿用场景值，额外键不参与还原。
+    visitOrderSettings(settings, field);
+    field("modifiedCameraGrayPointX", settings.grayPointX, 0.0, 1.0);
+    field("modifiedCameraGrayPointY", settings.grayPointY, 0.0, 1.0);
+    if (!error.isEmpty()) return false;
+
+    const double kappaTenths = settings.preset.kappaValue * 10.0;
+    if (std::abs(kappaTenths - std::round(kappaTenths)) > 1e-8) {
+        return invalid(QLatin1String("kappa"));
+    }
+    if (settings.timelapseWindow != 3 && settings.timelapseWindow != 5) {
+        return invalid(QLatin1String("timelapseWindow"));
+    }
+    const bool hasX = settings.grayPointX >= 0.0;
+    const bool hasY = settings.grayPointY >= 0.0;
+    if (hasX != hasY || (!hasX && settings.modifiedCameraColorMode == "manual")) {
+        return invalid(QLatin1String("modifiedCameraGrayPointX/Y"));
+    }
+    return true;
 }
 
 } // namespace
@@ -673,6 +837,7 @@ void ParamsPanel::setupUI() {
     stackLayout->addLayout(btnRow);
 
     m_maskPathLabel = new QLabel(m_stackGroup);
+    m_maskPathLabel->setTextFormat(Qt::PlainText);
     m_maskPathLabel->setVisible(false);
     setRole(m_maskPathLabel, "muted");
     stackLayout->addWidget(m_maskPathLabel);
@@ -1701,6 +1866,8 @@ void ParamsPanel::recommendStackMethod(int frameCount) {
 }
 
 void ParamsPanel::saveCurrentSettings() {
+    // 处理和关闭窗口仍会自动保存偏好，但不能用复开的文档覆盖它们。
+    if (m_orderSettingsRestored) return;
     QSettings settings("StarProcessor", "App");
     settings.setValue("stackMethod", m_stackAlgorithm->currentIndex());
     settings.setValue("kappaValue", m_kappaSlider->value());
@@ -1750,6 +1917,139 @@ void ParamsPanel::saveCurrentSettings() {
     settings.setValue("starTrailCometStrength", starTrailCometStrength());
     settings.setValue("starTrailReverse", starTrailReverse());
     settings.setValue("starTrailProtectGround", starTrailProtectGround());
+}
+
+void ParamsPanel::captureOrderSettings(PrintOrderDocument& document) const {
+    OrderSettings settings;
+    auto& preset = settings.preset;
+    preset.stackMethod = stackMethod();
+    preset.kappaValue = kappaValue();
+    preset.autoRejectLowQualityFrames = autoRejectLowQualityFrames();
+    preset.photometricNormalizationEnabled = photometricNormalizationEnabled();
+    preset.dewarpEnabled = dewarpEnabled();
+    preset.dewarpStrength = dewarpStrength();
+    preset.noiseReductionEnabled = noiseReductionEnabled();
+    preset.noiseReductionStrength = noiseReductionStrength();
+    preset.modifiedCameraColorEnabled = modifiedCameraColorEnabled();
+    preset.modifiedCameraColorStrength = modifiedCameraColorStrength();
+    preset.stretchEnabled = stretchEnabled();
+    preset.basicAdjustments = basicAdjustmentOptions();
+    preset.starDefringeEnabled = starDefringeEnabled();
+    preset.starDefringeStrength = starDefringeStrength();
+    preset.starReduceEnabled = starReduceEnabled();
+    preset.starReduceStrength = starReduceStrength();
+    preset.outputFormat = outputFormat();
+
+    settings.skyGround = skyGroundSeparationEnabled();
+    settings.skyGroundMode = skyGroundMode() == SkyGroundMask::UserMask
+        ? QStringLiteral("user-mask") : QStringLiteral("auto");
+    settings.feather = featherRadius();
+    settings.groundMethod = groundStackMethod();
+    settings.groundDetail = groundDetailStrength();
+    settings.timelapseWindow = timelapseWindowSize();
+    settings.timelapseStrength = timelapseStrength();
+    settings.timelapseMotionProtection = timelapseMotionProtection();
+    settings.timelapseProtectGround = timelapseProtectGround();
+    settings.starTrailCometStrength = starTrailCometStrength();
+    settings.starTrailReverse = starTrailReverse();
+    settings.starTrailProtectGround = starTrailProtectGround();
+    settings.saveGeneratedMasters = saveGeneratedMasters();
+    settings.modifiedCameraColorMode = modifiedCameraColorMode() ==
+            ModifiedCameraNeutralMode::ManualPoint
+        ? QStringLiteral("manual") : QStringLiteral("auto");
+
+    QJsonObject params;
+    visitOrderSettings(settings, [&params](const char* key, const auto& value,
+                                         const auto&...) {
+        params.insert(QLatin1String(key), QJsonValue(value));
+    });
+    if (hasModifiedCameraGrayPoint()) {
+        params.insert(QStringLiteral("modifiedCameraGrayPointX"), modifiedCameraGrayPointX());
+        params.insert(QStringLiteral("modifiedCameraGrayPointY"), modifiedCameraGrayPointY());
+    }
+    document.params = params;
+    document.dark = m_darkFramePaths;
+    document.flat = m_flatFramePaths;
+    document.bias = m_biasFramePaths;
+    document.darkFlat = m_darkFlatFramePaths;
+    document.masterDark = m_masterDarkPath;
+    document.masterFlat = m_masterFlatPath;
+    document.masterBias = m_masterBiasPath;
+    document.masterDarkFlat = m_masterDarkFlatPath;
+    document.userMask = m_userMaskPath;
+    document.outputDirectory = outputPath();
+}
+
+bool ParamsPanel::validateOrderSettings(const PrintOrderDocument& document,
+                                        QString& error) {
+    OrderSettings settings;
+    return decodeOrderSettings(document.params, settings, error);
+}
+
+void ParamsPanel::restoreOrderSettings(const PrintOrderDocument& document) {
+    // 场景由主窗口先切换。即使没有切换到不同场景，缺省值也不继承旧控件。
+    OrderSettings settings;
+    settings.preset = scenePreset(m_scene);
+    settings.skyGround = m_scene == ProcessingScene::SkyGround;
+    QString error;
+    if (!decodeOrderSettings(document.params, settings, error)) return;
+
+    {
+        const QSignalBlocker panelBlocker(this);
+        m_orderSettingsRestored = true;
+        applyPreset(settings.preset);
+        m_userChangedStackMethod = true;
+
+        m_skyGroundCheck->setChecked(settings.skyGround);
+        m_skyGroundMode->setCurrentIndex(settings.skyGroundMode == "user-mask" ? 1 : 0);
+        m_userMaskPath = document.userMask;
+        m_maskPathLabel->setText(QFileInfo(m_userMaskPath).fileName());
+        m_featherSlider->setValue(settings.feather);
+        m_groundStackMethod->setCurrentIndex(m_groundStackMethod->findData(settings.groundMethod));
+        m_groundDetailSlider->setValue(settings.groundDetail);
+        updateSkyGroundControls();
+
+        m_timelapseWindow->setCurrentIndex(m_timelapseWindow->findData(settings.timelapseWindow));
+        m_timelapseStrengthSlider->setValue(settings.timelapseStrength);
+        m_timelapseMotionProtectionSlider->setValue(settings.timelapseMotionProtection);
+        m_timelapseProtectGroundCheck->setChecked(settings.timelapseProtectGround);
+        m_starTrailCometSlider->setValue(settings.starTrailCometStrength);
+        m_starTrailReverseCheck->setChecked(settings.starTrailReverse);
+        m_starTrailProtectGroundCheck->setChecked(settings.starTrailProtectGround);
+
+        m_modifiedCameraGrayPointX = settings.grayPointX;
+        m_modifiedCameraGrayPointY = settings.grayPointY;
+        m_modifiedCameraColorMode->setCurrentIndex(settings.modifiedCameraColorMode == "manual" ? 1 : 0);
+        updateModifiedCameraColorControls();
+
+        m_darkFramePaths = document.dark;
+        m_flatFramePaths = document.flat;
+        m_biasFramePaths = document.bias;
+        m_darkFlatFramePaths = document.darkFlat;
+        m_masterDarkPath = document.masterDark;
+        m_masterFlatPath = document.masterFlat;
+        m_masterBiasPath = document.masterBias;
+        m_masterDarkFlatPath = document.masterDarkFlat;
+        updateCalibrationSource(m_darkFrameCount, m_darkFrameClear, m_darkFramePaths, m_masterDarkPath);
+        updateCalibrationSource(m_flatFrameCount, m_flatFrameClear, m_flatFramePaths, m_masterFlatPath);
+        updateCalibrationSource(m_biasFrameCount, m_biasFrameClear, m_biasFramePaths, m_masterBiasPath);
+        updateCalibrationSource(m_darkFlatFrameCount, m_darkFlatFrameClear, m_darkFlatFramePaths, m_masterDarkFlatPath);
+        m_saveGeneratedMastersCheck->setChecked(settings.saveGeneratedMasters);
+        updateCalibrationStatus();
+
+        QString reference = document.reference;
+#ifdef Q_OS_WIN
+        // 文档可用不同大小写引用同一张片，控件应保留片列里的路径拼写。
+        const auto light = std::find_if(m_referenceFiles.cbegin(), m_referenceFiles.cend(),
+            [&reference](const QString& path) { return path.compare(reference, Qt::CaseInsensitive) == 0; });
+        if (light != m_referenceFiles.cend()) reference = *light;
+#endif
+        setSelectedReferenceFrame(reference);
+        setOutputPath(document.outputDirectory.isEmpty()
+                          ? defaultOutputPath() : document.outputDirectory);
+        m_debounceTimer->stop();
+    }
+    emitParamsChanged();
 }
 
 void ParamsPanel::loadCustomPresets() {
@@ -2212,77 +2512,43 @@ void ParamsPanel::applyPreset(const Preset& preset) {
 void ParamsPanel::applySceneProfile(ProcessingScene scene,
                                     bool resetParameters) {
     m_scene = scene;
-    const QList<Preset> builtins = PresetManager::builtinPresets();
-    Preset preset;
     int presetIndex = 0;
     int activeTab = 0;
     QString title;
-    bool skyGroundEnabled = false;
 
     switch (scene) {
     case ProcessingScene::SingleFrame:
-        preset.name = QCoreApplication::translate("Nebulens", "单张精修");
-        preset.stackMethod = "median";
-        preset.autoRejectLowQualityFrames = false;
-        preset.photometricNormalizationEnabled = false;
-        preset.noiseReductionEnabled = true;
-        preset.noiseReductionStrength = 25;
-        preset.stretchEnabled = true;
-        preset.starReduceEnabled = false;
         title = QCoreApplication::translate("Nebulens", "单张精修参数");
         activeTab = 1;
         break;
     case ProcessingScene::Nightscape:
-        if (!builtins.isEmpty()) preset = builtins[0];
         presetIndex = 1;
         title = QCoreApplication::translate("Nebulens", "银河星景参数");
         break;
     case ProcessingScene::DeepSky:
-        if (builtins.size() > 1) preset = builtins[1];
         presetIndex = 2;
         title = QCoreApplication::translate("Nebulens", "深空堆栈参数");
         break;
     case ProcessingScene::SkyGround:
-        if (!builtins.isEmpty()) preset = builtins[0];
-        presetIndex = 0;
-        skyGroundEnabled = true;
         title = QCoreApplication::translate("Nebulens", "天地分离参数");
         break;
     case ProcessingScene::StarTrail:
-        preset.name = QCoreApplication::translate("Nebulens", "星轨合成");
-        preset.stackMethod = "average";
-        preset.autoRejectLowQualityFrames = false;
-        preset.photometricNormalizationEnabled = true;
-        preset.noiseReductionEnabled = false;
-        preset.dewarpEnabled = false;
-        preset.stretchEnabled = true;
-        preset.starReduceEnabled = false;
-        presetIndex = 0;
         title = QCoreApplication::translate("Nebulens", "星轨合成参数");
         break;
     case ProcessingScene::Timelapse:
-        preset.name = QCoreApplication::translate("Nebulens", "延时序列");
-        preset.stackMethod = "average";
-        preset.autoRejectLowQualityFrames = false;
-        preset.photometricNormalizationEnabled = true;
-        preset.noiseReductionEnabled = false;
-        preset.dewarpEnabled = false;
-        preset.stretchEnabled = false;
-        preset.starReduceEnabled = false;
-        presetIndex = 0;
         title = QCoreApplication::translate("Nebulens", "延时序列参数");
         break;
     }
 
     if (resetParameters) {
         m_userChangedStackMethod = false;
-        applyPreset(preset);
+        applyPreset(scenePreset(scene));
 
         const QSignalBlocker presetBlocker(m_presetCombo);
         const QSignalBlocker skyGroundBlocker(m_skyGroundCheck);
         m_presetCombo->setCurrentIndex(
             std::clamp(presetIndex, 0, m_presetCombo->count() - 1));
-        m_skyGroundCheck->setChecked(skyGroundEnabled);
+        m_skyGroundCheck->setChecked(scene == ProcessingScene::SkyGround);
     }
     updateSkyGroundControls();
 
@@ -2744,6 +3010,7 @@ void ParamsPanel::setOutputPath(const QString& path) {
 
 void ParamsPanel::clearProjectSources() {
     m_debounceTimer->stop();
+    m_orderSettingsRestored = false;
     clearCalibrationSources();
     clearModifiedCameraGrayPoint();
     clearUserMask();

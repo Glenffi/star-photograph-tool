@@ -85,6 +85,9 @@ public:
     ~ProjectPanel();
 
     void addFiles(const QStringList& filePaths);
+    // 静默恢复片列；调用方恢复其余项目状态后再按 currentFilePath() 加载预览。
+    void restoreOrderFiles(const QStringList& lights, const QStringList& excluded,
+                           const QString& selected, const QString& reference);
     void clearFiles();
     void removeSelected();
     void toggleSelectedExclusion();
@@ -100,6 +103,8 @@ public:
 
     QStringList filePaths() const;
     QStringList includedFilePaths() const;  // 未排除的文件
+    QStringList allFilePaths() const;       // 片列顺序，包含排除项
+    QStringList excludedFilePaths() const;
     int totalFileCount() const { return m_fileItems.size(); }
     QString currentFilePath() const;
     QString referenceFramePath() const;

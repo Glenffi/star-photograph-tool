@@ -1,6 +1,7 @@
 #include "PrintOrderPanel.h"
 
 #include <QAbstractButton>
+#include <QAction>
 #include <QApplication>
 #include <QButtonGroup>
 #include <QComboBox>
@@ -12,6 +13,7 @@
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QLineEdit>
+#include <QMenu>
 #include <QPainter>
 #include <QPointer>
 #include <QProgressBar>
@@ -552,6 +554,16 @@ QWidget#printOrderPanel { background-color: #202b28; }
 #printOrderPanel QPushButton[printRole="stage"]:hover { background: rgba(45, 72, 62, 20); }
 #printOrderPanel QPushButton[printRole="link"]:focus,
 #printOrderPanel QPushButton[printRole="stage"]:focus { border-color: #355a4e; }
+#printOrderPanel QPushButton#printOrderFileButton { padding-right: 20px; }
+#printOrderPanel QPushButton#printOrderFileButton::menu-indicator {
+    subcontrol-origin: padding; subcontrol-position: right center; right: 6px;
+}
+#printOrderPanel QMenu#printOrderFileMenu {
+    color: #253d33; background: #f9f4e7; border: 1px solid #938b75; padding: 4px;
+}
+#printOrderPanel QMenu#printOrderFileMenu::item { padding: 5px 16px; }
+#printOrderPanel QMenu#printOrderFileMenu::item:selected { background: #dce1d2; }
+#printOrderPanel QMenu#printOrderFileMenu::item:disabled { color: #6e6c60; }
 #printOrderPanel QPushButton[printRole="stage"] {
     color: #534f40; border-radius: 0; border-bottom: 2px solid transparent;
 }
@@ -651,6 +663,9 @@ struct PrintOrderPanel::Ui : QObject {
     QLabel* lightLabel = nullptr;
     QComboBox* lightField = nullptr;
     QLabel* orderTitle = nullptr;
+    QPushButton* orderFiles = nullptr;
+    QAction* openOrder = nullptr;
+    QAction* saveOrder = nullptr;
     QLabel* productTitle = nullptr;
     QLabel* assetsTitle = nullptr;
     QLabel* outputTitle = nullptr;
@@ -685,6 +700,7 @@ struct PrintOrderPanel::Ui : QObject {
     QLineEdit* resultPath = nullptr;
     QLabel* summaryLabel = nullptr;
     ElidedLabel* summaryValue = nullptr;
+    QPushButton* ridgeComparison = nullptr;
     QPushButton* advanced = nullptr;
     QPushButton* back = nullptr;
     QPushButton* next = nullptr;
@@ -703,6 +719,7 @@ struct PrintOrderPanel::Ui : QObject {
     const QImage sampleImage{QStringLiteral(":/print-order/lake-complete.jpg")};
     QImage proofImage;
     QString proofCaption;
+    bool ridgeComparisonAvailable = false;
     bool busy = false;
     bool cancelPending = false;
     bool retry = false;
@@ -819,6 +836,17 @@ struct PrintOrderPanel::Ui : QObject {
         mastRow->setSpacing(7);
         orderTitle = label(paper, "printOrderTitle", "heading");
         mastRow->addWidget(orderTitle);
+        orderFiles = command(paper, "printOrderFileButton", "link");
+        auto* orderMenu = new QMenu(orderFiles);
+        orderMenu->setObjectName(QStringLiteral("printOrderFileMenu"));
+        openOrder = new QAction(orderMenu);
+        openOrder->setObjectName(QStringLiteral("printOrderOpen"));
+        saveOrder = new QAction(orderMenu);
+        saveOrder->setObjectName(QStringLiteral("printOrderSave"));
+        orderMenu->addAction(openOrder);
+        orderMenu->addAction(saveOrder);
+        orderFiles->setMenu(orderMenu);
+        mastRow->addWidget(orderFiles, 0, Qt::AlignBottom);
         mastRow->addStretch();
         stageGroup = new QButtonGroup(this);
         constexpr std::array stageNames{
@@ -862,11 +890,13 @@ struct PrintOrderPanel::Ui : QObject {
         summary->addWidget(summaryLabel);
         summary->addWidget(summaryValue);
         stub->addLayout(summary, 1);
+        ridgeComparison = command(paper, "printOrderRidgeComparison");
         advanced = command(paper, "printOrderAdvanced", "link");
         back = command(paper, "printOrderBack", "link");
         next = command(paper, "printOrderNext", "primary");
         newOrder = command(paper, "printOrderNewOrder", "link");
         reveal = command(paper, "printOrderReveal", "primary");
+        stub->addWidget(ridgeComparison);
         stub->addWidget(advanced);
         stub->addWidget(back);
         stub->addWidget(next);
@@ -1037,6 +1067,15 @@ struct PrintOrderPanel::Ui : QObject {
 };
 
 void PrintOrderPanel::Ui::connectControls() {
+    connect(openOrder, &QAction::triggered, this, [this]() {
+        if (!busy) emit owner->openOrderRequested();
+    });
+    connect(saveOrder, &QAction::triggered, this, [this]() {
+        if (!busy) emit owner->saveOrderRequested();
+    });
+    connect(ridgeComparison, &QPushButton::clicked, this, [this]() {
+        if (!busy && ridgeComparisonAvailable) emit owner->ridgeComparisonRequested();
+    });
     connect(stageGroup, &QButtonGroup::idClicked, this, [this](int index) {
         setStep(static_cast<Step>(index));
     });
@@ -1138,6 +1177,9 @@ void PrintOrderPanel::Ui::retranslate() {
         ? QCoreApplication::translate("Nebulens", "已遵循系统的减弱动态效果设置")
         : QString());
     orderTitle->setText(QCoreApplication::translate("Nebulens", "冲印单"));
+    orderFiles->setText(QCoreApplication::translate("Nebulens", "单据"));
+    openOrder->setText(QCoreApplication::translate("Nebulens", "打开冲印单"));
+    saveOrder->setText(QCoreApplication::translate("Nebulens", "保存冲印单"));
     stageButtons[0]->setText(QStringLiteral("01   %1").arg(QCoreApplication::translate("Nebulens", "成品")));
     stageButtons[1]->setText(QStringLiteral("02   %1").arg(QCoreApplication::translate("Nebulens", "素材")));
     stageButtons[2]->setText(QStringLiteral("03   %1").arg(QCoreApplication::translate("Nebulens", "保存")));
@@ -1195,6 +1237,7 @@ void PrintOrderPanel::Ui::retranslate() {
     resultCountLabel->setText(QCoreApplication::translate("Nebulens", "交付"));
     resultPathLabel->setText(QCoreApplication::translate("Nebulens", "实际保存位置"));
     resultPath->setAccessibleName(resultPathLabel->text());
+    ridgeComparison->setText(QCoreApplication::translate("Nebulens", "山脊对照"));
     advanced->setText(QCoreApplication::translate("Nebulens", "高级设置"));
     back->setText(QCoreApplication::translate("Nebulens", "上一步"));
     newOrder->setText(QCoreApplication::translate("Nebulens", "重新开单"));
@@ -1340,6 +1383,12 @@ void PrintOrderPanel::Ui::refresh() {
     calibration->setEnabled(editing);
     ground->setEnabled(editing);
 
+    orderFiles->setEnabled(!busy);
+    openOrder->setEnabled(!busy);
+    saveOrder->setEnabled(!busy);
+    if (busy && orderFiles->menu()->isVisible()) orderFiles->menu()->close();
+    ridgeComparison->setVisible(ridgeComparisonAvailable);
+    ridgeComparison->setEnabled(!busy && ridgeComparisonAvailable);
     advanced->setVisible(editing);
     back->setVisible(editing && shown != Step::Product);
     newOrder->setVisible(complete);
@@ -1594,6 +1643,21 @@ void PrintOrderPanel::clearReceipt() {
     m_ui->refresh();
 }
 
+void PrintOrderPanel::setRidgeComparisonAvailable(bool available) {
+    if (m_ui->ridgeComparisonAvailable == available) return;
+    m_ui->ridgeComparisonAvailable = available;
+    m_ui->refresh();
+}
+
+void PrintOrderPanel::showReopenedOrder() {
+    if (m_ui->busy) return;
+    m_ui->step = m_ui->total > 0 ? Step::Assets : Step::Product;
+    m_ui->retry = false;
+    m_ui->progress = -1;
+    m_ui->status.clear();
+    clearReceipt();
+}
+
 void PrintOrderPanel::resetOrder() {
     m_ui->step = Step::Product;
     m_ui->scene = ProcessingScene::Nightscape;
@@ -1604,6 +1668,7 @@ void PrintOrderPanel::resetOrder() {
     m_ui->calibrationHint.clear();
     m_ui->proofImage = QImage();
     m_ui->proofCaption.clear();
+    m_ui->ridgeComparisonAvailable = false;
     m_ui->busy = false;
     m_ui->cancelPending = false;
     m_ui->retry = false;

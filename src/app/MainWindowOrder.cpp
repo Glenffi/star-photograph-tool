@@ -4,6 +4,7 @@
 #include "ui/ParamsPanel.h"
 #include "ui/PreviewPanel.h"
 #include "ui/PrintOrderPanel.h"
+#include "ui/RidgeComparisonDialog.h"
 #include "ui/ProjectPanel.h"
 #include "ui/TaskStatusBar.h"
 #include "ui/Toolbar.h"
@@ -47,6 +48,14 @@ private:
 }
 
 void MainWindow::connectPrintOrder() {
+    connect(m_printOrder, &PrintOrderPanel::openOrderRequested, this, [this] { requestOpenPrintOrder(); });
+    connect(m_printOrder, &PrintOrderPanel::saveOrderRequested, this, [this] { requestSavePrintOrder(); });
+    connect(m_printOrder, &PrintOrderPanel::ridgeComparisonRequested, this, [this] {
+        QString error;
+        if (!m_comparisonManifest.isEmpty() &&
+            !RidgeComparisonDialog::openForManifest(m_comparisonManifest, this, error))
+            QMessageBox::warning(this, QCoreApplication::translate("Nebulens", "山脊对照"), error);
+    });
     connect(m_printOrder, &PrintOrderPanel::productRequested, this, &MainWindow::selectProduct);
     connect(m_printOrder, &PrintOrderPanel::importFilesRequested, this, &MainWindow::onImportClicked);
     connect(m_printOrder, &PrintOrderPanel::importFolderRequested, this, &MainWindow::onImportFolderClicked);
@@ -63,7 +72,9 @@ void MainWindow::connectPrintOrder() {
         }
     });
     connect(m_printOrder, &PrintOrderPanel::processRequested, this, &MainWindow::onProcessClicked);
-    connect(m_printOrder, &PrintOrderPanel::newOrderRequested, this, &MainWindow::resetProject);
+    connect(m_printOrder, &PrintOrderPanel::newOrderRequested, this, [this] {
+        if (m_orderFilePath.isEmpty() || confirmOrderReplacement()) resetProject();
+    });
     connect(m_printOrder, &PrintOrderPanel::revealRequested, this, &MainWindow::revealDelivery);
     connect(m_toolbar, &Toolbar::printOrderRequested, this, &MainWindow::showPrintOrder);
     connect(m_paramsPanel, &ParamsPanel::referenceChoiceChanged, m_projectPanel,
@@ -135,6 +146,11 @@ void MainWindow::revealDelivery(const QString& path) {
 void MainWindow::resetProject() {
     if (processingActive()) return;
     m_resettingProject = true;
+    m_orderFilePath.clear();
+    m_orderFileBaseline.clear();
+    m_comparisonManifest.clear();
+    m_printOrder->setRidgeComparisonAvailable(false);
+    setWindowFilePath({});
     ++m_orderGeneration;
     for (auto* worker : m_activeMaskPreviewWorkers) worker->requestInterruption();
     m_maskPreviewWorker = nullptr; // 活动任务仍由集合持有，过期回调不得恢复蒙版。
@@ -209,6 +225,8 @@ void MainWindow::setTaskFeedback(bool busy, int progress, const QString& message
     m_taskMessage = message;
     m_taskProgress = progress;
     m_printOrder->setTask(busy, progress, message);
+    for (auto* action : {m_openOrderAction, m_saveOrderAction, m_saveOrderAsAction})
+        if (action) action->setEnabled(!busy);
 }
 
 bool MainWindow::matchesDeliverySnapshot(const DeliverySnapshot& snapshot) const {
