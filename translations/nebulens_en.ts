@@ -4,6 +4,210 @@
     <context>
         <name>Nebulens</name>
         <message>
+            <source>匹配星点太少</source>
+            <translation>Too few matching stars</translation>
+        </message>
+        <message>
+            <source>匹配星点未覆盖足够画面</source>
+            <translation>Matching stars cover too little of the frame</translation>
+        </message>
+        <message>
+            <source>星点匹配无法确定对齐方式</source>
+            <translation>Star matches could not determine a transform</translation>
+        </message>
+        <message>
+            <source>星点对齐后的偏差过大</source>
+            <translation>Stars are too far apart after alignment</translation>
+        </message>
+        <message>
+            <source>星点对齐未达到质量要求</source>
+            <translation>Alignment did not meet the quality threshold</translation>
+        </message>
+        <message>
+            <source>本次没有可导出的交付回执。</source>
+            <translation>There is no completed receipt to export.</translation>
+        </message>
+        <message>
+            <source>请检查所选位置的写入权限和剩余空间。</source>
+            <translation>Check available space and write access at the chosen location.</translation>
+        </message>
+        <message>
+            <source>请选择可写入的本地 JSON 文件。</source>
+            <translation>Choose a writable local JSON file.</translation>
+        </message>
+        <message>
+            <source>JSON 文件 (*.json)</source>
+            <translation>JSON files (*.json)</translation>
+        </message>
+        <message>
+            <source>入选 %1 张，采用 %2 张 · 跳过 %3 张</source>
+            <translation>%1 submitted, %2 used · %3 skipped</translation>
+        </message>
+        <message>
+            <source>入选 %1 张，采用 %2 张 · 跳过 %3 张 · 手动排除 %4 张</source>
+            <translation>%1 submitted, %2 used · %3 skipped · %4 manually excluded</translation>
+        </message>
+        <message>
+            <source>全部原片</source>
+            <translation>All frames</translation>
+        </message>
+        <message>
+            <source>关闭</source>
+            <translation>Close</translation>
+        </message>
+        <message>
+            <source>原因</source>
+            <translation>Reason</translation>
+        </message>
+        <message>
+            <source>原片</source>
+            <translation>Source</translation>
+        </message>
+        <message>
+            <source>参考原片</source>
+            <translation>Reference frame</translation>
+        </message>
+        <message>
+            <source>只保存本地匿名文件，不包含照片、文件名或路径。</source>
+            <translation>Saves a local anonymous file without photos, filenames or paths.</translation>
+        </message>
+        <message>
+            <source>可用于对齐的星点太少</source>
+            <translation>Too few stars to align</translation>
+        </message>
+        <message>
+            <source>含本机输出路径；对外反馈可使用冲印回执中的匿名诊断。</source>
+            <translation>Contains local output paths. Use the receipt's anonymous diagnostics for feedback.</translation>
+        </message>
+        <message>
+            <source>处理前手动取消选用</source>
+            <translation>Excluded before processing</translation>
+        </message>
+        <message>
+            <source>处理时跳过，未记录具体原因</source>
+            <translation>Skipped; no specific reason recorded</translation>
+        </message>
+        <message>
+            <source>导出匿名诊断</source>
+            <translation>Export anonymous diagnostics</translation>
+        </message>
+        <message>
+            <source>导出匿名诊断…</source>
+            <translation>Export anonymous diagnostics…</translation>
+        </message>
+        <message>
+            <source>已采用</source>
+            <translation>Used</translation>
+        </message>
+        <message>
+            <source>所选原片</source>
+            <translation>Selected frame</translation>
+        </message>
+        <message>
+            <source>手动排除</source>
+            <translation>Manually excluded</translation>
+        </message>
+        <message>
+            <source>找不到原片文件</source>
+            <translation>Source file not found</translation>
+        </message>
+        <message>
+            <source>按用片结果筛选</source>
+            <translation>Filter by frame outcome</translation>
+        </message>
+        <message>
+            <source>无法与参考帧对齐</source>
+            <translation>Could not align to the reference</translation>
+        </message>
+        <message>
+            <source>无法保存匿名诊断</source>
+            <translation>Could not save anonymous diagnostics</translation>
+        </message>
+        <message>
+            <source>无法将原片变换到输出画面</source>
+            <translation>Could not resample this frame</translation>
+        </message>
+        <message>
+            <source>无法解码原片预览</source>
+            <translation>Could not decode the source preview</translation>
+        </message>
+        <message>
+            <source>无法读取 RAW 原片</source>
+            <translation>Could not read the RAW frame</translation>
+        </message>
+        <message>
+            <source>无法读取原片文件</source>
+            <translation>Could not read the source file</translation>
+        </message>
+        <message>
+            <source>星点数</source>
+            <translation>Stars</translation>
+        </message>
+        <message>
+            <source>显示 %1 / %2 张</source>
+            <translation>Showing %1 of %2</translation>
+        </message>
+        <message>
+            <source>未交给本次处理</source>
+            <translation>Not submitted for this run</translation>
+        </message>
+        <message>
+            <source>未提交</source>
+            <translation>Not submitted</translation>
+        </message>
+        <message>
+            <source>未确认</source>
+            <translation>Unconfirmed</translation>
+        </message>
+        <message>
+            <source>未确认是否用于成品</source>
+            <translation>Use in the output could not be confirmed</translation>
+        </message>
+        <message>
+            <source>未记录原片路径</source>
+            <translation>No source path recorded</translation>
+        </message>
+        <message>
+            <source>未选择原片</source>
+            <translation>No frame selected</translation>
+        </message>
+        <message>
+            <source>未通过质量筛选</source>
+            <translation>Did not pass the quality check</translation>
+        </message>
+        <message>
+            <source>本机处理报告</source>
+            <translation>Local processing report</translation>
+        </message>
+        <message>
+            <source>本次没有参考帧</source>
+            <translation>No reference frame for this run</translation>
+        </message>
+        <message>
+            <source>正在读取预览…</source>
+            <translation>Loading preview…</translation>
+        </message>
+        <message>
+            <source>用片明细</source>
+            <translation>Frame details</translation>
+        </message>
+        <message>
+            <source>用片结果</source>
+            <translation>Outcome</translation>
+        </message>
+        <message>
+            <source>处理跳过</source>
+            <translation>Skipped in processing</translation>
+        </message>
+        <message>
+            <source>质量评分</source>
+            <translation>Quality score</translation>
+        </message>
+        <message>
+            <source>输出序号</source>
+            <translation>Output no.</translation>
+        </message>
+        <message>
             <source>100%</source>
             <translation>100%</translation>
         </message>

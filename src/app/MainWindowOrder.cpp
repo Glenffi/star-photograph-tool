@@ -1,6 +1,7 @@
 #include "app/MainWindow.h"
 
 #include "ui/FileDialogUtils.h"
+#include "ui/FrameReceiptDialog.h"
 #include "ui/ParamsPanel.h"
 #include "ui/PreviewPanel.h"
 #include "ui/PrintOrderPanel.h"
@@ -61,6 +62,7 @@ void MainWindow::connectPrintOrder() {
     connect(m_printOrder, &PrintOrderPanel::importFolderRequested, this, &MainWindow::onImportFolderClicked);
     connect(m_printOrder, &PrintOrderPanel::advancedRequested, this, &MainWindow::showAdvanced);
     connect(m_printOrder, &PrintOrderPanel::proofRequested, this, &MainWindow::inspectProof);
+    connect(m_printOrder, &PrintOrderPanel::frameReceiptRequested, this, &MainWindow::inspectFrameReceipt);
     connect(m_printOrder, &PrintOrderPanel::formatRequested, m_paramsPanel, &ParamsPanel::setOutputFormat);
     connect(m_printOrder, &PrintOrderPanel::directoryRequested, this, [this]() {
         if (processingActive()) return;
@@ -127,6 +129,38 @@ void MainWindow::selectProduct(ProcessingScene scene) {
     activateScene(scene);
 }
 
+void MainWindow::inspectFrameReceipt() {
+    if (processingActive() || m_resettingProject || m_deliveryPath.isEmpty() ||
+        m_formalFrameReceipt.rows.isEmpty()) return;
+    if (m_receiptDialog) {
+        m_receiptDialog->raise();
+        m_receiptDialog->activateWindow();
+        return;
+    }
+    auto* dialog = new FrameReceiptDialog(m_formalFrameReceipt, this);
+    dialog->setAttribute(Qt::WA_DeleteOnClose);
+    m_receiptDialog = dialog;
+    m_printOrder->setProofInspectionActive(true);
+    connect(dialog, &QDialog::finished, this, [this, dialog] {
+        if (m_receiptDialog == dialog) {
+            m_receiptDialog.clear();
+            m_printOrder->setProofInspectionActive(false);
+        }
+    });
+    dialog->open();
+}
+
+void MainWindow::clearDeliveryReceipt() {
+    if (m_receiptDialog) m_receiptDialog->reject();
+    m_deliveryPath.clear();
+    m_printOrder->clearReceipt();
+}
+
+void MainWindow::publishDeliveryReceipt(const QString& path) {
+    m_deliveryPath = path;
+    m_printOrder->setReceipt(path, m_formalFrameReceipt.deliverables, m_formalFrameReceipt);
+}
+
 void MainWindow::adaptStillScene() {
     if (!m_automaticStill || m_resettingProject || processingActive()) return;
     const auto count = m_projectPanel->includedFilePaths().size();
@@ -156,7 +190,6 @@ void MainWindow::resetProject() {
     m_maskPreviewWorker = nullptr; // 活动任务仍由集合持有，过期回调不得恢复蒙版。
     if (m_historyPreviewWorker) m_historyPreviewWorker->requestInterruption();
     invalidateCachedResult();
-    m_deliveryPath.clear();
     m_sourceProof = {};
     m_lastValidResultPreview = {};
     m_lastValidResultPreviewKey.clear();
@@ -191,8 +224,7 @@ QString MainWindow::refreshPrintOrderResult() {
         const bool formalCurrent = upstream + QStringLiteral("||") + finishing ==
             m_lastProcessedSignature;
         if (!formalCurrent && !m_deliveryPath.isEmpty()) {
-            m_deliveryPath.clear();
-            m_printOrder->clearReceipt();
+            clearDeliveryReceipt();
         }
         if (formalCurrent) {
             proof = m_formalProof;
@@ -236,8 +268,6 @@ bool MainWindow::matchesDeliverySnapshot(const DeliverySnapshot& snapshot) const
 
 void MainWindow::finishStaleDelivery(const QString& savedPath) {
     invalidateCachedResult();
-    m_deliveryPath.clear();
-    m_printOrder->clearReceipt();
     m_paramsPanel->setProcessingReport({});
     if (m_previewPanel->isShowingResult()) {
         const QString source = m_projectPanel->currentFilePath();

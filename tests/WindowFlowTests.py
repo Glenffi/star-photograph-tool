@@ -43,7 +43,7 @@ def main():
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--reopen", action="store_true")
     mode.add_argument("--example", nargs=2, type=Path, metavar=("ORDER", "BASELINE_TIFF"),
-                      help="local opt-in: reopen real RAWs and compare GUI delivery against the baseline TIFF")
+                      help="local opt-in: compare GUI frame use and RGB16 delivery with the example and baseline TIFF")
     args = parser.parse_args()
     with tempfile.TemporaryDirectory(prefix="nebulens-window-flow-") as temp:
         root = Path(temp).resolve()
@@ -60,8 +60,9 @@ def main():
             if args.example:
                 phases = [["--replay-example", *(str(p.resolve()) for p in args.example)]]
             for extra in phases:
+                # Allow both source and receipt previews to finish around the 600-second replay limit.
                 subprocess.run([str(args.window_tests.resolve()), str(root), *extra],
-                               env=env, check=True, timeout=660 if args.example else 120)
+                               env=env, check=True, timeout=720 if args.example else 120)
         except subprocess.TimeoutExpired:
             parser.exit(1, "NebulensWindowTests timed out\n")
         except subprocess.CalledProcessError as error:

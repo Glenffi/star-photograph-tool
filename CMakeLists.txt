@@ -130,6 +130,7 @@ set(APP_SOURCES
     src/app/MainWindowOrder.cpp
     src/app/MainWindowDocument.cpp
     src/ui/PrintOrderPanel.cpp
+    src/ui/FrameReceiptDialog.cpp
     src/ui/RidgeComparisonDialog.cpp
     src/i18n/AppLocalization.cpp
     src/core/ThumbnailGenerator.cpp
@@ -241,6 +242,8 @@ target_link_libraries(StarProcessorCore PUBLIC
 )
 
 add_library(StarProcessorWorkers STATIC
+    src/workers/FrameReceipt.cpp
+    src/workers/FrameReceipt.h
     src/workers/ProcessingWorker.cpp
     src/workers/ProcessingWorker.h
     src/workers/ExportWorker.cpp
@@ -350,6 +353,9 @@ if(BUILD_TESTING)
     add_executable(StarProcessorWorkerTests tests/WorkerTests.cpp)
     target_link_libraries(StarProcessorWorkerTests PRIVATE StarProcessorWorkers)
     add_test(NAME worker_lifecycle COMMAND StarProcessorWorkerTests)
+    add_executable(NebulensFrameReceiptTests tests/FrameReceiptTests.cpp)
+    target_link_libraries(NebulensFrameReceiptTests PRIVATE StarProcessorWorkers)
+    add_test(NAME frame_receipt COMMAND NebulensFrameReceiptTests)
 
     add_executable(StarProcessorOutputDeliveryTests tests/OutputDeliveryTests.cpp)
     target_link_libraries(StarProcessorOutputDeliveryTests PRIVATE StarProcessorWorkers)

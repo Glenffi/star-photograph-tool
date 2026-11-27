@@ -1,5 +1,6 @@
 #pragma once
 
+#include "FrameReceipt.h"
 #include "core/ChromaticAberrationCorrector.h"
 #include "core/FinishingPipeline.h"
 #include "core/FrameQualityEvaluator.h"
@@ -147,6 +148,10 @@ public:
     const std::vector<SkippedFrameInfo>& skippedFrames() const {
         return m_skippedFrames;
     }
+    // Pass the project Light and exclusion lists captured when this job started.
+    // An unfinished, failed, or cancelled job has an empty receipt.
+    FrameReceipt frameReceipt(const QStringList& allProjectLights,
+                              const QStringList& manualExcluded) const;
     QString errorString() const { return m_errorString; }
     QString outputFile() const { return m_outputFile; }
     int affineFrameCount() const { return m_affineFrameCount; }
@@ -227,6 +232,7 @@ protected:
 
 private:
     bool stopIfCancelled();
+    void startFrameReceipt(qsizetype submittedCount);
     void runSingleFrame();
     void runTimelapse();
     void runStarTrail();
@@ -267,6 +273,7 @@ private:
     std::vector<FrameQualityMetrics> m_frameQualityMetrics;
     QStringList m_qualityRejectedFiles;
     std::vector<SkippedFrameInfo> m_skippedFrames;
+    FrameReceipt m_frameReceipt;
     QString m_errorString;
     QString m_outputFile;
     int m_affineFrameCount = 0;

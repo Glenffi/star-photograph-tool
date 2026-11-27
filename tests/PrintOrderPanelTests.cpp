@@ -1,5 +1,7 @@
+#include "ui/FrameReceiptDialog.h"
 #include "ui/PrintOrderPanel.h"
 #include "ui/RidgeComparisonDialog.h"
+#include "ui/StyleTokens.h"
 
 #include <QAbstractButton>
 #include <QAbstractScrollArea>
@@ -10,6 +12,8 @@
 #include <QDir>
 #include <QEventLoop>
 #include <QFile>
+#include <QFileDialog>
+#include <QFileInfo>
 #include <QKeyEvent>
 #include <QLabel>
 #include <QLineEdit>
@@ -21,6 +25,8 @@
 #include <QRegion>
 #include <QScrollBar>
 #include <QStackedWidget>
+#include <QStandardPaths>
+#include <QTableView>
 #include <QTemporaryDir>
 #include <QTimer>
 #include <QTranslator>
@@ -406,6 +412,224 @@ QImage render(QWidget& widget) {
     return image;
 }
 
+void testFrameSummary() {
+    using Outcome = FrameReceipt::Outcome;
+    FrameReceipt receipt;
+    receipt.deliverables = 1;
+    receipt.rows = {{"used.dng", Outcome::Used, true, 0, 24, 1.2, {}},
+                    {"more.dng", Outcome::Used, false, 0, 32, 2.6, {}},
+                    {"skipped.dng", Outcome::NoStars, false, 0, 0, -1.0, {}},
+                    {"unknown.dng", Outcome::Unconfirmed, false, 0, -1, -1.0, {}},
+                    {"other.dng", Outcome::NotSubmitted, false, 0, -1, -1.0, {}}};
+    PrintOrderPanel panel;
+    showWindow(panel);
+    auto& summary = child<QLabel>(panel, "printOrderFrameSummary");
+    auto& details = child<QAbstractButton>(panel, "printOrderFrameDetails");
+    int requested = 0;
+    QObject::connect(&panel, &PrintOrderPanel::frameReceiptRequested, &details, [&] { ++requested; });
+    const auto expectNoDetails = [&] {
+        QApplication::processEvents();
+        check(summary.text().isEmpty() && summary.toolTip().isEmpty() && !summary.isVisible() &&
+                  !details.isVisible() && !details.isEnabled(),
+              "Inactive or legacy receipts must not leave an old summary or an actionable details button");
+    };
+
+    expectNoDetails();
+    panel.setReceipt("delivery.tiff", 1, receipt);
+    QApplication::processEvents();
+    expectPage(panel, Page::Receipt);
+    const auto noManual = QCoreApplication::translate("Nebulens", "入选 %1 张，采用 %2 张 · 跳过 %3 张")
+                              .arg(4).arg(2).arg(1);
+    expectNote(panel, "printOrderFrameSummary", noManual);
+    expectNote(panel, "printOrderResultCount", QCoreApplication::translate("Nebulens", "%1 张成品").arg(1));
+    check(summary.toolTip() == noManual.toHtmlEscaped() && !summary.wordWrap(),
+          "Summary must remain a single line with the complete text on hover");
+    click(panel, "printOrderFrameDetails");
+    check(requested == 1, "The receipt entry must emit a details request");
+
+    receipt.rows.append({"manual.dng", Outcome::ManualExcluded, false, 0, -1, -1.0, {}});
+    panel.setTask(true, 20, {});
+    expectNoDetails();
+    details.click();
+    check(requested == 1, "Busy orders cannot request the previous details");
+    panel.setTask(false, -1, {});
+    expectNoDetails();
+    panel.setTask(true, 20, {});
+    panel.setReceipt("next.tiff", 1, receipt);
+    expectNoDetails();
+    panel.setTask(false, 100, {});
+    QApplication::processEvents();
+    const auto manual = QCoreApplication::translate("Nebulens", "入选 %1 张，采用 %2 张 · 跳过 %3 张 · 手动排除 %4 张")
+                             .arg(4).arg(2).arg(1).arg(1);
+    expectNote(panel, "printOrderFrameSummary", manual);
+    check(summary.toolTip() == manual.toHtmlEscaped(), "The manual exclusion suffix must not lose the tooltip");
+
+    panel.setReceipt("next.tiff", 1);
+    expectNoDetails();
+    expectPage(panel, Page::Receipt);
+    panel.setReceipt("next.tiff", 1, receipt);
+    panel.clearReceipt();
+    expectNoDetails();
+    panel.setReceipt("next.tiff", 1, receipt);
+    panel.showReopenedOrder();
+    expectNoDetails();
+    panel.setReceipt("next.tiff", 1, receipt);
+    panel.resetOrder();
+    expectNoDetails();
+    panel.setReceipt("next.tiff", 1, receipt);
+    panel.setScene(ProcessingScene::StarTrail);
+    expectNoDetails();
+}
+
+template <typename Predicate>
+bool waitForReceipt(Predicate ready) {
+    if (ready()) return true;
+    QEventLoop loop;
+    QTimer timer;
+    QObject::connect(&timer, &QTimer::timeout, &loop, [&] { if (ready()) loop.quit(); });
+    timer.start(12);
+    QTimer::singleShot(3000, &loop, &QEventLoop::quit);
+    loop.exec();
+    return ready();
+}
+
+void testFrameDetails() {
+    using Outcome = FrameReceipt::Outcome;
+    QTemporaryDir directory;
+    check(directory.isValid(), "Cannot create temporary preview sources");
+    const QDir root(directory.path());
+    check(root.mkdir("camera-a") && root.mkdir("camera-b"), "Cannot create two same-name fixture directories");
+    const QString reference = root.filePath("camera-a/frame.png");
+    const QString manual = root.filePath("camera-b/frame.png");
+    const QString last = root.filePath("latest.png");
+    const QString missing = root.filePath("removed.dng");
+    const QString damaged = root.filePath("damaged.dng");
+    QImage swatch(48, 36, QImage::Format_RGB32);
+    swatch.fill(Qt::red);
+    check(swatch.save(reference), "Cannot write red reference fixture");
+    swatch.fill(Qt::blue);
+    check(swatch.save(manual), "Cannot write blue comparison fixture");
+    swatch.fill(Qt::green);
+    check(swatch.save(last), "Cannot write green selection fixture");
+    {
+        QFile file(damaged);
+        check(file.open(QIODevice::WriteOnly) && file.write("not a RAW") == 9,
+              "Cannot make a broken RAW fixture");
+    }
+
+    FrameReceipt receipt;
+    receipt.sequence = true;
+    receipt.deliverables = 2;
+    receipt.rows = {{reference, Outcome::Used, true, 2, 18, 0.5, {}},
+                    {manual, Outcome::ManualExcluded, false, 0, -1, -1.0, {}},
+                    {missing, Outcome::AlignmentFailed, false, 0, 15, -2.5,
+                     {"alignment-quality-gate", "rms-above-2px", "p95-above-3.5px",
+                      "low-grid-coverage", "low-match-coverage", "private-code"}},
+                    {damaged, Outcome::RawLoadFailed, false, 0, -1, -1.0, {}},
+                    {{}, Outcome::NotSubmitted, false, 0, -1, -1.0, {}},
+                    {missing, Outcome::AlignmentFailed, false, 0, -1, -1.0, {"unknown-code"}},
+                    {last, Outcome::Used, false, 1, 12, 0.2, {}}};
+    FrameReceiptDialog dialog(receipt);
+    dialog.setStyleSheet(StyleTokens::appStyleSheet());
+    showWindow(dialog);
+    check(dialog.objectName() == "frameReceiptDialog", "Incorrect details window identity");
+    auto& table = child<QTableView>(dialog, "receiptFrameTable");
+    auto& filter = child<QComboBox>(dialog, "receiptFrameFilter");
+    auto& referenceView = child<QLabel>(dialog, "receiptReferencePreview");
+    auto& selectedView = child<QLabel>(dialog, "receiptSelectedPreview");
+    auto& save = child<QPushButton>(dialog, "receiptSaveDiagnostics");
+    usable(save);
+    usable(table);
+    fits(referenceView);
+    fits(selectedView);
+    check(referenceView.geometry().right() < selectedView.geometry().left() &&
+              selectedView.geometry().bottom() < table.geometry().top() && table.horizontalScrollBar()->maximum() == 0,
+          "Both previews and all table columns must fit without overlap at 920x540");
+
+    const auto tr = [](const char* source) { return QCoreApplication::translate("Nebulens", source); };
+    auto* model = table.model();
+    const auto first = model->index(0, 0);
+    const auto second = model->index(1, 0);
+    check(first.data(Qt::UserRole).toString() == reference &&
+              first.data(Qt::UserRole + 1).toInt() == static_cast<int>(Outcome::Used) &&
+              first.data(Qt::UserRole + 2).toBool() && first.data(Qt::UserRole + 3).toInt() == 2 &&
+              first.data().toString().contains("#1") && second.data().toString().contains("#2") &&
+              second.data(Qt::UserRole).toString() == manual && table.currentIndex().row() == 1,
+          "Same-name paths must have distinct original numbers and the first unused frame must be current");
+    const QString reason = model->index(2, 2).data(Qt::ToolTipRole).toString();
+    check(reason.contains(tr("星点对齐后的偏差过大")) && reason.contains(tr("匹配星点未覆盖足够画面")) &&
+              reason.contains(tr("匹配星点太少")) && !reason.contains("private-code") &&
+              model->index(5, 2).data().toString() == tr("无法与参考帧对齐"),
+          "Known alignment thresholds must be explained without leaking opaque reason codes");
+
+    const auto center = [](QLabel& view) { return render(view).pixel(view.rect().center()); };
+    check(waitForReceipt([&] { return center(referenceView) == qRgb(255, 0, 0) &&
+                                     center(selectedView) == qRgb(0, 0, 255); }),
+          "The two same-name sources must actually render independently");
+    table.setCurrentIndex(model->index(2, 0));
+    table.setCurrentIndex(model->index(3, 0));
+    table.setCurrentIndex(model->index(6, 0));
+    check(selectedView.text() == tr("正在读取预览…"), "Old pixels must be replaced immediately on selection");
+    check(waitForReceipt([&] { return center(selectedView) == qRgb(0, 255, 0); }) &&
+              center(referenceView) == qRgb(255, 0, 0),
+          "Rapid selection must show only the latest source and leave the reference unchanged");
+
+    choose(filter, filter.findText(tr("处理跳过")));
+    check(model->rowCount() == 3 && model->index(0, 0).data().toString().contains("#3") &&
+              model->index(1, 1).data().toString() == tr("处理跳过"),
+          "Processing skips must include decode errors and retain input frame numbers");
+    check(waitForReceipt([&] { return selectedView.text() == tr("找不到原片文件"); }),
+          "A removed file must not appear as a decode failure");
+    table.setCurrentIndex(model->index(1, 0));
+    check(waitForReceipt([&] { return selectedView.text() == tr("无法解码原片预览"); }),
+          "A damaged RAW must not appear missing");
+    choose(filter, filter.findText(tr("手动排除")));
+    check(model->rowCount() == 1 && table.currentIndex().data(Qt::UserRole).toString() == manual &&
+              model->index(0, 1).data().toString() == tr("手动排除"),
+          "Manual exclusions must have a distinct filter from processing skips");
+    check(!table.isColumnHidden(3) && !table.isColumnHidden(4) && !table.isColumnHidden(5),
+          "Measurements and output numbers must stay available even if the current filter has none");
+    choose(filter, filter.findText(tr("未确认")));
+    check(model->rowCount() == 0 && selectedView.text() == tr("未选择原片") &&
+              center(referenceView) == qRgb(255, 0, 0),
+          "An empty filter must clear only the selected pane");
+    choose(filter, filter.findText(tr("未提交")));
+    check(selectedView.text() == tr("未记录原片路径"), "A pathless record needs a distinct placeholder");
+
+    bool correctSaveSuggestion = false;
+    const QString canceled = root.filePath("canceled.json");
+    const QString documents = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
+    const QDir suggestedDirectory(QFileInfo(documents).isDir() ? documents : QDir::homePath());
+    QTimer::singleShot(0, &dialog, [&] {
+        auto* picker = dialog.findChild<QFileDialog*>();
+        if (!picker) return;
+        correctSaveSuggestion = picker->selectedFiles().value(0) == suggestedDirectory.filePath("frame-receipt.json");
+        picker->setDirectory(root);
+        picker->selectFile("canceled.json");
+        picker->reject();
+    });
+    save.click();
+    check(correctSaveSuggestion && !QFile::exists(canceled) && save.isEnabled(),
+          "The save picker needs a neutral filename in Documents or home, and cancellation must not write");
+
+    choose(filter, filter.findText(tr("已采用")));
+    dialog.close();
+
+    FrameReceipt unmeasured;
+    unmeasured.deliverables = 1;
+    unmeasured.rows.append({{}, Outcome::Used, false, 0, -1, -1.0, {}});
+    FrameReceiptDialog noMetrics(unmeasured);
+    const auto& noMetricsTable = child<QTableView>(noMetrics, "receiptFrameTable");
+    check(noMetricsTable.isColumnHidden(3) && noMetricsTable.isColumnHidden(4) && noMetricsTable.isColumnHidden(5),
+          "Unmeasured columns and non-sequence numbering should not take space in the table");
+
+    FrameReceiptDialog empty(FrameReceipt{});
+    showWindow(empty);
+    check(child<QLabel>(empty, "receiptReferencePreview").text() == tr("本次没有参考帧") &&
+              !child<QPushButton>(empty, "receiptSaveDiagnostics").isEnabled(),
+          "An empty receipt must not manufacture a reference or an exportable file");
+}
+
 constexpr std::array kRidgeFiles{"ridge-single.png", "ridge-stack.png", "ridge-separated.png"};
 constexpr std::array kRidgeLabels{"ridgeComparisonSingleTitle", "ridgeComparisonStackTitle",
                                   "ridgeComparisonSeparatedTitle"};
@@ -751,12 +975,17 @@ int main(int argc, char* argv[]) {
 
         testWorkflow(false);
         testOrderEntryPoints();
+        testFrameSummary();
+        testFrameDetails();
         QTranslator english;
         check(english.load(QStringLiteral(":/i18n/nebulens_en.qm")) && app.installTranslator(&english),
               "The test target must link the real English translation resource");
         testWorkflow(true);
         testOrderEntryPoints();
+        testFrameSummary();
+        testFrameDetails();
         std::cout << "[PASS] Chinese and English workflow, 920x540 layout, and file/sequence receipts\n";
+        std::cout << "[PASS] Frame receipt counts, filters, layout, and independent previews\n";
         testRidgeComparison();
         std::cout << "[PASS] Order file actions, reopened orders, and synchronized local comparison crops\n";
 

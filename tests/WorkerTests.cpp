@@ -1,3 +1,4 @@
+#include "core/MasterFrameIO.h"
 #include "core/ProcessingMemoryEstimator.h"
 #include "core/RawImageLoader.h"
 #include "workers/ProcessingWorker.h"
@@ -34,12 +35,19 @@ void check(bool condition, const char* message) {
 }
 
 using Phase = ProcessingWorker::Phase;
+using Outcome = FrameReceipt::Outcome;
 constexpr int kDngWidth = 512;
 constexpr int kDngHeight = 384;
 
+struct SyntheticDngOptions {
+    size_t starCount = 16;
+    double starFalloff = 6.0;
+    bool exposureMetadata = false;
+};
+
 // Paint in display coordinates, then store the inverse rotation in the RAW.
 bool writeSyntheticDng(const QString& path, uint16_t orientation, int second,
-                       int starOffsetX, int groundLevel) {
+                       int starOffsetX, int groundLevel, SyntheticDngOptions options = {}) {
 #ifdef Q_OS_WIN
     TIFF* handle = TIFFOpenW(path.toStdWString().c_str(), "w");
 #else
@@ -47,6 +55,18 @@ bool writeSyntheticDng(const QString& path, uint16_t orientation, int second,
 #endif
     const std::unique_ptr<TIFF, decltype(&TIFFClose)> tiff(handle, TIFFClose);
     if (!tiff) return false;
+
+    uint64_t exifOffset = 0;
+    if (options.exposureMetadata) {
+        const uint16_t iso = 800;
+        TIFFCreateEXIFDirectory(handle);
+        if (!TIFFSetField(handle, EXIFTAG_ISOSPEEDRATINGS, 1, &iso) ||
+            !TIFFSetField(handle, EXIFTAG_EXPOSURETIME, 30.0) ||
+            !TIFFWriteCustomDirectory(handle, &exifOffset)) {
+            return false;
+        }
+        TIFFCreateDirectory(handle);
+    }
 
     const uint8_t version[] = {1, 4, 0, 0};
     const uint16_t cfaDimensions[] = {2, 2};
@@ -72,7 +92,8 @@ bool writeSyntheticDng(const QString& path, uint16_t orientation, int second,
         !TIFFSetField(handle, TIFFTAG_CFAPATTERN, 4, cfaPattern) ||
         !TIFFSetField(handle, TIFFTAG_WHITELEVEL, 1, &whiteLevel) ||
         !TIFFSetField(handle, TIFFTAG_COLORMATRIX1, 9, colorMatrix) ||
-        !TIFFSetField(handle, TIFFTAG_ASSHOTNEUTRAL, 3, neutral)) {
+        !TIFFSetField(handle, TIFFTAG_ASSHOTNEUTRAL, 3, neutral) ||
+        (exifOffset != 0 && !TIFFSetField(handle, TIFFTAG_EXIFIFD, exifOffset))) {
         return false;
     }
 
@@ -94,14 +115,15 @@ bool writeSyntheticDng(const QString& path, uint16_t orientation, int second,
         {257, 139}, {254, 248}, {269, 345}, {295, 93},
         {303, 209}, {321, 305}, {340, 161}, {349, 67}
     }};
-    for (size_t i = 0; i < stars.size(); ++i) {
+    const int radius = options.starFalloff > 6.0 ? 12 : 5;
+    for (size_t i = 0; i < std::min(stars.size(), options.starCount); ++i) {
         const int x = stars[i].x() + starOffsetX;
         const int y = stars[i].y();
-        for (int dy = -5; dy <= 5; ++dy) {
-            for (int dx = -5; dx <= 5; ++dx) {
+        for (int dy = -radius; dy <= radius; ++dy) {
+            for (int dx = -radius; dx <= radius; ++dx) {
                 scene[static_cast<size_t>(y + dy) * width + x + dx] +=
                     static_cast<uint16_t>((5000 + 160 * i) *
-                        std::exp(-(dx * dx + dy * dy) / 6.0));
+                        std::exp(-(dx * dx + dy * dy) / options.starFalloff));
             }
         }
     }
@@ -121,14 +143,15 @@ bool writeSyntheticDng(const QString& path, uint16_t orientation, int second,
 }
 
 QStringList makeSyntheticSequence(const QDir& directory, uint16_t orientation,
-                                  const std::array<int, 3>& offsets) {
+                                  const std::array<int, 3>& offsets,
+                                  SyntheticDngOptions options = {}) {
     if (!QDir().mkpath(directory.absolutePath())) return {};
     const QStringList names = {"C_early.dng", "A_middle.dng", "B_late.dng"};
     const std::array<int, 3> groundLevels{320, 780, 450};
     QStringList files;
     for (int i = 0; i < names.size(); ++i) {
         const QString path = directory.filePath(names[i]);
-        if (!writeSyntheticDng(path, orientation, i * 10, offsets[i], groundLevels[i])) {
+        if (!writeSyntheticDng(path, orientation, i * 10, offsets[i], groundLevels[i], options)) {
             return {};
         }
         files.append(path);
@@ -151,6 +174,22 @@ bool waitForProcessing(ProcessingWorker& worker) {
     worker.wait();
     check(false, "Synthetic sequence worker should finish promptly");
     return false;
+}
+
+void checkUsedReceipt(const ProcessingWorker& worker, const QStringList& order,
+                      int referenceIndex, bool sequence) {
+    const FrameReceipt receipt = worker.frameReceipt(order, {});
+    check(receipt.rows.size() == order.size() && receipt.sequence == sequence &&
+              receipt.deliverables == (sequence ? order.size() : 1) &&
+              receipt.usedCount() == order.size() && receipt.submittedCount() == order.size() &&
+              receipt.skippedCount() == 0 && receipt.manualCount() == 0,
+          "A wholly successful job should have exactly its adopted sources and written deliverables");
+    for (qsizetype i = 0; i < receipt.rows.size() && i < order.size(); ++i) {
+        const auto& row = receipt.rows.at(i);
+        check(row.sourcePath == order.at(i) && row.outcome == Outcome::Used &&
+                  row.reference == (i == referenceIndex) && row.outputNumber == (sequence ? i + 1 : 0),
+              "Receipt must bind the exact source, reference and number in worker order");
+    }
 }
 
 void testTimelapseDiskBudget() {
@@ -215,6 +254,11 @@ void testPortraitStarTrails() {
               "Both portrait orientations should produce three-frame vertical star trails");
         check(worker.orderedFilePaths() == ordered && worker.selectedReferenceFrame() == ordered[0],
               "Star-trail accessor and reference should follow capture order");
+        checkUsedReceipt(worker, ordered, 0, false);
+        for (const auto& row : worker.frameReceipt(ordered, {}).rows) {
+            check(row.detectedStars == -1 && row.qualityScore == -1.0 && row.reasonCodes.isEmpty(),
+                  "Star-trail accumulation should not invent optional alignment or quality diagnostics");
+        }
         check(phases == std::vector<Phase>{Phase::Preparation, Phase::Stacking,
                                           Phase::Adjustment, Phase::Output},
               "Star trails should skip alignment and emit queued finishing and export phases");
@@ -286,6 +330,8 @@ void testSmallCommonIntersection() {
               worker.outputFile().isEmpty() && worker.takeStackedData().empty() &&
               phases == std::vector<Phase>{Phase::Preparation, Phase::Alignment},
           "A rejected common crop must stop before stacking or export");
+    check(worker.frameReceipt(files, {}).rows.isEmpty(),
+          "Accepted pairwise alignments are not a successful receipt if the shared crop fails");
 
     phases.clear();
     ProcessingWorker pair({files[1], files[2]}, files[1], params);
@@ -298,6 +344,225 @@ void testSmallCommonIntersection() {
               phases == std::vector<Phase>{Phase::Preparation, Phase::Alignment,
                   Phase::Stacking, Phase::Adjustment, Phase::Output},
           "A valid common region should still crop and export through all phases");
+    checkUsedReceipt(pair, {files[1], files[2]}, 0, false);
+}
+
+void testSingleFrameReceipt() {
+    QTemporaryDir temporary;
+    check(temporary.isValid(), "Single-frame receipt needs a writable directory");
+    if (!temporary.isValid()) return;
+
+    const QString original = temporary.filePath("same.dng");
+    const QString otherWithSameName = temporary.filePath("other/same.dng");
+    const bool fixturesReady = QDir(temporary.path()).mkdir("other") &&
+        writeSyntheticDng(original, ORIENTATION_TOPLEFT, 0, 0, 320) &&
+        writeSyntheticDng(otherWithSameName, ORIENTATION_TOPLEFT, 10, 1, 450);
+    check(fixturesReady, "Distinct originals with the same basename should be generated");
+    if (!fixturesReady) return;
+
+    QString selected = original;
+    QString multipleEntry;
+#ifdef Q_OS_UNIX
+    selected = temporary.filePath("first-link/same.dng");
+    multipleEntry = temporary.filePath("second-link/same.dng");
+    const QDir root(temporary.path());
+    const bool linksReady = root.mkdir("first-link") && root.mkdir("second-link") &&
+        QFile::link(original, selected) && QFile::link(original, multipleEntry);
+    check(linksReady, "Two distinct project links should point at the same physical RAW");
+    if (!linksReady) return;
+#endif
+    const QString unsubmitted = temporary.filePath("never-read.dng");
+    const QString excluded = temporary.filePath("manual.dng");
+    QStringList liveProject{otherWithSameName, selected, excluded, unsubmitted};
+    if (!multipleEntry.isEmpty()) liveProject.append(multipleEntry);
+    const QStringList projectSnapshot = liveProject;
+    QStringList liveExclusions{excluded};
+    const QStringList exclusionSnapshot = liveExclusions;
+
+    ProcessingWorker::Params params;
+    params.singleFrameMode = true;
+    params.autoLensChromaticAberration = false;
+    params.outputPath = temporary.filePath("output");
+    ProcessingWorker worker({selected, unsubmitted}, otherWithSameName, params);
+    check(worker.frameReceipt(projectSnapshot, exclusionSnapshot).rows.isEmpty(),
+          "An unstarted worker must not publish a receipt");
+    bool prematureReceiptChecked = false;
+    QObject::connect(&worker, &ProcessingWorker::progress, &worker, [&](int value) {
+        if (value != 100) return;
+        prematureReceiptChecked = true;
+        check(worker.frameReceipt(projectSnapshot, exclusionSnapshot).rows.isEmpty(),
+              "Even committed image output must wait for the worker to finish before publishing the receipt");
+    }, Qt::DirectConnection);
+    worker.start();
+    liveProject = {unsubmitted};
+    liveExclusions = {selected};
+    if (!waitForProcessing(worker)) return;
+
+    const auto receipt = worker.frameReceipt(projectSnapshot, exclusionSnapshot);
+    check(prematureReceiptChecked && worker.errorString().isEmpty() &&
+              QFileInfo::exists(worker.outputFile()) && receipt.deliverables == 1 &&
+              !receipt.sequence && receipt.submittedCount() == 1 && receipt.usedCount() == 1 &&
+              receipt.skippedCount() == 0 && receipt.manualCount() == 1,
+          "Single refinement only submits the actual source and keeps launch-time exclusions outside skips");
+    QStringList expected{selected, otherWithSameName, excluded, unsubmitted};
+    if (!multipleEntry.isEmpty()) expected.append(multipleEntry);
+    check(receipt.rows.size() == expected.size(), "Single receipt should list every project entry exactly once");
+    for (qsizetype i = 0; i < receipt.rows.size() && i < expected.size(); ++i) {
+        const auto& row = receipt.rows.at(i);
+        check(row.sourcePath == expected.at(i) && row.reference == (i == 0) && row.outputNumber == 0 &&
+                  row.outcome == (i == 0 ? Outcome::Used : i == 2 ? Outcome::ManualExcluded : Outcome::NotSubmitted) &&
+                  row.detectedStars == -1 && row.qualityScore == -1.0 && row.reasonCodes.isEmpty(),
+              "Single receipt must preserve distinct paths, project order for leftovers, and unknown diagnostics");
+    }
+
+    params.outputPath = original; // A decoded file exists here, not an output directory.
+    ProcessingWorker failed({selected}, {}, params);
+    failed.start();
+    if (!waitForProcessing(failed)) return;
+    check(!failed.errorString().isEmpty() && failed.outputFrameCount() == 1 &&
+              failed.frameReceipt(projectSnapshot, exclusionSnapshot).rows.isEmpty(),
+          "Successful decode and a legacy frame count are not enough when single output could not be written");
+}
+
+void testStackReceiptSkips() {
+    QTemporaryDir temporary;
+    check(temporary.isValid(), "Stack receipt needs a writable directory");
+    if (!temporary.isValid()) return;
+    // The quality pass detects stars on half-size RAW previews.
+    const auto good = makeSyntheticSequence(QDir(temporary.path()), ORIENTATION_TOPLEFT,
+                                            {-2, 0, 2}, {16, 12.0});
+    const QString outlier = temporary.filePath("wide-stars.dng");
+    const QString blank = temporary.filePath("blank.dng");
+    const QString few = temporary.filePath("one-star.dng");
+    const QString unreadable = temporary.filePath("will-not-load.dng");
+    const bool fixturesReady = good.size() == 3 && QFile::copy(good[0], unreadable) &&
+        writeSyntheticDng(outlier, ORIENTATION_TOPLEFT, 25, 0, 320, {9, 50.0}) &&
+        writeSyntheticDng(blank, ORIENTATION_TOPLEFT, 30, 0, 1400, {0}) &&
+        writeSyntheticDng(few, ORIENTATION_TOPLEFT, 35, 0, 1400, {1});
+    check(fixturesReady, "Stack quality and alignment fixtures should be generated");
+    if (!fixturesReady) return;
+
+    ProcessingWorker::Params params;
+    params.autoLensChromaticAberration = false;
+    params.photometricNormalizationEnabled = false;
+    params.outputPath = temporary.filePath("output");
+    const QStringList files{few, good[0], unreadable, good[1], outlier, blank, good[2]};
+    ProcessingWorker worker(files, good[1], params);
+    bool movedRaw = false;
+    QObject::connect(&worker, &ProcessingWorker::phaseChanged, &worker, [&](Phase phase) {
+        // Metadata and quality previews have loaded, but source RAW decoding has not started.
+        if (phase == Phase::Alignment) movedRaw = QFile::rename(unreadable, unreadable + ".moved");
+    }, Qt::DirectConnection);
+    worker.start();
+    if (!waitForProcessing(worker)) return;
+    const auto receipt = worker.frameReceipt(files, {});
+    if (worker.qualityRejectedFiles() != QStringList{outlier}) {
+        for (const auto& metrics : worker.frameQualityMetrics()) {
+            std::cerr << "Quality fixture: valid=" << metrics.valid << ", stars=" << metrics.usableStars
+                      << ", fwhm=" << metrics.medianFwhm << ", score=" << metrics.score << '\n';
+        }
+    }
+    check(movedRaw && worker.errorString().isEmpty() && QFileInfo::exists(worker.outputFile()) &&
+              receipt.deliverables == 1 && receipt.rows.size() == files.size() &&
+              receipt.submittedCount() == 7 && receipt.usedCount() == 3 && receipt.skippedCount() == 4 &&
+              worker.qualityRejectedFiles() == QStringList{outlier} && worker.skippedFrames().size() == 3,
+          "Stack should count quality rejection once alongside the real RAW, detection and alignment skips");
+    if (receipt.rows.size() != files.size()) return;
+
+    const std::array<Outcome, 7> outcomes{Outcome::AlignmentFailed, Outcome::Used,
+        Outcome::RawLoadFailed, Outcome::Used, Outcome::QualityRejected, Outcome::NoStars, Outcome::Used};
+    for (qsizetype i = 0; i < files.size(); ++i) {
+        const auto& row = receipt.rows.at(i);
+        check(row.sourcePath == files.at(i) && row.outcome == outcomes[static_cast<size_t>(i)] &&
+                  row.reference == (i == 3) && row.outputNumber == 0,
+              "Stack statuses and the selected reference must stay on their own input rows");
+    }
+    check(receipt.rows.at(0).reasonCodes == QStringList{"no-fit-model"} && receipt.rows.at(0).detectedStars == 1 &&
+              receipt.rows.at(2).reasonCodes == QStringList{"raw-decode-failed"} && receipt.rows.at(2).detectedStars == -1 &&
+              receipt.rows.at(3).detectedStars > 0 &&
+              receipt.rows.at(4).reasonCodes == QStringList{"quality-outlier"} && receipt.rows.at(4).detectedStars == -1 &&
+              receipt.rows.at(5).reasonCodes == QStringList{"no-alignment-stars"} && receipt.rows.at(5).detectedStars == 0,
+          "Only formal detection counts belong in the receipt; skip reasons must reflect the failed stage");
+    const auto& quality = worker.frameQualityMetrics();
+    check(quality.size() == 7 && quality[4].valid && quality[4].detectedStars > 0 &&
+              receipt.rows.at(4).qualityScore == quality[4].score && receipt.rows.at(4).qualityScore < 0.0 &&
+              receipt.rows.at(5).qualityScore == -1.0,
+          "Quality rejection should preserve the measured score without borrowing its preview star count");
+}
+
+void testSkyGroundReceipt() {
+    QTemporaryDir temporary;
+    check(temporary.isValid(), "Sky-ground receipt needs a writable directory");
+    if (!temporary.isValid()) return;
+    const auto good = makeSyntheticSequence(QDir(temporary.path()), ORIENTATION_TOPLEFT, {-2, 0, 2});
+    check(good.size() == 3, "Sky-ground Light fixtures should be generated");
+    if (good.size() != 3) return;
+
+    ProcessingWorker::Params params;
+    params.autoLensChromaticAberration = false;
+    params.autoRejectLowQualityFrames = false;
+    params.photometricNormalizationEnabled = false;
+    params.skyGroundSepEnabled = true;
+    params.editedSkyGroundMaskWidth = kDngWidth;
+    params.editedSkyGroundMaskHeight = kDngHeight;
+    params.editedSkyGroundMaskSourcePath = good[1];
+    params.editedSkyGroundMask.assign(kDngWidth * kDngHeight, 0);
+    std::fill_n(params.editedSkyGroundMask.begin(), kDngWidth * kDngHeight * 2 / 3, uint8_t{255});
+    params.outputPath = temporary.filePath("output");
+    const QStringList files{good[2], good[0], good[1]};
+    ProcessingWorker worker(files, good[1], params);
+    worker.start();
+    if (!waitForProcessing(worker)) return;
+    check(worker.errorString().isEmpty() && worker.skyGroundMaskSource() == "guided-preview" &&
+              QFileInfo::exists(worker.outputFile()),
+          "Sky-ground stack should actually finish using the reference-bound edited mask");
+    checkUsedReceipt(worker, files, 2, false);
+}
+
+void testDeepSkyReceipt() {
+    QTemporaryDir temporary;
+    check(temporary.isValid(), "Deep-sky receipt needs a writable directory");
+    if (!temporary.isValid()) return;
+    const QString first = temporary.filePath("light-one.dng");
+    const QString second = temporary.filePath("light-two.dng");
+    const SyntheticDngOptions lightOptions{16, 6.0, true};
+    RawImageLoader loader;
+    RawImageLoader::CfaImageData light;
+    const bool lightsReady = writeSyntheticDng(first, ORIENTATION_TOPLEFT, 0, 0, 320, lightOptions) &&
+        writeSyntheticDng(second, ORIENTATION_TOPLEFT, 10, 1, 320, lightOptions) &&
+        loader.loadRawCfa(first, light) && light.iso == 800 && light.exposureTime == 30.0;
+    check(lightsReady, "Synthetic deep-sky Lights should provide real Bayer geometry and exposure metadata");
+    if (!lightsReady) return;
+
+    ProcessingWorker::Params params;
+    params.deepSkyMode = true;
+    params.autoRejectLowQualityFrames = false;
+    params.photometricNormalizationEnabled = false;
+    params.autoLensChromaticAberration = false;
+    params.outputPath = temporary.filePath("output");
+    params.masterDarkPath = temporary.filePath("master-dark.spmaster");
+    params.masterFlatPath = temporary.filePath("master-flat.spmaster");
+    RawCalibrationEngine::MasterFrame dark;
+    RawCalibrationEngine::MasterFrame flat;
+    using Role = RawCalibrationEngine::MasterRole;
+    QString error;
+    const bool mastersReady = RawCalibrationEngine::createMasterFrame(
+            Role::Dark, light, std::vector<float>(light.data.size(), 0.0f), false, dark) &&
+        RawCalibrationEngine::createMasterFrame(
+            Role::Flat, light, std::vector<float>(light.data.size(), 1.0f), true, flat) &&
+        MasterFrameIO::save(params.masterDarkPath, dark, error) &&
+        MasterFrameIO::save(params.masterFlatPath, flat, error);
+    check(mastersReady, "Neutral masters must pass the genuine calibration-file writer");
+    if (!mastersReady) return;
+
+    const QStringList lights{second, first};
+    ProcessingWorker worker(lights, first, params);
+    worker.start();
+    if (!waitForProcessing(worker)) return;
+    check(worker.errorString().isEmpty() && worker.calibratedLightFrameCount() == 2 &&
+              QFileInfo::exists(worker.outputFile()),
+          "Deep sky must actually calibrate and export with the synthetic masters");
+    checkUsedReceipt(worker, lights, 1, false);
 }
 
 void testConcurrentTimelapseOutputs() {
@@ -308,6 +573,9 @@ void testConcurrentTimelapseOutputs() {
                                                 {-2, 0, 2});
     check(ordered.size() == 3, "Timelapse DNGs should be generated");
     if (ordered.size() != 3) return;
+    const bool noStars = writeSyntheticDng(ordered[2], ORIENTATION_TOPLEFT, 20, 0, 1400, {0});
+    check(noStars, "A target without any aligned sky neighbors should still have its own output");
+    if (!noStars) return;
     const QStringList input{ordered[1], ordered[2], ordered[0]};
 
     class EnglishStatus final : public QTranslator {
@@ -362,6 +630,11 @@ void testConcurrentTimelapseOutputs() {
         check(worker->orderedFilePaths() == ordered && worker->selectedReferenceIndex() == 1 &&
                   worker->selectedReferenceFrame() == ordered[1],
               "Ordered input, reference index and reference file should identify the same frames");
+        checkUsedReceipt(*worker, ordered, 1, true);
+        const auto receipt = worker->frameReceipt(input, {});
+        check(receipt.rows.size() == 3 && receipt.rows.at(2).detectedStars == 0 &&
+                  receipt.rows.at(2).outcome == Outcome::Used && receipt.rows.at(2).reasonCodes.isEmpty(),
+              "A skipped neighbor transform is not a skipped source if its own output was written");
         if (worker->outputFile().isEmpty()) continue;
         const QDir output(worker->outputFile());
         const QString extension = worker == &tiff ? ".tiff" : ".png";
@@ -381,6 +654,21 @@ void testConcurrentTimelapseOutputs() {
     check(cancelled.wasCancelled() && cancelled.outputFile().isEmpty() &&
               QDir(params.outputPath).entryList(QDir::Dirs | QDir::NoDotAndDotDot).size() == 2,
           "Cancelling before the first export should remove only the empty task directory");
+    check(cancelled.frameReceipt(input, {}).rows.isEmpty(),
+          "An early cancellation must not publish a receipt");
+
+    ProcessingWorker partial(input, {}, params);
+    int outputPhases = 0;
+    QObject::connect(&partial, &ProcessingWorker::phaseChanged, &partial,
+                     [&](Phase phase) {
+                         if (phase == Phase::Output && ++outputPhases == 2) partial.requestCancel();
+                     }, Qt::DirectConnection);
+    partial.start();
+    if (!waitForProcessing(partial)) return;
+    check(partial.wasCancelled() && partial.outputFrameCount() == 1 &&
+              !partial.outputFile().isEmpty() && QDir(partial.outputFile()).entryList(QDir::Files).size() == 1 &&
+              partial.frameReceipt(input, {}).rows.isEmpty(),
+          "A cancelled timelapse keeps its first committed frame without publishing a formal receipt");
 }
 
 void testEmptyInput() {
@@ -616,6 +904,10 @@ int main(int argc, char* argv[]) {
     testTimelapseDiskBudget();
     testPortraitStarTrails();
     testSmallCommonIntersection();
+    testSingleFrameReceipt();
+    testStackReceiptSkips();
+    testSkyGroundReceipt();
+    testDeepSkyReceipt();
     testConcurrentTimelapseOutputs();
     testEmptyInput();
     testCancellationBeforeStart();

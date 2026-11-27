@@ -1469,9 +1469,11 @@ void ParamsPanel::setupUI() {
     outputPageLayout->addWidget(m_outputGroup, 0, Qt::AlignTop);
 
     m_processingReportGroup = createCollapsibleGroup(
-        QCoreApplication::translate("Nebulens", "处理报告"), true);
+        QCoreApplication::translate("Nebulens", "本机处理报告"), true);
     auto* reportLayout = new QVBoxLayout(m_processingReportGroup);
     m_processingReportLabel = new QLabel(m_processingReportGroup);
+    m_processingReportLabel->setTextFormat(Qt::PlainText);
+    m_processingReportLabel->setToolTip(QCoreApplication::translate("Nebulens", "含本机输出路径；对外反馈可使用冲印回执中的匿名诊断。"));
     m_processingReportLabel->setWordWrap(true);
     m_processingReportLabel->setTextInteractionFlags(
         Qt::TextSelectableByMouse | Qt::TextSelectableByKeyboard);

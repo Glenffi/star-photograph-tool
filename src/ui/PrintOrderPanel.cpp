@@ -39,6 +39,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <optional>
 
 namespace {
 
@@ -696,6 +697,8 @@ struct PrintOrderPanel::Ui : QObject {
     ReceiptStamp* stamp = nullptr;
     QLabel* resultCountLabel = nullptr;
     QLabel* resultCountValue = nullptr;
+    ElidedLabel* frameSummary = nullptr;
+    QPushButton* frameDetails = nullptr;
     QLabel* resultPathLabel = nullptr;
     QLineEdit* resultPath = nullptr;
     QLabel* summaryLabel = nullptr;
@@ -727,6 +730,13 @@ struct PrintOrderPanel::Ui : QObject {
     QString status;
     QString receiptPath;
     int receiptFrames = 0;
+    struct FrameCounts {
+        int submitted;
+        int used;
+        int skipped;
+        int manual;
+    };
+    std::optional<FrameCounts> frameCounts;
 
     Light selectedLight = Light::Soft;
     bool systemReduced = false;
@@ -1022,11 +1032,17 @@ struct PrintOrderPanel::Ui : QObject {
         resultCountValue = label(parent, "printOrderResultCount");
         resultCountValue->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
         pair(content, resultCountLabel, resultCountValue);
+        frameSummary = new ElidedLabel(parent);
+        frameSummary->setObjectName(QStringLiteral("printOrderFrameSummary"));
+        frameSummary->setProperty("printRole", QStringLiteral("muted"));
+        content->addWidget(frameSummary);
         resultPathLabel = label(parent, "printOrderResultPathLabel", "muted");
         resultPath = pathField(parent, "printOrderResultPath");
         resultPathLabel->setBuddy(resultPath);
         content->addWidget(resultPathLabel);
         content->addWidget(resultPath);
+        frameDetails = command(parent, "printOrderFrameDetails");
+        content->addWidget(frameDetails, 0, Qt::AlignLeft);
         content->addStretch();
     }
 
@@ -1047,6 +1063,11 @@ struct PrintOrderPanel::Ui : QObject {
         return scene != ProcessingScene::StarTrail && scene != ProcessingScene::Timelapse;
     }
     bool hasReceipt() const { return !receiptPath.isEmpty() && !busy; }
+    void discardReceipt() {
+        receiptPath.clear();
+        receiptFrames = 0;
+        frameCounts.reset();
+    }
     bool editable() const { return !busy && !hasReceipt(); }
     bool showsSample() const { return total == 0 && proofImage.isNull() && !sampleImage.isNull(); }
     const QImage& displayedProof() const { return showsSample() ? sampleImage : proofImage; }
@@ -1075,6 +1096,9 @@ void PrintOrderPanel::Ui::connectControls() {
     });
     connect(ridgeComparison, &QPushButton::clicked, this, [this]() {
         if (!busy && ridgeComparisonAvailable) emit owner->ridgeComparisonRequested();
+    });
+    connect(frameDetails, &QPushButton::clicked, this, [this]() {
+        if (hasReceipt() && frameCounts) emit owner->frameReceiptRequested();
     });
     connect(stageGroup, &QButtonGroup::idClicked, this, [this](int index) {
         setStep(static_cast<Step>(index));
@@ -1236,6 +1260,7 @@ void PrintOrderPanel::Ui::retranslate() {
     stamp->setText(QCoreApplication::translate("Nebulens", "已出样"));
     resultCountLabel->setText(QCoreApplication::translate("Nebulens", "交付"));
     resultPathLabel->setText(QCoreApplication::translate("Nebulens", "实际保存位置"));
+    frameDetails->setText(QCoreApplication::translate("Nebulens", "用片明细"));
     resultPath->setAccessibleName(resultPathLabel->text());
     ridgeComparison->setText(QCoreApplication::translate("Nebulens", "山脊对照"));
     advanced->setText(QCoreApplication::translate("Nebulens", "高级设置"));
@@ -1395,6 +1420,21 @@ void PrintOrderPanel::Ui::refresh() {
     reveal->setVisible(complete);
     next->setVisible(!complete);
     next->setEnabled(busy ? !cancelPending : (shown != Step::Output || canProcess()));
+
+    const bool hasFrameDetails = complete && frameCounts.has_value();
+    QString frameText;
+    if (hasFrameDetails) {
+        const auto& counts = *frameCounts;
+        frameText = counts.manual > 0
+            ? QCoreApplication::translate("Nebulens", "入选 %1 张，采用 %2 张 · 跳过 %3 张 · 手动排除 %4 张")
+                  .arg(counts.submitted).arg(counts.used).arg(counts.skipped).arg(counts.manual)
+            : QCoreApplication::translate("Nebulens", "入选 %1 张，采用 %2 张 · 跳过 %3 张")
+                  .arg(counts.submitted).arg(counts.used).arg(counts.skipped);
+    }
+    frameSummary->setValue(frameText);
+    frameSummary->setVisible(hasFrameDetails);
+    frameDetails->setVisible(hasFrameDetails);
+    frameDetails->setEnabled(hasFrameDetails);
 
     if (complete) {
         const QString count = QCoreApplication::translate("Nebulens", "%1 张成品").arg(receiptFrames);
@@ -1560,6 +1600,7 @@ PrintOrderPanel::PrintOrderPanel(QWidget* parent) : QWidget(parent) {
 PrintOrderPanel::~PrintOrderPanel() = default;
 
 void PrintOrderPanel::setScene(ProcessingScene scene) {
+    if (m_ui->scene != scene) m_ui->frameCounts.reset();
     m_ui->scene = scene;
     m_ui->syncScene();
     m_ui->refresh();
@@ -1606,8 +1647,7 @@ void PrintOrderPanel::setTask(bool busy, int progress, const QString& status) {
     m_ui->status = status;
     if (starting) {
         m_ui->step = Step::Output;
-        m_ui->receiptPath.clear();
-        m_ui->receiptFrames = 0;
+        m_ui->discardReceipt();
         m_ui->cancelPending = false;
         m_ui->retry = false;
     }
@@ -1621,7 +1661,7 @@ void PrintOrderPanel::setTask(bool busy, int progress, const QString& status) {
     m_ui->refresh();
 }
 
-void PrintOrderPanel::setReceipt(const QString& path, int frameCount) {
+void PrintOrderPanel::setReceipt(const QString& path, int frameCount, const FrameReceipt& info) {
     if (path.trimmed().isEmpty() || frameCount <= 0) {
         clearReceipt();
         return;
@@ -1629,6 +1669,11 @@ void PrintOrderPanel::setReceipt(const QString& path, int frameCount) {
     m_ui->step = Step::Output;
     m_ui->receiptPath = path;
     m_ui->receiptFrames = frameCount;
+    m_ui->frameCounts.reset();
+    if (!info.rows.isEmpty()) {
+        m_ui->frameCounts = Ui::FrameCounts{
+            info.submittedCount(), info.usedCount(), info.skippedCount(), info.manualCount()};
+    }
     m_ui->retry = false;
     m_ui->refresh();
 }
@@ -1638,8 +1683,7 @@ void PrintOrderPanel::clearReceipt() {
         m_ui->status.clear();
         m_ui->progress = -1;
     }
-    m_ui->receiptPath.clear();
-    m_ui->receiptFrames = 0;
+    m_ui->discardReceipt();
     m_ui->refresh();
 }
 

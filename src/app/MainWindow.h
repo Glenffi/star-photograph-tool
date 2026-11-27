@@ -2,15 +2,18 @@
 
 #include "core/FinishingPipeline.h"
 #include "ui/WorkflowRail.h"
+#include "workers/FrameReceipt.h"
 
 #include <QImage>
 #include <QMainWindow>
+#include <QPointer>
 #include <QSet>
 #include <QStringList>
 #include <functional>
 #include <memory>
 
 class QAction;
+class QDialog;
 class ExportWorker;
 class HistoryPreviewWorker;
 class QLabel;
@@ -73,6 +76,9 @@ private:
     void showPrintOrder();
     void showAdvanced(WorkflowStage stage);
     void inspectProof();
+    void inspectFrameReceipt();
+    void clearDeliveryReceipt();
+    void publishDeliveryReceipt(const QString& path);
     void revealDelivery(const QString& path);
     void selectProduct(ProcessingScene scene);
     void adaptStillScene();
@@ -134,6 +140,8 @@ private:
     QString m_orderFileBaseline;
     QString m_comparisonManifest;
     QString m_deliveryPath;
+    FrameReceipt m_formalFrameReceipt;
+    QPointer<QDialog> m_receiptDialog;
     QString m_taskMessage;
     int m_taskProgress = 0;
     bool m_automaticStill = true;

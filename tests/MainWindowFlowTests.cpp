@@ -1,6 +1,7 @@
 #include "app/MainWindow.h"
 #include "core/ImageExporter.h"
 #include "core/PreviewToneMapper.h"
+#include "core/PrintOrderDocument.h"
 #include "ui/ParamsPanel.h"
 #include "ui/PreviewPanel.h"
 #include "ui/PrintOrderPanel.h"
@@ -8,9 +9,11 @@
 #include "ui/StyleTokens.h"
 #include "ui/Toolbar.h"
 #include "workers/ExportWorker.h"
+#include "workers/FrameReceipt.h"
 #include "workers/ProcessingWorker.h"
 
 #include <QAbstractButton>
+#include <QAbstractItemView>
 #include <QAction>
 #include <QApplication>
 #include <QCheckBox>
@@ -21,7 +24,12 @@
 #include <QDir>
 #include <QEventLoop>
 #include <QFile>
+#include <QFileDialog>
 #include <QFileInfo>
+#include <QHash>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QKeyEvent>
 #include <QKeySequence>
 #include <QLabel>
@@ -34,6 +42,7 @@
 #include <QRegularExpression>
 #include <QScrollArea>
 #include <QScrollBar>
+#include <QSet>
 #include <QSettings>
 #include <QSlider>
 #include <QStackedWidget>
@@ -95,7 +104,15 @@ public:
     DialogCapture() {
         QObject::connect(&m_poll, &QTimer::timeout, &m_poll, [this] {
             auto* dialog = qobject_cast<QDialog*>(QApplication::activeModalWidget());
-            if (!dialog) return;
+            if (!dialog || dialog->objectName() == QStringLiteral("frameReceiptDialog")) return;
+            auto* fileDialog = qobject_cast<QFileDialog*>(dialog);
+            if (!m_savePath.isEmpty() && fileDialog && fileDialog->acceptMode() == QFileDialog::AcceptSave) {
+                const QFileInfo target(std::exchange(m_savePath, QString()));
+                fileDialog->setDirectory(target.absolutePath());
+                fileDialog->selectFile(target.fileName());
+                dialog->accept();
+                return;
+            }
             auto* box = qobject_cast<QMessageBox*>(dialog);
             m_messages.append(box ? box->text() : dialog->windowTitle());
             dialog->reject();
@@ -103,10 +120,12 @@ public:
         m_poll.start(10);
     }
 
+    void saveTo(const QString& path) { m_savePath = path; }
     const QStringList& messages() const { return m_messages; }
 
 private:
     QTimer m_poll;
+    QString m_savePath;
     QStringList m_messages;
 };
 
@@ -233,7 +252,7 @@ QAction& menuText(MainWindow& window, const char* source) {
     return menuAction(window, [&](QAction& action) { return action.text() == text; });
 }
 
-void selectAsset(ProjectPanel& project, const QString& path) {
+FileCard& selectAsset(ProjectPanel& project, const QString& path) {
     for (auto* card : project.findChildren<FileCard*>()) {
         if (!card->isVisible() || !card->accessibleName().startsWith(QFileInfo(path).fileName())) continue;
         QMouseEvent press(QEvent::MouseButtonPress, QPointF(6, 6),
@@ -241,7 +260,7 @@ void selectAsset(ProjectPanel& project, const QString& path) {
                           Qt::NoModifier);
         QApplication::sendEvent(card, &press);
         check(project.currentFilePath() == path, "Filmstrip click did not select the source");
-        return;
+        return *card;
     }
     throw std::runtime_error("Required filmstrip card was not found");
 }
@@ -255,6 +274,20 @@ QAbstractButton& exportButton(MainWindow& window) {
     }
     throw std::runtime_error("Required toolbar export button was not found");
 }
+
+using Outcome = FrameReceipt::Outcome;
+
+struct ReceiptRow {
+    Outcome outcome;
+    bool reference;
+    int outputNumber;
+
+    bool operator==(const ReceiptRow& other) const {
+        return outcome == other.outcome && reference == other.reference && outputNumber == other.outputNumber;
+    }
+};
+
+using ReceiptRows = QHash<QString, ReceiptRow>;
 
 struct Flow {
     MainWindow window;
@@ -314,7 +347,81 @@ struct Flow {
               allowed ? "Toolbar must allow a current manual export"
                       : "Toolbar must not offer a stale or inapplicable export");
     }
+
+    QWidget* visibleFrameReceipt() const {
+        for (auto* dialog : window.findChildren<QWidget*>(QStringLiteral("frameReceiptDialog"))) {
+            if (dialog->isVisible()) return dialog;
+        }
+        return nullptr;
+    }
+
+    QWidget& openFrameReceipt() {
+        const auto& summary = child<QLabel>(order, "printOrderFrameSummary");
+        check(summary.isVisible() && !summary.text().trimmed().isEmpty(),
+              "A formal delivery must show a frame summary");
+        click(child<QAbstractButton>(order, "printOrderFrameDetails"));
+        auto* dialog = visibleFrameReceipt();
+        check(dialog && dialog->isWindow(), "Frame details must open in a separate window");
+        return *dialog;
+    }
+
+    void checkNoFrameReceipt() {
+        check(order.isVisible() &&
+                  !child<QWidget>(order, "printOrderFrameSummary").isVisible() &&
+                  !child<QWidget>(order, "printOrderFrameDetails").isVisible() && !visibleFrameReceipt(),
+              "An order without a current delivery must not show frame details");
+    }
 };
+
+ReceiptRows readReceiptRows(QWidget& dialog) {
+    const auto& table = child<QAbstractItemView>(dialog, "receiptFrameTable");
+    const auto* model = table.model();
+    check(table.isVisible() && model && model->rowCount() > 0, "Frame details must show the receipt rows");
+    ReceiptRows rows;
+    for (int row = 0; row < model->rowCount(); ++row) {
+        const auto index = model->index(row, 0);
+        const QString source = index.data(Qt::UserRole).toString();
+        bool outcomeOk = false, outputOk = false;
+        const int outcome = index.data(Qt::UserRole + 1).toInt(&outcomeOk);
+        const auto reference = index.data(Qt::UserRole + 2);
+        const int output = index.data(Qt::UserRole + 3).toInt(&outputOk);
+        check(QDir::isAbsolutePath(source) && !rows.contains(source) && outcomeOk &&
+                  reference.typeId() == QMetaType::Bool && outputOk,
+              QString("Missing or duplicate frame identity, outcome, reference or output number at row %1")
+                  .arg(row + 1));
+        rows.insert(source, {static_cast<Outcome>(outcome), reference.toBool(), output});
+    }
+    return rows;
+}
+
+ReceiptRows inspectReceiptRows(Flow& flow) {
+    auto& dialog = flow.openFrameReceipt();
+    const auto rows = readReceiptRows(dialog);
+    check(dialog.close(), "Frame details must be dismissible");
+    return rows;
+}
+
+void selectReceiptRow(QWidget& dialog, const QString& source) {
+    auto& table = child<QAbstractItemView>(dialog, "receiptFrameTable");
+    const auto* model = table.model();
+    for (int row = 0; row < model->rowCount(); ++row) {
+        const auto index = model->index(row, 0);
+        if (index.data(Qt::UserRole).toString() != source) continue;
+        table.scrollTo(index);
+        const QPoint pos = table.visualRect(index).center();
+        auto* viewport = table.viewport();
+        check(viewport->rect().contains(pos), "Frame details must make the source row reachable");
+        for (const auto type : {QEvent::MouseButtonPress, QEvent::MouseButtonRelease}) {
+            const auto down = type == QEvent::MouseButtonPress ? Qt::LeftButton : Qt::NoButton;
+            QMouseEvent mouse(type, QPointF(pos), viewport->mapToGlobal(pos), Qt::LeftButton,
+                              down, Qt::NoModifier);
+            QApplication::sendEvent(viewport, &mouse);
+        }
+        check(table.currentIndex().siblingAtColumn(0) == index, "Click must select the receipt row");
+        return;
+    }
+    throw std::runtime_error("Source was not found in the frame receipt");
+}
 
 void checkReveal(Flow& flow, const QString& receiptPath, const QString& expectedDirectory) {
     FileUrlCapture urls;
@@ -335,6 +442,30 @@ QByteArray bytes(const QString& path) {
     QFile file(path);
     check(file.open(QIODevice::ReadOnly), "Cannot read " + path);
     return file.readAll();
+}
+
+QJsonObject readJson(const QString& path) {
+    const auto document = QJsonDocument::fromJson(bytes(path));
+    check(document.isObject(), "Expected a JSON object");
+    return document.object();
+}
+
+QString freshArtifactPath(const QString& path) {
+    const QFileInfo target(path);
+    check(!target.exists() && !target.isSymLink() && QDir(target.absolutePath()).exists(),
+          "Artifacts need a fresh local filename in an existing directory");
+    return target.absoluteFilePath();
+}
+
+QJsonObject saveReceiptDiagnostics(Flow& flow, QWidget& dialog, const QString& path) {
+    const QString target = freshArtifactPath(path);
+    const auto messagesBefore = flow.dialogs.messages().size();
+    flow.dialogs.saveTo(target);
+    click(child<QAbstractButton>(dialog, "receiptSaveDiagnostics"));
+    check(waitFor([&] {
+        return QFileInfo(target).isFile() || flow.dialogs.messages().size() != messagesBefore;
+    }, 3000) && QFileInfo(target).isFile(), "Save diagnostics must write to the chosen JSON file");
+    return readJson(target);
 }
 
 void testExplicitSceneAndReference(const QDir& root) {
@@ -428,6 +559,7 @@ void checkQuickPreview(Flow& flow, const QDir& output) {
     check(!quickProof.isNull() && quickProof != formalProof &&
               proof.accessibleDescription().contains(u8"\u5feb\u901f\u9884\u89c8"),
           "A current quick result must update and label the order proof");
+    flow.checkNoFrameReceipt();
     showAdvanced.trigger();
 
     exposure->setValue(previousExposure);
@@ -478,6 +610,9 @@ void testSingleAndClear(const QDir& root) {
           "Single-frame delivery must contain one full-size PNG in the chosen directory");
     check(flow.order.proofImage() == formalImage.convertToFormat(QImage::Format_RGB888),
           "The formal proof must match the delivered PNG, not the darkroom tone map");
+    const auto frameRows = inspectReceiptRows(flow);
+    check(frameRows == ReceiptRows{{source, {Outcome::Used, true, 0}}},
+          "The only RAW must be the frame used by the single delivery and its actual reference");
     checkReveal(flow, path, output.absolutePath());
 
     menuText(flow.window, u8"\u9ad8\u7ea7\u6697\u623f").trigger();
@@ -503,6 +638,10 @@ void testSingleAndClear(const QDir& root) {
     check(QImage(output.filePath(exported)) == formalImage &&
               QDir::fromNativeSeparators(flow.receipt.text()) == output.filePath(exported),
           "Manual export must publish the current full-resolution result and its own receipt");
+    menuText(flow.window, u8"\u51b2\u5370\u5355").trigger();
+    check(inspectReceiptRows(flow) == frameRows,
+          "Re-export must keep the current formal delivery's original frame rows");
+    menuText(flow.window, u8"\u9ad8\u7ea7\u6697\u623f").trigger();
     const auto formalBytes = bytes(path);
     const auto exportBytes = bytes(output.filePath(exported));
 
@@ -514,6 +653,7 @@ void testSingleAndClear(const QDir& root) {
     check(flow.project.filePaths().isEmpty() && flow.receipt.text().isEmpty() &&
               flow.preview.currentImage().isNull(),
           "Clearing the project must remove the source, receipt, and result canvas");
+    flow.checkNoFrameReceipt();
     flow.checkExportEligibility(false);
 
     const QFileInfo replacement(root.filePath("replacement.dng"));
@@ -524,6 +664,8 @@ void testSingleAndClear(const QDir& root) {
     check(QFile::remove(source) && QFile::rename(replacement.filePath(), source),
           "Cannot replace the fixture at its original path");
     flow.window.importFiles({source});
+    flow.goToOutput();
+    flow.checkNoFrameReceipt();
     flow.window.selectStartupWorkflowStage(WorkflowStage::Adjustment);
     check(waitFor([&] { return !flow.preview.currentImage().isNull(); }) &&
               flow.preview.currentImage() != originalRawPreview &&
@@ -543,6 +685,82 @@ void testSingleAndClear(const QDir& root) {
     shortcut(flow.window, "R").trigger();
     check(flow.preview.currentContentKey() == replacementKey && !flow.preview.isShowingResult(),
           "Returning to a result after clear must not revive the previous cache");
+}
+
+void testSingleFrameReceiptFromMultipleRaws(const QDir& root) {
+    const QDir output(root.filePath("multi-raw-receipt-output"));
+    prepareOutput(output);
+    Flow flow;
+    const QString unsubmitted = root.filePath("frame2.dng");
+    const QString selected = root.filePath("frame10.dng");
+    const QString excluded = root.filePath("late.dng");
+    flow.window.importFiles({unsubmitted, selected, excluded});
+    flow.window.selectStartupWorkflowStage(WorkflowStage::Alignment);
+    auto& excludedCard = selectAsset(flow.project, excluded);
+    excludedCard.setFocus(Qt::MouseFocusReason);
+    QKeyEvent exclude(QEvent::KeyPress, Qt::Key_Space, Qt::NoModifier);
+    QApplication::sendEvent(&excludedCard, &exclude);
+    check(flow.project.excludedFilePaths() == QStringList{excluded},
+          "The filmstrip shortcut must manually exclude exactly one RAW");
+    choose(child<QComboBox>(flow.params, "referenceFrameCombo"), unsubmitted);
+    choose(child<QComboBox>(flow.window, "toolbarSceneCombo"),
+           static_cast<int>(ProcessingScene::SingleFrame));
+    selectAsset(flow.project, selected);
+    auto& showOrder = menuText(flow.window, u8"\u51b2\u5370\u5355");
+    showOrder.trigger();
+    flow.goToOutput();
+    flow.checkNoFrameReceipt();
+    const QString delivery = flow.process(1);
+    const QStringList deliveries{QFileInfo(delivery).fileName()};
+    check(files(output) == deliveries, "A formal delivery must not automatically write a diagnostics report");
+    const auto contentKey = flow.preview.currentContentKey();
+    const auto checkEditor = [&] {
+        check(flow.project.currentFilePath() == selected && flow.project.referenceFramePath() == unsubmitted &&
+                  flow.params.selectedReferenceFrame() == unsubmitted &&
+                  flow.project.excludedFilePaths() == QStringList{excluded} &&
+                  flow.preview.isShowingResult() && flow.preview.currentContentKey() == contentKey &&
+                  flow.receipt.text() == QDir::toNativeSeparators(delivery),
+              "Viewing the receipt must not change the editor's source, reference, result or exclusion");
+        flow.checkExportEligibility(true);
+    };
+    checkEditor();
+    auto& dialog = flow.openFrameReceipt();
+    const auto rows = readReceiptRows(dialog);
+    check(rows == ReceiptRows{{selected, {Outcome::Used, true, 0}},
+                              {unsubmitted, {Outcome::NotSubmitted, false, 0}},
+                              {excluded, {Outcome::ManualExcluded, false, 0}}},
+          "Single-frame details must mark the real reference and distinguish unused from manually excluded RAWs");
+    selectReceiptRow(dialog, unsubmitted);
+    checkEditor();
+    selectReceiptRow(dialog, excluded);
+    const auto report = saveReceiptDiagnostics(flow, dialog, root.filePath("anonymous-frame-receipt.json"));
+    const auto anonymousRows = report.value("rows").toArray();
+    // An allowlist of values catches leaks even when the original path or text is JSON-escaped.
+    check(anonymousRows.size() == 3 &&
+              report == QJsonObject{{"schemaVersion", 1}, {"sequence", false}, {"deliverables", 1},
+                                    {"submittedCount", 1}, {"usedCount", 1}, {"skippedCount", 0},
+                                    {"manualCount", 1}, {"rows", anonymousRows}},
+          "Saved report must contain only the anonymous schema and correct counts");
+    QSet<QString> outcomes{"used", "not-submitted", "manual-excluded"};
+    for (int row = 0; row < anonymousRows.size(); ++row) {
+        const auto entry = anonymousRows.at(row).toObject();
+        const QString outcome = entry.value("outcome").toString();
+        check(outcomes.remove(outcome) &&
+                  entry == QJsonObject{{"frameNumber", row + 1}, {"outcome", outcome},
+                                       {"reference", outcome == "used"}},
+              "Saved rows must contain only consecutive anonymous numbers, known outcomes and reference flags");
+    }
+    check(dialog.close() && files(output) == deliveries,
+          "Saving diagnostics elsewhere must not modify the delivered files");
+    checkEditor();
+
+    menuText(flow.window, u8"\u9ad8\u7ea7\u6697\u623f").trigger();
+    shortcut(flow.window, "Ctrl+E").trigger();
+    check(waitFor([&] { return files(output).size() == 2 && flow.params.isEnabled(); }),
+          "The formal result must remain exportable after viewing frame details");
+    showOrder.trigger();
+    check(inspectReceiptRows(flow) == rows,
+          "A re-export must retain the same used, unsubmitted and manually excluded frames");
 }
 
 void testQueuedDeliverySnapshots(const QDir& root) {
@@ -566,6 +784,8 @@ void testQueuedDeliverySnapshots(const QDir& root) {
         flow.goToOutput();
         const QString previousPath = flow.process(1);
         const QImage previousProof = flow.order.proofImage();
+        check(inspectReceiptRows(flow).value(first).reference,
+              "The previous delivery must describe the original source");
         QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
         showAdvanced.trigger();
 
@@ -599,6 +819,7 @@ void testQueuedDeliverySnapshots(const QDir& root) {
                   flow.next.isEnabled() && child<QWidget>(flow.order, "printOrderOutputPage").isVisible() &&
                   !child<QProgressBar>(flow.order, "printOrderTaskProgress").isVisible(),
               "The stale delivery must unlock a retryable order without publishing a receipt");
+        flow.checkNoFrameReceipt();
         check(waitFor([&] { return !flow.preview.currentImage().isNull(); }) &&
                   !flow.preview.isShowingResult() && flow.order.proofImage() == flow.preview.currentImage() &&
                   flow.order.proofImage() != previousProof,
@@ -613,11 +834,16 @@ void testQueuedDeliverySnapshots(const QDir& root) {
         const QString recoveredPath = flow.process(1);
         check(recoveredPath != savedPath && QFileInfo::exists(previousPath) && bytes(savedPath) == savedBytes,
               "A new valid delivery must leave both earlier files untouched");
+        const auto rows = inspectReceiptRows(flow);
+        check(rows == ReceiptRows{{second, {Outcome::Used, true, 0}},
+                                  {first, {Outcome::NotSubmitted, false, 0}}},
+              "A valid retry must describe the newly delivered source, not the stale worker's source");
 
         click(child<QAbstractButton>(flow.order, "printOrderNewOrder"));
         check(flow.project.filePaths().isEmpty() && flow.preview.currentImage().isNull() &&
                   flow.order.proofImage() == sample && flow.receipt.text().isEmpty() && files(output).size() == 3,
               "A new order must remove session images and receipts without removing files");
+        flow.checkNoFrameReceipt();
     }
 }
 
@@ -727,7 +953,12 @@ void testCancelOrder(const QDir& root) {
                              root.filePath("late.dng")});
     flow.goToOutput();
     auto& progress = child<QProgressBar>(flow.order, "printOrderTaskProgress");
-    click(flow.next);
+    const QDir priorDelivery(flow.process(3));
+    const auto deliveredFiles = files(priorDelivery);
+    check(inspectReceiptRows(flow).size() == 3, "Cancellation must start with a prior frame receipt");
+    QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+    shortcut(flow.window, "Ctrl+Return").trigger();
+    flow.checkNoFrameReceipt();
     auto& worker = child<ProcessingWorker>(flow.window);
     int cancelledAt = 0;
     QObject progressReceiver;
@@ -751,8 +982,11 @@ void testCancelOrder(const QDir& root) {
     check(flow.receipt.text().isEmpty() && !flow.receipt.isVisible() &&
               !child<QAbstractButton>(flow.order, "printOrderReveal").isVisible() &&
               output.entryList(QDir::AllEntries | QDir::Hidden | QDir::System |
-                               QDir::NoDotAndDotDot).isEmpty(),
-          "Cancellation before delivery must not leave a receipt, file, or sequence directory");
+                               QDir::NoDotAndDotDot) == QStringList{priorDelivery.dirName()} &&
+              files(priorDelivery) == deliveredFiles,
+          "Cancellation must not publish a receipt or leave any new file or sequence directory");
+    flow.checkNoFrameReceipt();
+    flow.checkExportEligibility(false);
     std::cout << "Print order cancelled at " << cancelledAt << "%\n";
 }
 
@@ -775,6 +1009,14 @@ void testSequence(const QDir& root) {
                                "0003_late_denoised.tiff"};
     check(files(sequence) == expected,
           "Sequence files must follow capture time, with natural filename tie-breaking");
+    const auto rows = inspectReceiptRows(flow);
+    const QStringList orderedSources{"frame2.dng", "frame10.dng", "late.dng"};
+    check(rows.size() == orderedSources.size(), "Sequence receipt must account for all three frames");
+    for (int index = 0; index < orderedSources.size(); ++index) {
+        const auto row = rows.value(root.filePath(orderedSources.at(index)));
+        check(row.outcome == Outcome::Used && row.outputNumber == index + 1,
+              "Receipt output numbers must follow the worker's on-disk sequence, not the import order");
+    }
     for (const auto& name : expected) {
         std::vector<uint16_t> rgb;
         int width = 0;
@@ -789,9 +1031,59 @@ void testSequence(const QDir& root) {
               child<QWidget>(flow.order, "printOrderProductPage").isVisible() &&
               files(sequence) == expected,
           "Starting a new order must reset the receipt without deleting the delivered sequence");
+    flow.checkNoFrameReceipt();
+}
+
+struct ExampleFrames {
+    QSet<QString> selected;
+    QSet<QString> used;
+    QString reference;
+};
+
+ExampleFrames readExampleFrames(const QString& orderPath) {
+    PrintOrderDocument order;
+    QString error;
+    check(PrintOrderDocument::load(orderPath, order, error), error);
+    check(!order.comparisonManifest.isEmpty(), "The example order must link to its comparison manifest");
+    const auto manifest = readJson(order.comparisonManifest);
+    const auto selected = manifest.value("selectedLights").toArray();
+    const auto used = manifest.value("lights").toArray();
+    check(!selected.isEmpty() && selected.size() == order.lights.size() && !used.isEmpty(),
+          "The comparison manifest must list the submitted and adopted lights");
+
+    const auto relative = [](const QJsonValue& value) {
+        const QString path = value.toString();
+        check(!path.isEmpty() && path != "." && path != ".." && !path.startsWith("../") &&
+                  QDir::isRelativePath(path) && QDir::cleanPath(path) == path,
+              "Manifest light paths must be relative to the Runner input root");
+        return path;
+    };
+    // The manifest and order list the same slice under different roots. Bind
+    // the whole relative path so same-name RAWs in different folders stay distinct.
+    const QString firstRelative = relative(selected.first());
+    const QString firstLocal = order.lights.first();
+    check(firstLocal.endsWith('/' + firstRelative), "Cannot bind the manifest to the order's local RAW root");
+    const QDir rawRoot(firstLocal.left(firstLocal.size() - firstRelative.size()));
+    ExampleFrames expected;
+    for (int i = 0; i < selected.size(); ++i) {
+        const QString path = rawRoot.filePath(relative(selected.at(i)));
+        check(path == order.lights.at(i) && !expected.selected.contains(path),
+              "Manifest selectedLights must match the full order slice");
+        expected.selected.insert(path);
+    }
+    for (const auto& value : used) {
+        const QString path = rawRoot.filePath(relative(value));
+        check(expected.selected.contains(path) && !expected.used.contains(path),
+              "Manifest lights must be a unique subset of selectedLights");
+        expected.used.insert(path);
+    }
+    expected.reference = rawRoot.filePath(relative(manifest.value("reference")));
+    check(expected.used.contains(expected.reference), "Manifest reference must be an adopted light");
+    return expected;
 }
 
 void replayLocalExample(const QDir& root, const QString& order, const QString& baseline) {
+    const auto expectedFrames = readExampleFrames(order);
     const QDir out(root.filePath("replay-output"));
     prepareOutput(out);
     Flow flow;
@@ -809,15 +1101,48 @@ void replayLocalExample(const QDir& root, const QString& order, const QString& b
     check(child<QWidget>(flow.order, "printOrderAssetsPage").isVisible(), "Reopen must land on assets");
     click(flow.next);
     const QString actual = flow.process(1, 600000);
-    std::vector<uint16_t> actualPixels, expectedPixels;
     int w = 0, h = 0, expectedW = 0, expectedH = 0;
-    check(ImageExporter::loadTiffRgb16(actual, actualPixels, w, h) &&
-          ImageExporter::loadTiffRgb16(baseline, expectedPixels, expectedW, expectedH),
-          "Cannot compare formal TIFF pixels");
-    check(w == expectedW && h == expectedH && actualPixels == expectedPixels,
-          QStringLiteral("Reopened GUI pixels differ from the original TIFF (%1x%2 vs %3x%4)")
-              .arg(w).arg(h).arg(expectedW).arg(expectedH));
+    {
+        std::vector<uint16_t> actualPixels, expectedPixels;
+        check(ImageExporter::loadTiffRgb16(actual, actualPixels, w, h) &&
+              ImageExporter::loadTiffRgb16(baseline, expectedPixels, expectedW, expectedH),
+              "Cannot compare formal TIFF pixels");
+        check(w == expectedW && h == expectedH && actualPixels == expectedPixels,
+              QStringLiteral("Reopened GUI pixels differ from the original TIFF (%1x%2 vs %3x%4)")
+                  .arg(w).arg(h).arg(expectedW).arg(expectedH));
+    }
+    auto& details = flow.openFrameReceipt();
+    const auto rows = readReceiptRows(details);
+    check(rows.size() == expectedFrames.selected.size(), "Receipt must cover manifest selectedLights");
+    for (auto it = rows.cbegin(); it != rows.cend(); ++it) {
+        const auto& row = it.value();
+        check(expectedFrames.selected.contains(it.key()) &&
+                  (row.outcome == Outcome::Used) == expectedFrames.used.contains(it.key()) &&
+                  row.outcome != Outcome::ManualExcluded && row.outcome != Outcome::NotSubmitted &&
+                  row.outcome != Outcome::Unconfirmed,
+              "Receipt must distinguish adopted lights from those the worker did not adopt");
+        check(row.reference == (it.key() == expectedFrames.reference),
+              "Receipt reference must match the actual reference in the comparison manifest");
+    }
+    const QString frameSnapshot = qEnvironmentVariable("NEBULENS_TEST_FRAME_RECEIPT_SCREENSHOT");
+    const auto& referencePreview = child<QLabel>(details, "receiptReferencePreview");
+    const auto& selectedPreview = child<QLabel>(details, "receiptSelectedPreview");
+    const auto ready = [](const QLabel& preview) {
+        return preview.isVisible() && preview.text().isEmpty();
+    };
+    const bool previewsReady = waitFor([&] { return ready(referencePreview) && ready(selectedPreview); });
+    check(previewsReady, QStringLiteral("Frame receipt previews did not load. Reference: %1; selected: %2")
+              .arg(ready(referencePreview) ? QStringLiteral("ready") : referencePreview.text(),
+                   ready(selectedPreview) ? QStringLiteral("ready") : selectedPreview.text()));
+    if (!frameSnapshot.isEmpty()) {
+        check(details.grab().save(freshArtifactPath(frameSnapshot), "PNG"), "Cannot capture the frame receipt window");
+    }
+    const QString diagnostics = qEnvironmentVariable("NEBULENS_TEST_FRAME_RECEIPT_JSON");
+    if (!diagnostics.isEmpty()) saveReceiptDiagnostics(flow, details, diagnostics);
+    check(details.close(), "Frame details must be dismissible");
     std::cout << "Local example: " << flow.project.totalFileCount() << " RAW inputs, "
+              << expectedFrames.used.size() << " adopted and "
+              << expectedFrames.selected.size() - expectedFrames.used.size() << " not adopted, "
               << w << 'x' << h << " RGB16 pixels identical after GUI replay\n";
 }
 
@@ -855,6 +1180,8 @@ int main(int argc, char* argv[]) {
         for (const auto& test : {
                  std::make_pair("Explicit scene and reference selection", testExplicitSceneAndReference),
                  std::make_pair("Single-frame delivery, quick preview, and clear", testSingleAndClear),
+                 std::make_pair("Single-frame receipt of multiple RAWs and private diagnostics",
+                                testSingleFrameReceiptFromMultipleRaws),
                  std::make_pair("Queued formal and manual delivery snapshots", testQueuedDeliverySnapshots),
                  std::make_pair("Milky Way manual separation and ground detail", testNightscapeGroundDetail),
                  std::make_pair("Cancel a running print order without a receipt", testCancelOrder),

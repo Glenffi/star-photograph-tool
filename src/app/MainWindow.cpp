@@ -1035,9 +1035,9 @@ QString MainWindow::effectiveSingleFrameSource() const {
     if (files.isEmpty()) return QString();
     QString source = m_projectPanel->currentFilePath();
     if (source.isEmpty() || !files.contains(source)) source = files.first();
-    const QFileInfo info(source);
-    const QString canonical = info.canonicalFilePath();
-    return canonical.isEmpty() ? info.absoluteFilePath() : canonical;
+    // 保留胶片带里的素材身份；两个入口即使指向同一文件，回执也要标对被选中的那一行。
+    // 文件实体及变更时间已由 ProjectPanel::processingSourceSignature 单独核验。
+    return source;
 }
 
 bool MainWindow::discardEditedMaskForDifferentReference() {
@@ -1370,6 +1370,8 @@ void MainWindow::startQuickPreview() {
 
 void MainWindow::invalidateCachedResult() {
     cancelQuickPreview(false);
+    clearDeliveryReceipt();
+    m_formalFrameReceipt = {};
     m_cachedStackedData.clear();
     m_cachedStackedData.shrink_to_fit();
     m_cachedBeforePreview = QImage();
@@ -1397,8 +1399,7 @@ void MainWindow::invalidateCachedResult() {
 }
 
 void MainWindow::markCachedResultStale(const QString& reason) {
-    m_deliveryPath.clear();
-    m_printOrder->clearReceipt();
+    clearDeliveryReceipt();
     cancelQuickPreview(false);
     m_quickPreviewSource.reset();
     m_quickPreviewMask.reset();
@@ -1716,9 +1717,11 @@ void MainWindow::onProcessClicked() {
             : QCoreApplication::translate("Nebulens", "正在准备处理"));
 
     // 创建后台线程。进度与取消都留在主窗口，不再弹出第二个窗口。
+    // 单张精修只提交选中的一张；回执仍需辨别片列中的未提交项和手动排除项。
+    const auto projectLights = m_projectPanel->allFilePaths();
+    const auto manualExclusions = m_projectPanel->excludedFilePaths();
     auto* worker = new ProcessingWorker(files, refFrame, params, this);
     m_worker = worker;
-    m_deliveryPath.clear();
     setTaskFeedback(true, 0, QCoreApplication::translate("Nebulens", "正在准备处理"));
     refreshPrintOrderResult();
     refreshExportAction();
@@ -1747,7 +1750,8 @@ void MainWindow::onProcessClicked() {
         m_toolbar->setProgress(value);
         setTaskFeedback(true, value, m_taskMessage);
     });
-    connect(worker, &ProcessingWorker::finished, this, [this, worker, snapshot, upstreamSignature]() {
+    connect(worker, &ProcessingWorker::finished, this, [this, worker, snapshot, upstreamSignature,
+                                                        projectLights, manualExclusions]() {
         if (m_worker != worker) {
             worker->deleteLater();
             return;
@@ -1806,9 +1810,8 @@ void MainWindow::onProcessClicked() {
             m_lastValidResultPreview = m_previewPanel->currentImage();
             m_lastValidResultPreviewKey =
                 QStringLiteral("last-valid:") + m_lastProcessedSignature;
-            m_deliveryPath = worker->outputFile();
-            m_printOrder->setReceipt(m_deliveryPath,
-                m_scene == ProcessingScene::Timelapse ? m_cachedFrameCount : 1);
+            m_formalFrameReceipt = worker->frameReceipt(projectLights, manualExclusions);
+            publishDeliveryReceipt(worker->outputFile());
             setTaskFeedback(false, 100, {});
             int frameCount = m_cachedFrameCount;
             const QString referenceName = QFileInfo(
@@ -2015,7 +2018,7 @@ void MainWindow::onExportClicked() {
     auto* worker = new ExportWorker(
         image, m_cachedWidth, m_cachedHeight, fullPath, fmt, this);
     m_exportWorker = worker;
-    m_deliveryPath.clear();
+    clearDeliveryReceipt();
     setTaskFeedback(true, -1, QCoreApplication::translate("Nebulens", "正在导出 %1...").arg(fileName));
     refreshExportAction();
     m_projectPanel->setEditingEnabled(false);
@@ -2037,8 +2040,8 @@ void MainWindow::onExportClicked() {
                 } else {
                     m_cachedStackedData = std::move(*image);
                     if (worker->succeeded()) {
-                        m_deliveryPath = worker->outputPath();
-                        m_printOrder->setReceipt(m_deliveryPath, 1);
+                        // 这里只重新编码成片；用片明细来自产生这些像素的正式任务。
+                        publishDeliveryReceipt(worker->outputPath());
                         setTaskFeedback(false, 100, {});
                         m_paramsPanel->refreshRecentResults();
                         statusBar()->showMessage(QCoreApplication::translate("Nebulens",

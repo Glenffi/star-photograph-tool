@@ -57,6 +57,15 @@
 
 namespace {
 
+using ReceiptOutcome = FrameReceipt::Outcome;
+
+QString receiptSourcePath(const QString& path) {
+    // Keep exact paths, including distinct symlink entries, without stat'ing
+    // every project row on the UI thread after the worker finishes.
+    return path.isEmpty() || QDir::isAbsolutePath(path)
+        ? path : QDir::current().absoluteFilePath(path);
+}
+
 bool reorderChronologically(
     QStringList& files,
     std::vector<RawImageLoader::Metadata>& metadata) {
@@ -582,6 +591,49 @@ QImage ProcessingWorker::takeBeforePreview() {
     return std::move(m_beforePreview);
 }
 
+void ProcessingWorker::startFrameReceipt(qsizetype submittedCount) {
+    m_frameReceipt.sequence = m_params.timelapseMode;
+    m_frameReceipt.rows.resize(submittedCount);
+    for (qsizetype i = 0; i < submittedCount; ++i) {
+        m_frameReceipt.rows[i].sourcePath = receiptSourcePath(m_files.at(i));
+    }
+}
+
+FrameReceipt ProcessingWorker::frameReceipt(const QStringList& allProjectLights,
+                                            const QStringList& manualExcluded) const {
+    if (!isFinished() || m_frameReceipt.deliverables == 0 ||
+        m_wasCancelled || !m_errorString.isEmpty()) {
+        return {};
+    }
+
+    FrameReceipt receipt = m_frameReceipt;
+    if (m_selectedReferenceIndex >= 0 && m_selectedReferenceIndex < receipt.rows.size()) {
+        receipt.rows[m_selectedReferenceIndex].reference = true;
+    }
+
+    QSet<QString> recordedPaths;
+    recordedPaths.reserve(receipt.rows.size() + allProjectLights.size());
+    for (const auto& row : std::as_const(receipt.rows)) recordedPaths.insert(row.sourcePath);
+
+    QSet<QString> excludedPaths;
+    excludedPaths.reserve(manualExcluded.size());
+    for (const QString& path : manualExcluded) excludedPaths.insert(receiptSourcePath(path));
+
+    auto appendUnsubmitted = [&](const QString& path) {
+        const QString source = receiptSourcePath(path);
+        if (source.isEmpty() || recordedPaths.contains(source)) return;
+        recordedPaths.insert(source);
+        FrameReceipt::Row row;
+        row.sourcePath = source;
+        row.outcome = excludedPaths.contains(source)
+            ? ReceiptOutcome::ManualExcluded : ReceiptOutcome::NotSubmitted;
+        receipt.rows.append(std::move(row));
+    };
+    for (const QString& path : allProjectLights) appendUnsubmitted(path);
+    for (const QString& path : manualExcluded) appendUnsubmitted(path);
+    return receipt;
+}
+
 double ProcessingWorker::averageAlignmentRms() const {
     const int alignedSources = m_affineFrameCount + m_homographyFrameCount;
     return alignedSources > 0 ? m_alignmentRmsSum / alignedSources : 0.0;
@@ -1004,6 +1056,7 @@ void ProcessingWorker::run() {
     m_frameQualityMetrics.clear();
     m_qualityRejectedFiles.clear();
     m_skippedFrames.clear();
+    m_frameReceipt = {};
     m_wasCancelled = false;
     m_outputFile.clear();
     m_affineFrameCount = 0;
@@ -1069,6 +1122,7 @@ void ProcessingWorker::run() {
         return;
     }
 
+    startFrameReceipt(m_files.size());
     emit stageMessage(QCoreApplication::translate("Nebulens", "检查图像与内存预算..."));
     RawImageLoader loader;
     if (m_params.deepSkyMode) {
@@ -1176,8 +1230,15 @@ void ProcessingWorker::run() {
     // the sequence even if its preview metrics look unusual.
     qualityRejected[referenceIndex] = false;
     for (int i = 0; i < m_files.size(); ++i) {
+        auto& row = m_frameReceipt.rows[i];
+        if (!m_frameQualityMetrics.empty()) {
+            const auto& metrics = m_frameQualityMetrics[static_cast<size_t>(i)];
+            if (metrics.valid && std::isfinite(metrics.score)) row.qualityScore = metrics.score;
+        }
         if (qualityRejected[static_cast<size_t>(i)]) {
             m_qualityRejectedFiles.push_back(m_files[i]);
+            row.outcome = ReceiptOutcome::QualityRejected;
+            row.reasonCodes.append(QStringLiteral("quality-outlier"));
         }
     }
     m_selectedReferenceIndex = static_cast<int>(referenceIndex);
@@ -1490,6 +1551,9 @@ void ProcessingWorker::run() {
         m_errorString = QCoreApplication::translate("Nebulens", "无法写入参考帧临时缓存（请检查磁盘空间）");
         return;
     }
+    auto& referenceRow = m_frameReceipt.rows[m_selectedReferenceIndex];
+    referenceRow.outcome = ReceiptOutcome::Used;
+    referenceRow.detectedStars = static_cast<int>(referenceStars.detectedCount);
     referenceImage.data.clear();
     referenceImage.data.shrink_to_fit();
     referenceLuminance.clear();
@@ -1509,6 +1573,7 @@ void ProcessingWorker::run() {
         if (qualityRejected[static_cast<size_t>(i)]) continue;
         if (static_cast<size_t>(i) == referenceIndex) continue;
 
+        auto& receiptRow = m_frameReceipt.rows[i];
         RawImageLoader::ImageData sourceImage;
         const bool sourceLoaded = m_params.deepSkyMode
             ? loadCalibratedRaw(
@@ -1516,6 +1581,8 @@ void ProcessingWorker::run() {
             : loader.loadRaw(m_files[i], sourceImage);
         if (!sourceLoaded) {
             if (m_params.deepSkyMode) return;
+            receiptRow.outcome = ReceiptOutcome::RawLoadFailed;
+            receiptRow.reasonCodes.append(QStringLiteral("raw-decode-failed"));
             SkippedFrameInfo skipped;
             skipped.filePath = m_files[i];
             skipped.stage = "raw-load";
@@ -1542,8 +1609,12 @@ void ProcessingWorker::run() {
             return;
         }
         AlignmentStarSelection sourceStars;
-        if (!detector.detectForAlignment(sourceLuminance, width, height,
-                                         sourceStars)) {
+        const bool detected = detector.detectForAlignment(
+            sourceLuminance, width, height, sourceStars);
+        receiptRow.detectedStars = static_cast<int>(sourceStars.detectedCount);
+        if (!detected) {
+            receiptRow.outcome = ReceiptOutcome::NoStars;
+            receiptRow.reasonCodes.append(QStringLiteral("no-alignment-stars"));
             SkippedFrameInfo skipped;
             skipped.filePath = m_files[i];
             skipped.stage = "star-detection";
@@ -1562,6 +1633,7 @@ void ProcessingWorker::run() {
         alignmentModelOptions.evaluationSourceStars = &sourceStars.evaluation;
         if (!aligner.align(referenceStars.fit, sourceStars.fit, transform,
                            &alignmentQuality, alignmentModelOptions)) {
+            receiptRow.outcome = ReceiptOutcome::AlignmentFailed;
             SkippedFrameInfo skipped;
             skipped.filePath = m_files[i];
             skipped.stage = "alignment";
@@ -1602,8 +1674,13 @@ void ProcessingWorker::run() {
                     QString::fromStdString(reason));
             }
             if (!skipped.affineEvaluated && !skipped.homographyEvaluated) {
+                receiptRow.reasonCodes.append(QStringLiteral("no-fit-model"));
                 skipped.reason = QCoreApplication::translate("Nebulens", "星点匹配未形成可拟合模型");
             } else {
+                receiptRow.reasonCodes.append(QStringLiteral("alignment-quality-gate"));
+                receiptRow.reasonCodes.append(skipped.affineFailureReasons);
+                receiptRow.reasonCodes.append(skipped.homographyFailureReasons);
+                receiptRow.reasonCodes.removeDuplicates();
                 QStringList failedModels;
                 if (skipped.affineEvaluated) {
                     failedModels.append(QString("Affine: %1")
@@ -1635,6 +1712,8 @@ void ProcessingWorker::run() {
             : aligner.applyTransformRgb(
                   sourceImage.data, width, height, transform, alignedFrame);
         if (!resampled) {
+            receiptRow.outcome = ReceiptOutcome::ResamplingFailed;
+            receiptRow.reasonCodes.append(QStringLiteral("resampling-failed"));
             SkippedFrameInfo skipped;
             skipped.filePath = m_files[i];
             skipped.stage = "resampling";
@@ -1714,6 +1793,7 @@ void ProcessingWorker::run() {
         }
         // Only report frames that were successfully resampled and persisted.
         // This keeps diagnostics consistent with the frames consumed by stacking.
+        receiptRow.outcome = ReceiptOutcome::Used;
         if (transform.model == AlignmentModel::Homography) {
             ++m_homographyFrameCount;
         } else {
@@ -1876,6 +1956,7 @@ void ProcessingWorker::runStarTrail() {
             "Nebulens", "无法确定星轨序列的时间顺序");
         return;
     }
+    startFrameReceipt(m_files.size());
 
     ProcessingMemoryEstimator::EstimateOptions estimateOptions;
     // The compositor is streaming. One synthetic frame keeps the generic
@@ -2049,6 +2130,7 @@ void ProcessingWorker::runStarTrail() {
                     StarTrailEngine::errorMessage(trailEngine.lastError())));
             return;
         }
+        m_frameReceipt.rows[index].outcome = ReceiptOutcome::Used;
 
         if (protectGround && groundMaskReady) {
             if (groundFrameCount == 0) {
@@ -2164,6 +2246,7 @@ void ProcessingWorker::runTimelapse() {
             "Nebulens", "无法确定延时序列的时间顺序");
         return;
     }
+    startFrameReceipt(m_files.size());
 
     const int metadataWidth = metadata.front().width;
     const int metadataHeight = metadata.front().height;
@@ -2267,9 +2350,9 @@ void ProcessingWorker::runTimelapse() {
         std::vector<uint16_t> luminance;
         if (ImageBufferUtils::extractLuminance(
                 image.data, width, height, luminance)) {
-            detector.detect(luminance, width, height,
-                            detectedStars[static_cast<size_t>(index)],
-                            detectionOptions);
+            auto& stars = detectedStars[static_cast<size_t>(index)];
+            detector.detect(luminance, width, height, stars, detectionOptions);
+            m_frameReceipt.rows[index].detectedStars = static_cast<int>(stars.size());
         }
         if (!decodedCache.append(image.data)) {
             m_errorString = QCoreApplication::translate("Nebulens", "延时 RAW 临时缓存写入失败");
@@ -2659,10 +2742,11 @@ void ProcessingWorker::runTimelapse() {
             }
         }
 
+        const int outputNumber = targetIndex + 1;
         const QString extension = png ? ".png" : ".tiff";
         const QString baseName = QFileInfo(m_files[targetIndex]).completeBaseName();
         const QString outputName = QString("%1_%2_denoised%3")
-            .arg(targetIndex + 1, outputIndexWidth, 10, QLatin1Char('0'))
+            .arg(outputNumber, outputIndexWidth, 10, QLatin1Char('0'))
             .arg(baseName, extension);
         const QString outputPath = outputDirectory.filePath(outputName);
         if (stopIfCancelled()) return;
@@ -2678,6 +2762,9 @@ void ProcessingWorker::runTimelapse() {
             m_errorString = QCoreApplication::translate("Nebulens", "延时序列导出失败: %1").arg(outputName);
             return;
         }
+        auto& receiptRow = m_frameReceipt.rows[targetIndex];
+        receiptRow.outcome = ReceiptOutcome::Used;
+        receiptRow.outputNumber = outputNumber;
         if (targetIndex == m_selectedReferenceIndex) {
             m_stackedData = std::move(resultRgb);
         }
@@ -2699,12 +2786,14 @@ void ProcessingWorker::runTimelapse() {
             NormalizationState::Failed));
     }
     if (stopIfCancelled()) return;
+    m_frameReceipt.deliverables = writtenFrames;
     emit progress(100);
     emit stageMessage(QCoreApplication::translate("Nebulens", "延时序列处理完成：已输出 %1 张").arg(writtenFrames));
 }
 
 void ProcessingWorker::runSingleFrame() {
     m_params.skyGroundSepEnabled = false;
+    startFrameReceipt(1);
     const QString sourcePath = m_files.first();
     RawImageLoader loader;
     RawImageLoader::Metadata metadata;
@@ -2821,6 +2910,7 @@ void ProcessingWorker::runSingleFrame() {
     }
     std::vector<uint8_t> noMask;
     if (!finishResult(resultRgb, m_width, m_height, noMask)) return;
+    m_frameReceipt.rows[0].outcome = ReceiptOutcome::Used;
 }
 
 bool ProcessingWorker::finishResult(std::vector<uint16_t>& resultRgb,
@@ -3000,6 +3090,7 @@ bool ProcessingWorker::finishResult(std::vector<uint16_t>& resultRgb,
         return false;
     }
     m_stackedData = std::move(resultRgb);
+    m_frameReceipt.deliverables = 1;
     emit progress(100);
     emit stageMessage(QCoreApplication::translate("Nebulens", "处理完成"));
     return true;
