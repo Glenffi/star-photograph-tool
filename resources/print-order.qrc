@@ -3,5 +3,12 @@
         <file alias="vellum.png">print-order/vellum.png</file>
         <!-- Neal Herbert / NPS, public domain. NPGallery asset 2ef91b9f-ad6d-4c60-9a57-d2386724aeb7. -->
         <file alias="lake-complete.jpg">print-order/lake-complete.jpg</file>
+        <file alias="product-proof-samples.json">print-order/product-proof-samples.json</file>
+        <file alias="la-silla-star-trails.jpg">print-order/la-silla-star-trails.jpg</file>
+        <file alias="paranal-timelapse-01.jpg">print-order/paranal-timelapse-01.jpg</file>
+        <file alias="paranal-timelapse-02.jpg">print-order/paranal-timelapse-02.jpg</file>
+        <file alias="paranal-timelapse-03.jpg">print-order/paranal-timelapse-03.jpg</file>
+        <file alias="paranal-timelapse-04.jpg">print-order/paranal-timelapse-04.jpg</file>
+        <file alias="paranal-timelapse-05.jpg">print-order/paranal-timelapse-05.jpg</file>
     </qresource>
 </RCC>

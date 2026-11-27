@@ -1,0 +1,82 @@
+{
+  "still": {
+    "title": "YELLO_LakeNight_NPS_Herbert",
+    "author": "Neal Herbert",
+    "credit": "Neal Herbert / NPS",
+    "sourceUrl": "https://npgallery.nps.gov/AssetDetail/2ef91b9f-ad6d-4c60-9a57-d2386724aeb7",
+    "sourceFileUrl": "https://npgallery.nps.gov/GetAsset/2ef91b9f-ad6d-4c60-9a57-d2386724aeb7/proxymdres.jpg",
+    "sourceFileSha256": "58559f80e4049d09da480afd561f96e8b1af678913fbde9fd9844518e6a8fec9",
+    "license": "Public domain (U.S. Government work)",
+    "licenseUrl": "https://www.nps.gov/aboutus/disclaimer.htm",
+    "processing": "Unchanged NPGallery medium JPEG (1440 x 960); no app crop or color edits.",
+    "frames": [
+      {
+        "file": "lake-complete.jpg",
+        "sha256": "58559f80e4049d09da480afd561f96e8b1af678913fbde9fd9844518e6a8fec9"
+      }
+    ]
+  },
+  "starTrail": {
+    "title": "Star trails over La Silla",
+    "author": "Alexandre Santerne",
+    "credit": "ESO/A. Santerne",
+    "sourceUrl": "https://www.eso.org/public/images/santerne-northern-sky/",
+    "sourceFileUrl": "https://cdn.eso.org/images/screen/santerne-northern-sky.jpg",
+    "sourceFileSha256": "1399985eac89d36e9702a97bdc6d61c7a4696cd968eb72838b56c74a70c057c7",
+    "license": "CC BY 4.0",
+    "licenseUrl": "https://creativecommons.org/licenses/by/4.0/",
+    "rightsUrl": "https://www.eso.org/public/outreach/copyright/",
+    "processing": "Unchanged ESO Screensize JPEG (1280 x 853). The photographer combined real nighttime exposures; no app crop or color edits.",
+    "frames": [
+      {
+        "file": "la-silla-star-trails.jpg",
+        "sha256": "1399985eac89d36e9702a97bdc6d61c7a4696cd968eb72838b56c74a70c057c7"
+      }
+    ]
+  },
+  "timelapse": {
+    "title": "Twilight and night sky time-lapse",
+    "author": "St\u00e9phane Guisard",
+    "credit": "ESO/S. Guisard (www.eso.org/~sguisard)",
+    "sourceUrl": "https://www.eso.org/public/videos/p4paranal/",
+    "sourceFileUrl": "https://cdn.eso.org/videos/hd_and_apple/p4paranal.m4v",
+    "sourceFileSha256": "d03e88f8fcdcb399efce468b42fa8fb7b857e25b6d61dbc9577a9fe55652c8dc",
+    "license": "CC BY 4.0",
+    "licenseUrl": "https://creativecommons.org/licenses/by/4.0/",
+    "rightsUrl": "https://www.eso.org/public/outreach/copyright/",
+    "sourceFramesPerSecond": 25,
+    "processing": "Five decoded frames from one stationary fisheye shot in ESO's 1280 x 720 HD & Apple TV Preview. Fixed center crop x=100, y=0, width=1080, height=720 on each frame. FFmpeg limited-range BT.709 to full-range RGB, then ImageMagick JPEG for sRGB display, quality 92, 4:4:4, without an embedded ICC profile. No audio, interpolation, reframing or grading. sourceFrame is zero-based; sourceTimeMs is the presentation time in the downloaded clip, not a capture time.",
+    "frames": [
+      {
+        "file": "paranal-timelapse-01.jpg",
+        "sourceFrame": 200,
+        "sourceTimeMs": 8000,
+        "sha256": "a999107b7d68fa417c821cbf25087bc123ed24583c0793791a88948a17897a9b"
+      },
+      {
+        "file": "paranal-timelapse-02.jpg",
+        "sourceFrame": 325,
+        "sourceTimeMs": 13000,
+        "sha256": "2268c4e8661c6f2bced37a5c4fb5efa5a355e02388bb93bd61942cde93411dd6"
+      },
+      {
+        "file": "paranal-timelapse-03.jpg",
+        "sourceFrame": 450,
+        "sourceTimeMs": 18000,
+        "sha256": "4c85e8593f114ea084fb13e0272da5ab1056486f19409a01d834e5cf8469cfb2"
+      },
+      {
+        "file": "paranal-timelapse-04.jpg",
+        "sourceFrame": 575,
+        "sourceTimeMs": 23000,
+        "sha256": "5d7152576716e98508b24bb32125c1834748ac549c707d4b35b37087bd499d89"
+      },
+      {
+        "file": "paranal-timelapse-05.jpg",
+        "sourceFrame": 700,
+        "sourceTimeMs": 28000,
+        "sha256": "130567615141d5ae0715d8fa17c9d66c15350c5759d100ae6c0194255aff128a"
+      }
+    ]
+  }
+}
