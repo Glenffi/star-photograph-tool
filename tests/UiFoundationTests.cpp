@@ -9,7 +9,9 @@
 #include <QColor>
 #include <QFontMetrics>
 #include <QImage>
+#include <QKeyEvent>
 #include <QLabel>
+#include <QMouseEvent>
 #include <QProgressBar>
 #include <QSignalBlocker>
 #include <QString>
@@ -60,20 +62,14 @@ public:
     }
 };
 
-int stageLabelInkWidth(QAbstractButton* stage) {
-    const QImage image = stage->grab().toImage().scaled(stage->size());
-    int left = image.width();
-    int right = -1;
-    // Skip the number and the status dot in the upper part of the button.
-    for (int y = 22; y < image.height() - 5; ++y) {
-        for (int x = 5; x < image.width() - 5; ++x) {
-            if (relativeLuminance(image.pixelColor(x, y)) > 0.25) {
-                left = std::min(left, x);
-                right = std::max(right, x);
-            }
-        }
-    }
-    return right - left + 1;
+void clickAt(QAbstractButton* button, const QPoint& point) {
+    const QPoint global = button->mapToGlobal(point);
+    QMouseEvent press(QEvent::MouseButtonPress, point, global,
+                      Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
+    QMouseEvent release(QEvent::MouseButtonRelease, point, global,
+                        Qt::LeftButton, Qt::NoButton, Qt::NoModifier);
+    QApplication::sendEvent(button, &press);
+    QApplication::sendEvent(button, &release);
 }
 
 } // namespace
@@ -101,6 +97,16 @@ int main(int argc, char* argv[]) {
                           StyleTokens::Colors::kTextFaint),
                       background) >= 4.5,
         "Faint text does not meet the planned 4.5:1 contrast ratio");
+    success &= require(
+        contrastRatio(StyleTokens::Colors::fromHex(StyleTokens::Colors::kActionText),
+                      StyleTokens::Colors::fromHex(StyleTokens::Colors::kAction)) >= 4.5 &&
+            contrastRatio(StyleTokens::Colors::fromHex(StyleTokens::Colors::kFocus),
+                          background) >= 3.0,
+        "Paper buttons and keyboard focus should remain legible");
+    const QColor matte = StyleTokens::Colors::fromHex(StyleTokens::Colors::kBackgroundCanvas);
+    success &= require(matte.red() == matte.green() && matte.green() == matte.blue() &&
+                           matte != background,
+                       "Image surrounds must stay neutral against the paper");
 
     const QColor translucent = StyleTokens::Colors::fromHex(
         StyleTokens::Colors::kMaskSky);
@@ -190,13 +196,25 @@ int main(int argc, char* argv[]) {
     RailTranslator translator;
     app.installTranslator(&translator);
     WorkflowRail rail;
+    rail.resize(800, StyleTokens::Layout::kWorkflowIndexHeight);
     rail.show();
     QApplication::processEvents();
     success &= require(
-        rail.width() == StyleTokens::Layout::kWorkflowRailWidth &&
-            rail.currentStage() == WorkflowStage::Adjustment,
-        "Workflow rail should use the instrument layout and default stage");
+        rail.currentStage() == WorkflowStage::Adjustment,
+        "The chapter index should start on Adjustment");
     const auto workflowButtons = rail.findChildren<QAbstractButton*>();
+    success &= require(workflowButtons.size() == 6,
+                       "Nightscape should expose all six chapters");
+    QRect previous;
+    for (QAbstractButton* button : workflowButtons) {
+        const QPoint corner = button->rect().bottomRight() - QPoint(1, 1);
+        success &= require(button->isVisible() && rail.rect().contains(button->geometry()) &&
+                               (previous.isNull() || (button->x() > previous.right() &&
+                                                      button->y() == previous.y())) &&
+                               rail.childAt(button->mapTo(&rail, corner)) == button,
+                           "Chapter buttons should fit in one row with their whole area clickable");
+        previous = button->geometry();
+    }
     success &= require(
         std::count_if(workflowButtons.begin(), workflowButtons.end(),
                       [](QAbstractButton* button) {
@@ -207,17 +225,28 @@ int main(int argc, char* argv[]) {
         workflowButtons.cbegin(), workflowButtons.cend(), [](QAbstractButton* button) {
             return button->text() == QStringLiteral("Calibration");
         });
-    success &= require(calibrationButton != workflowButtons.cend() &&
-                           stageLabelInkWidth(*calibrationButton) >= 50,
-                       "English calibration should occupy a readable full-width label");
+    success &= require(calibrationButton != workflowButtons.cend(),
+                       "The full English calibration label should be discoverable");
     if (calibrationButton != workflowButtons.cend()) {
+        auto* button = *calibrationButton;
         QFont labelFont = (*calibrationButton)->font();
-        labelFont.setPixelSize(StyleTokens::Typography::kBodySize - 1);
+        labelFont.setPixelSize(StyleTokens::Typography::kBodySize);
         labelFont.setWeight(QFont::DemiBold);
         success &= require(
-            QFontMetrics(labelFont).horizontalAdvance((*calibrationButton)->text()) <=
-                (*calibrationButton)->width() - 8,
-            "The full English calibration label must fit at the intended font size");
+            QFontMetrics(labelFont).horizontalAdvance(button->text()) < button->width() - 30 &&
+                button->accessibleName() == button->text(),
+            "English Calibration must fit with its index and status and have an accessible name");
+        clickAt(button, button->rect().bottomRight() - QPoint(1, 1));
+        success &= require(button->isChecked() && rail.currentStage() == WorkflowStage::Calibration,
+                           "Clicking the edge of a chapter button should select the chapter");
+        rail.setStageComplete(WorkflowStage::Calibration, true);
+        const QImage complete = button->grab().toImage();
+        const QString completeDescription = button->accessibleDescription();
+        rail.setStageWarning(WorkflowStage::Calibration, true);
+        success &= require(!completeDescription.isEmpty() &&
+                               completeDescription != button->accessibleDescription() &&
+                               complete != button->grab().toImage(),
+                           "Warning and completion should have distinct indicators and descriptions");
     }
     if (!workflowButtons.isEmpty()) {
         auto* firstButton = workflowButtons.first();
@@ -252,6 +281,16 @@ int main(int argc, char* argv[]) {
     success &= require(
         rail.currentStage() == WorkflowStage::Stacking && stageChanges == 3,
         "Timelapse should hide stages without user-facing settings");
+    if (!workflowButtons.isEmpty()) {
+        rail.setCurrentStage(WorkflowStage::Assets);
+        auto* assets = workflowButtons.first();
+        assets->setFocus(Qt::TabFocusReason);
+        QKeyEvent right(QEvent::KeyPress, Qt::Key_Right, Qt::NoModifier);
+        QApplication::sendEvent(assets, &right);
+        success &= require(rail.currentStage() == WorkflowStage::Stacking &&
+                               stageChanges == 4 && workflowButtons.at(3)->hasFocus(),
+                           "Arrow navigation should skip chapters hidden in this scene");
+    }
 
     return success ? 0 : 1;
 }

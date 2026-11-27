@@ -6,6 +6,7 @@
 #include <QAbstractButton>
 #include <QAbstractScrollArea>
 #include <QAction>
+#include <QLayout>
 #include <QApplication>
 #include <QComboBox>
 #include <QCoreApplication>
@@ -71,7 +72,9 @@ void showWindow(QWidget& window) {
     window.resize(kWindowSize);
     window.show();
     QApplication::processEvents();
-    check(window.size() == kWindowSize, "The test window must fit at 920x540 logical pixels");
+    check(window.size() == kWindowSize,
+          QStringLiteral("%1 must fit 920x540; actual size %2x%3").arg(window.objectName())
+              .arg(window.width()).arg(window.height()));
 }
 
 void fits(const QWidget& widget) {
@@ -211,21 +214,43 @@ void testWorkflow(bool english) {
 
     showWindow(panel);
     expectPage(panel, Page::Product);
-    expectNote(panel, "printOrderTitle", copy(english, "Print Order", u8"\u51b2\u5370\u5355"));
+    auto& document = child<QPushButton>(panel, "printOrderFileButton");
+    usable(document);
+    check(document.text() == copy(english, "Print Order", u8"\u51b2\u5370\u5355") && document.menu(),
+          "The common order title must also be its file menu");
     auto& still = child<QAbstractButton>(panel, "printOrderProductStill");
     auto& trail = child<QAbstractButton>(panel, "printOrderProductStarTrail");
     auto& sequence = child<QAbstractButton>(panel, "printOrderProductTimelapse");
     auto& next = child<QAbstractButton>(panel, kNext);
-    const auto& proof = child<QAbstractButton>(panel, kProof);
+    auto& proof = child<QAbstractButton>(panel, kProof);
     check(still.isChecked() && !trail.isChecked() && !sequence.isChecked() &&
               !panel.proofImage().isNull() && proof.accessibleDescription().contains(
                   copy(english, "Sample Proof", u8"\u793a\u4f8b\u5370\u6837")),
           "Startup must offer the default still product and an identified sample proof");
+    const QImage stillImage = panel.proofImage();
+    const auto paintedPhoto = [&] {
+        const QRect area(proof.width()/4, proof.height()/4, proof.width()/2, proof.height()/4);
+        return proof.grab(area).toImage();
+    };
+    const QImage stillPaint = paintedPhoto();
     click(panel, "printOrderProductStarTrail");
     check(trail.isChecked() && !still.isChecked(), "Star trail must replace the still selection");
+    const QImage trailImage = panel.proofImage();
+    const QImage trailPaint = paintedPhoto();
+    check(!trailImage.isNull() && trailImage != stillImage && trailPaint != stillPaint,
+          "Choosing a star trail must change the displayed photograph, not just its label");
     click(panel, "printOrderProductTimelapse");
     check(sequence.isChecked() && !trail.isChecked(), "Timelapse must replace the star trail selection");
+    const QImage firstFrame = panel.proofImage();
+    check(!firstFrame.isNull() && firstFrame != stillImage && firstFrame != trailImage &&
+          trailPaint != paintedPhoto(), "The sequence must have its own physical print");
+    click(panel, "printOrderSampleFrame2");
+    check(panel.proofImage() != firstFrame &&
+          child<QAbstractButton>(panel, "printOrderSampleFrame2").isChecked(),
+          "Selecting a numbered exposure must show the next real photograph");
     click(panel, "printOrderProductStill");
+    check(panel.proofImage() == stillImage && !child<QWidget>(panel, "printOrderSampleStrip").isVisible(),
+          "Returning to a still must remove the frames and restore the original still photograph");
     check(still.isChecked() && !sequence.isChecked() &&
               products == QList<ProcessingScene>{ProcessingScene::StarTrail, ProcessingScene::Timelapse,
                                                  ProcessingScene::Nightscape},
@@ -233,6 +258,8 @@ void testWorkflow(bool english) {
 
     click(panel, kNext);
     expectPage(panel, Page::Assets);
+    check(panel.proofImage().isNull() && !proof.isEnabled(),
+          "An empty assets step must not show an artist's example as the user's source image");
     const QString noFrames = copy(english, "No RAW frames imported yet",
                                   u8"\u5c1a\u672a\u5bfc\u5165 RAW \u7d20\u6750");
     expectNote(panel, "printOrderAssetNote", noFrames);
@@ -831,11 +858,9 @@ void checkIdlePixels(PrintOrderPanel& panel) {
                                         -photo.width() / 4, -photo.height() / 4);
     const QImage fixed = baseline.copy(sample);
 
-    // Exclude child widgets so hover, focus, and page transitions cannot masquerade as lighting.
-    QRegion barePaper(paper.rect());
-    for (auto* widget : paper.findChildren<QWidget*>(QString(), Qt::FindDirectChildrenOnly)) {
-        if (widget->isVisible()) barePaper -= widget->geometry();
-    }
+    // The full-window stack covers the sheet; sample the exposed unprinted side margin,
+    // away from the masthead, controls, photograph, perforation and focus rings.
+    QRegion barePaper(QRect(2, proofBounds.top() + 8, 8, proofBounds.height() - 16));
     check(!barePaper.isEmpty(), "No exposed paper to sample");
 
     bool paperMoved = false;
@@ -884,6 +909,29 @@ public:
         return QProxyStyle::styleHint(hint, option, widget, data);
     }
 };
+
+void testMastheadReservations() {
+    for (const QMargins safe : {QMargins(100,0,28,0), QMargins(28,0,176,0)}) {
+        PrintOrderPanel panel;
+        QAction fileAction(QStringLiteral("File"), &panel);
+        panel.setApplicationMenus({&fileAction});
+        QWidget* mast = panel.masthead();
+        mast->layout()->setContentsMargins(safe);
+        showWindow(panel);
+        const QRect content = mast->rect().marginsRemoved(safe);
+        QList<QRect> occupied;
+        for (const char* name : {"printOrderBrand", "printOrderFileButton",
+                                 "printOrderStepProduct","printOrderStepAssets","printOrderStepOutput",
+                                 "printOrderLight","paperApplicationMenu"}) {
+            auto& widget = child<QWidget>(panel, name);
+            fits(widget);
+            const QRect control(widget.mapTo(mast, QPoint()), widget.size());
+            check(content.contains(control), "Header control overlaps the reserved native caption area: " + widget.objectName());
+            for (const auto& other : occupied) check(!other.intersects(control), "Overlapping header controls");
+            occupied.append(control);
+        }
+    }
+}
 
 void testMotion(Motion expectation) {
     QStackedWidget window;
@@ -981,6 +1029,7 @@ int main(int argc, char* argv[]) {
         check(english.load(QStringLiteral(":/i18n/nebulens_en.qm")) && app.installTranslator(&english),
               "The test target must link the real English translation resource");
         testWorkflow(true);
+        testMastheadReservations();
         testOrderEntryPoints();
         testFrameSummary();
         testFrameDetails();

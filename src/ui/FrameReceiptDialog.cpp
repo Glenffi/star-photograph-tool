@@ -1,6 +1,7 @@
 #include "FrameReceiptDialog.h"
 
 #include "FileDialogUtils.h"
+#include "StyleTokens.h"
 #include "core/RawImageLoader.h"
 #include "workers/FrameReceipt.h"
 
@@ -23,6 +24,7 @@
 #include <QPointer>
 #include <QPromise>
 #include <QPushButton>
+#include <QScreen>
 #include <QSignalBlocker>
 #include <QStandardPaths>
 #include <QTableView>
@@ -327,9 +329,6 @@ public:
         setTextFormat(Qt::PlainText);
         setAlignment(Qt::AlignCenter);
         setWordWrap(true);
-        setFrameStyle(QFrame::StyledPanel | QFrame::Sunken);
-        setBackgroundRole(QPalette::Base);
-        setAutoFillBackground(true);
         setMargin(8);
         setMinimumHeight(104);
         setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Expanding);
@@ -370,6 +369,8 @@ protected:
         QRect target(QPoint(), m_image.size().scaled(area.size(), Qt::KeepAspectRatio));
         target.moveCenter(area.center());
         QPainter painter(this);
+        painter.fillRect(contentsRect(),
+                         StyleTokens::Colors::fromHex(StyleTokens::Colors::kBackgroundCanvas));
         painter.setRenderHint(QPainter::SmoothPixmapTransform);
         painter.drawImage(target, m_image);
     }
@@ -419,9 +420,7 @@ public:
     explicit PreviewTitle(QWidget* parent) : QLabel(parent) {
         setTextFormat(Qt::PlainText);
         setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
-        QFont title = font();
-        title.setBold(true);
-        setFont(title);
+        setProperty(StyleTokens::Properties::kTextRole, StyleTokens::Properties::kSection);
     }
 
 protected:
@@ -472,6 +471,8 @@ struct FrameReceiptDialog::Ui : QObject {
         controls->addStretch();
         filterCount = new QLabel(owner);
         filterCount->setObjectName(QStringLiteral("receiptFrameCount"));
+        filterCount->setProperty(StyleTokens::Properties::kTextRole,
+                                 StyleTokens::Properties::kMono);
         controls->addWidget(filterCount);
         layout->addLayout(controls);
 
@@ -505,9 +506,12 @@ struct FrameReceiptDialog::Ui : QObject {
         save = buttons->addButton(QString(), QDialogButtonBox::ActionRole);
         save->setObjectName(QStringLiteral("receiptSaveDiagnostics"));
         save->setAutoDefault(false);
+        save->setProperty(StyleTokens::Properties::kVariant,
+                          StyleTokens::Properties::kSecondaryButton);
         save->setEnabled(!receipt.rows.isEmpty());
         close = buttons->button(QDialogButtonBox::Close);
         close->setAutoDefault(false);
+        close->setProperty(StyleTokens::Properties::kVariant, StyleTokens::Properties::kGhost);
         layout->addWidget(buttons);
 
         for (int row = 0; row < receipt.rows.size(); ++row) {
@@ -536,7 +540,10 @@ struct FrameReceiptDialog::Ui : QObject {
 
         chooseRow(model->preferredRow());
         retranslate();
-        owner->resize(920, 540);
+        filter->setFocus(Qt::OtherFocusReason);
+        const QSize preferred(920, 540);
+        const auto* screen = owner->screen();
+        owner->resize(screen ? preferred.boundedTo(screen->availableGeometry().size()) : preferred);
     }
 
     struct Pane {

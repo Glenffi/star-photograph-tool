@@ -38,10 +38,13 @@ enum class Glyph {
     NewFolder,
     ListView,
     DetailView,
-    ChevronRight
+    ChevronRight,
+    More,
+    Stop
 };
 
 QIcon icon(Glyph glyph, const QColor& color, int logicalSize = 20);
+QIcon controlIcon(Glyph glyph, const QColor& ink, int logicalSize = 20);
 QPixmap logoMark(int logicalSize = 36);
 QIcon appIcon();
 

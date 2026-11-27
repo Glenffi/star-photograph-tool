@@ -1,5 +1,6 @@
 #include "app/MainWindow.h"
 #include "i18n/AppLocalization.h"
+#include "ui/ProductProofSamples.h"
 #include "ui/StyleTokens.h"
 #include "ui/UiAssets.h"
 
@@ -64,12 +65,25 @@ int main(int argc, char* argv[]) {
             std::cerr << "Cannot decode packaged " << format << ": " << path << '\n';
             return false;
         };
-        if (!decode(":/print-order/vellum.png", "PNG") ||
-            !decode(":/print-order/lake-complete.jpg", "JPEG")) {
-            return 1;
+        if (!decode(":/print-order/vellum.png", "PNG")) return 1;
+        int photos = 0;
+        for (const auto scene : {ProcessingScene::Nightscape, ProcessingScene::StarTrail,
+                                 ProcessingScene::Timelapse}) {
+            const int n = ProductProofSamples::count(scene);
+            if (n < (scene == ProcessingScene::Timelapse ? 3 : 1)) {
+                std::cerr << "Incomplete packaged product samples\n";
+                return 1;
+            }
+            for (int i = 0; i < n; ++i) {
+                if (ProductProofSamples::frame(scene, i).isNull()) {
+                    std::cerr << "Cannot decode a packaged product sample\n";
+                    return 1;
+                }
+                ++photos;
+            }
         }
         std::cout << "StarProcessor " << STARPROCESSOR_VERSION
-                  << " print-order PNG and JPEG decoded\n";
+                  << " print-order paper and " << photos << " photographic proofs decoded\n";
         return 0;
     }
 

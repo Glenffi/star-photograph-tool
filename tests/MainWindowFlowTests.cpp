@@ -21,6 +21,7 @@
 #include <QDateTime>
 #include <QDesktopServices>
 #include <QDialog>
+#include <QDoubleSpinBox>
 #include <QDir>
 #include <QEventLoop>
 #include <QFile>
@@ -48,6 +49,7 @@
 #include <QStackedWidget>
 #include <QStatusBar>
 #include <QTimer>
+#include <QTranslator>
 #include <QUrl>
 #include <QVariant>
 
@@ -468,6 +470,93 @@ QJsonObject saveReceiptDiagnostics(Flow& flow, QWidget& dialog, const QString& p
     return readJson(target);
 }
 
+void testEnglishPreferences(const QDir& root) {
+    prepareOutput(QDir(root.filePath("preferences-output")));
+    MainWindow window;
+    QTranslator english;
+    check(english.load(":/i18n/nebulens_en.qm"), "Missing bundled English translation");
+    qApp->installTranslator(&english);
+    bool fits = false;
+    QTimer::singleShot(0, &window, [&] {
+        auto* dialog = window.findChild<QDialog*>("paperPreferences");
+        if (!dialog) return;
+        auto* combo = dialog->findChild<QComboBox*>();
+        auto* edit = dialog->findChild<QLineEdit*>();
+        int checked = 0;
+        for (auto* label : dialog->findChildren<QLabel*>())
+            if (label->buddy() && label->width() >= label->fontMetrics().horizontalAdvance(label->text()))
+                ++checked;
+        fits = checked == 2 && combo && edit && combo->x() == edit->x();
+        dialog->reject();
+    });
+    const bool invoked = QMetaObject::invokeMethod(&window, "onSettingsClicked", Qt::DirectConnection);
+    qApp->removeTranslator(&english);
+    check(invoked && fits, "Translated preference labels must fit and both fields must align");
+}
+
+void testOneSheet(const QDir& root) {
+    prepareOutput(QDir(root.filePath("one-sheet-output")));
+    Flow flow;
+    auto* masthead = flow.order.masthead();
+    check(flow.window.centralWidget() == &flow.order && masthead->isVisible(),
+          "One paper surface and one permanent masthead must own the entire order");
+    const QString raw = root.filePath("source.dng");
+    flow.window.importFiles({raw});
+    check(waitFor([&] { return !flow.order.proofImage().isNull() &&
+                              flow.order.proofCaption().contains(QFileInfo(raw).fileName()); }),
+          "Import must replace stock imagery with the selected source proof");
+    const QImage input = flow.order.proofImage();
+    click(child<QAbstractButton>(flow.order, "printOrderProductStarTrail"));
+    check(flow.order.proofImage() != input && flow.project.allFilePaths() == QStringList{raw},
+          "Changing the product should identify its example without substituting another RAW");
+    click(child<QAbstractButton>(flow.order, "printOrderSampleToggle"));
+    check(flow.order.proofImage() == input, "The current RAW must be reachable from the product example");
+    click(child<QAbstractButton>(flow.order, "printOrderProductStill"));
+    flow.goToOutput();
+    check(flow.order.proofImage() == input, "The delivery page must not present a demo as this order's result");
+    click(child<QAbstractButton>(flow.order, "printOrderQuickToggle"));
+    auto& ev = child<QDoubleSpinBox>(flow.order, "printOrderQuickExposure");
+    ev.setValue(1.2);
+    check(flow.params.basicAdjustmentOptions().exposureTenths == 12 &&
+          flow.order.proofImage() != input && flow.order.proofCaption().contains("EV") &&
+          flow.receipt.text().isEmpty() && !shortcut(flow.window, "Ctrl+E").isEnabled(),
+          "Inline exposure must change real parameters and a labeled preview, never an exportable result");
+    auto& appendix = child<QAbstractButton>(flow.order, "printOrderAdvanced");
+    click(appendix);
+    check(flow.order.showingDetailPage() && masthead == flow.order.masthead() && masthead->isVisible() &&
+          flow.order.isAncestorOf(&flow.params) && flow.params.isVisible(),
+          "Detailed adjustments must be a leaf of this same visible sheet");
+    auto& image = child<QLabel>(flow.preview, "previewImageLabel");
+    auto& draftLabel = child<QLabel>(flow.preview, "previewResultState");
+    check(waitFor([&]{ return draftLabel.isVisible() && draftLabel.text().contains("EV") &&
+                              !image.pixmap().isNull(); }), "The adjustment canvas must identify the source exposure proof");
+    const QImage positive = image.pixmap().toImage();
+    flow.params.setExposureTenths(-3);
+    check(waitFor([&]{ return image.pixmap().toImage() != positive; }) &&
+          flow.preview.currentImage() == input && !flow.preview.isShowingResult(),
+          "The visible canvas must react to exposure without modifying the source or becoming a result");
+    menuText(flow.window, u8"\u51b2\u5370\u5355").trigger();
+    check(!flow.order.showingDetailPage() && child<QWidget>(flow.order,"printOrderOutputPage").isVisible() &&
+          qAbs(ev.value()+0.3) < 0.001 && flow.project.currentFilePath() == raw &&
+          flow.order.proofImage() != input && flow.order.proofCaption().contains("EV"),
+          "Return must preserve the step, actual editing values, selection and draft");
+    ev.setValue(0);
+    check(flow.order.proofImage() == input && flow.receipt.text().isEmpty(),
+          "Resetting exposure must restore the identical camera preview without writing a file");
+    const QString damaged = root.filePath("unreadable-source.dng");
+    QFile invalid(damaged);
+    check(invalid.open(QIODevice::WriteOnly) && invalid.write("not a RAW") == 9, "Cannot create broken RAW fixture");
+    invalid.close();
+    flow.window.importFiles({damaged});
+    flow.window.selectStartupWorkflowStage(WorkflowStage::Assets);
+    selectAsset(flow.project, damaged);
+    menuText(flow.window, u8"\u51b2\u5370\u5355").trigger();
+    check(waitFor([&] {
+        return flow.order.proofImage().isNull() && flow.order.proofCaption() ==
+            QCoreApplication::translate("Nebulens", "原片预览不可用");
+    }) && flow.receipt.text().isEmpty(), "A broken RAW must not borrow the previous photo or a sample proof");
+}
+
 void testExplicitSceneAndReference(const QDir& root) {
     prepareOutput(QDir(root.filePath("explicit-output")));
     Flow flow;
@@ -512,7 +601,7 @@ void checkQuickPreview(Flow& flow, const QDir& output) {
     const auto formalProof = flow.order.proofImage();
     auto& proof = child<QAbstractButton>(flow.order, "printOrderProof");
     auto& showOrder = menuText(flow.window, u8"\u51b2\u5370\u5355");
-    auto& showAdvanced = menuText(flow.window, u8"\u9ad8\u7ea7\u6697\u623f");
+    auto& showAdvanced = menuText(flow.window, u8"\u51b2\u5370\u53c2\u6570");
     const auto before = files(output);
     auto& comparison = shortcut(flow.window, "Shift+B");
     check(comparison.isEnabled(), "The formal result must offer before/after comparison");
@@ -615,8 +704,8 @@ void testSingleAndClear(const QDir& root) {
           "The only RAW must be the frame used by the single delivery and its actual reference");
     checkReveal(flow, path, output.absolutePath());
 
-    menuText(flow.window, u8"\u9ad8\u7ea7\u6697\u623f").trigger();
-    check(!flow.order.isVisible() && flow.params.isEnabled() && flow.receipt.text() == path,
+    menuText(flow.window, u8"\u51b2\u5370\u53c2\u6570").trigger();
+    check(flow.order.showingDetailPage() && flow.order.masthead()->isVisible() && flow.params.isEnabled() && flow.receipt.text() == path,
           "The Advanced menu must resume editing the delivered project");
     flow.window.selectStartupWorkflowStage(WorkflowStage::Adjustment);
     check(exportButton(flow.window).isVisible(), "Advanced toolbar must be reachable from the same window");
@@ -641,7 +730,7 @@ void testSingleAndClear(const QDir& root) {
     menuText(flow.window, u8"\u51b2\u5370\u5355").trigger();
     check(inspectReceiptRows(flow) == frameRows,
           "Re-export must keep the current formal delivery's original frame rows");
-    menuText(flow.window, u8"\u9ad8\u7ea7\u6697\u623f").trigger();
+    menuText(flow.window, u8"\u51b2\u5370\u53c2\u6570").trigger();
     const auto formalBytes = bytes(path);
     const auto exportBytes = bytes(output.filePath(exported));
 
@@ -754,7 +843,7 @@ void testSingleFrameReceiptFromMultipleRaws(const QDir& root) {
           "Saving diagnostics elsewhere must not modify the delivered files");
     checkEditor();
 
-    menuText(flow.window, u8"\u9ad8\u7ea7\u6697\u623f").trigger();
+    menuText(flow.window, u8"\u51b2\u5370\u53c2\u6570").trigger();
     shortcut(flow.window, "Ctrl+E").trigger();
     check(waitFor([&] { return files(output).size() == 2 && flow.params.isEnabled(); }),
           "The formal result must remain exportable after viewing frame details");
@@ -770,7 +859,7 @@ void testQueuedDeliverySnapshots(const QDir& root) {
         Flow flow;
         const QImage sample = flow.order.proofImage();
         auto& showOrder = menuText(flow.window, u8"\u51b2\u5370\u5355");
-        auto& showAdvanced = menuText(flow.window, u8"\u9ad8\u7ea7\u6697\u623f");
+        auto& showAdvanced = menuText(flow.window, u8"\u51b2\u5370\u53c2\u6570");
         showAdvanced.trigger();
         choose(child<QComboBox>(flow.window, "toolbarSceneCombo"),
                static_cast<int>(ProcessingScene::SingleFrame));
@@ -1178,6 +1267,8 @@ int main(int argc, char* argv[]) {
         }
         int failures = 0;
         for (const auto& test : {
+                 std::make_pair("One sheet from product choice to exposure and back", testOneSheet),
+                 std::make_pair("English preferences label columns", testEnglishPreferences),
                  std::make_pair("Explicit scene and reference selection", testExplicitSceneAndReference),
                  std::make_pair("Single-frame delivery, quick preview, and clear", testSingleAndClear),
                  std::make_pair("Single-frame receipt of multiple RAWs and private diagnostics",

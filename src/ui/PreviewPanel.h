@@ -63,6 +63,9 @@ public:
 
     void setInfo(const QString& info);           // 底部信息栏文字
     void setResultLabel(const QString& label);   // 持久显示结果/快速预览状态
+    // A display-only proof for the current source; an empty mapped image clears it.
+    void setSourceExposureProof(const QImage& source, const QImage& mapped,
+                                const QString& label);
     void setPointSelectionActive(bool active);
     void setSelectedPoint(double normalizedX, double normalizedY);
     void clearSelectedPoint();
@@ -139,6 +142,7 @@ private:
     void setupBottomBar();
     void positionCanvasOverlays();
     void showImageCanvas();
+    bool updatePreviewStateLabel();
     QString sourceContentKey(const QString& filePath) const;
     QString legacyResultContentKey() const;
     bool beginContentSwitch(const QString& contentKey);
@@ -170,6 +174,7 @@ private:
     void setMaskRefinementBusy(bool busy);
     void scheduleMaskDisplayRefresh();
     double maximumSafeZoom() const;
+    bool hasSourceExposureProof() const;
     const QImage& displayedImage() const;
     void resetComparison();
     void invalidateComparisonRenderCache();
@@ -224,6 +229,13 @@ private:
 
     // 数据
     QImage m_currentImage;
+    struct SourceExposureProof {
+        qint64 sourceCacheKey = 0;
+        QImage mapped;
+        QString label;
+    };
+    SourceExposureProof m_sourceExposureProof;
+    QString m_resultLabel;
     QImage m_beforeImage;
     QImage m_afterImage;
     QPixmap m_scaledBeforeCache;

@@ -43,16 +43,18 @@ bool loadQtChineseTranslation(QTranslator& translator) {
 }  // namespace
 
 QString preferredLanguage() {
-    QSettings settings(QStringLiteral("StarProcessor"),
-                       QStringLiteral("App"));
+    // NativeFormat remains the application default. Tests can choose an isolated
+    // INI store instead of reading or modifying the photographer's desktop preferences.
+    QSettings settings(QSettings::defaultFormat(), QSettings::UserScope,
+                       QStringLiteral("StarProcessor"), QStringLiteral("App"));
     return normalizedLanguage(settings.value(
         QStringLiteral("ui/language"),
         QString::fromLatin1(kSimplifiedChinese)).toString());
 }
 
 void setPreferredLanguage(const QString& languageCode) {
-    QSettings settings(QStringLiteral("StarProcessor"),
-                       QStringLiteral("App"));
+    QSettings settings(QSettings::defaultFormat(), QSettings::UserScope,
+                       QStringLiteral("StarProcessor"), QStringLiteral("App"));
     settings.setValue(QStringLiteral("ui/language"),
                       normalizedLanguage(languageCode));
     settings.sync();

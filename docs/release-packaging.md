@@ -69,7 +69,7 @@ Windows 包应在 Windows 上用 MSVC 验证；macOS 的构建不能代替 Windo
 确认主分支干净、Release 构建通过后：
 
 ```bash
-tag=v0.14.0
+tag=v0.15.0
 git tag -a "$tag" -m "发布：Nebulens $tag" &&
   git push origin "refs/tags/$tag"
 ```

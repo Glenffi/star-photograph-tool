@@ -6,10 +6,11 @@ if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Darwin" AND
         "Minimum supported macOS version")
 endif()
 
-project(StarProcessor VERSION 0.14.0 LANGUAGES CXX)
+project(StarProcessor VERSION 0.15.0 LANGUAGES CXX)
 
 include(CTest)
 option(BUILD_SAMPLE_TOOLS "Build local RAW sample regression tools" ON)
+option(NEBULENS_BUILD_DESKTOP_QA "Build the opt-in macOS native window evidence tool (macOS 15+ SDK)" OFF)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -130,6 +131,8 @@ set(APP_SOURCES
     src/app/MainWindowOrder.cpp
     src/app/MainWindowDocument.cpp
     src/ui/PrintOrderPanel.cpp
+    src/ui/ProductProofSamples.cpp
+    src/ui/PaperWindowChrome.cpp
     src/ui/FrameReceiptDialog.cpp
     src/ui/RidgeComparisonDialog.cpp
     src/i18n/AppLocalization.cpp
@@ -258,6 +261,15 @@ add_library(StarProcessorWorkers STATIC
 target_include_directories(StarProcessorWorkers PUBLIC ${CMAKE_SOURCE_DIR}/src)
 target_link_libraries(StarProcessorWorkers PUBLIC StarProcessorCore Qt6::Core Qt6::Gui)
 
+if(APPLE)
+    enable_language(OBJCXX)
+    set(CMAKE_OBJCXX_STANDARD 17)
+    set(CMAKE_OBJCXX_STANDARD_REQUIRED ON)
+    list(APPEND APP_SOURCES src/ui/PaperWindowChrome_mac.mm)
+    set_source_files_properties(src/ui/PaperWindowChrome_mac.mm PROPERTIES COMPILE_FLAGS "-fobjc-arc")
+elseif(WIN32)
+    list(APPEND APP_SOURCES src/ui/PaperWindowChrome_win.cpp)
+endif()
 add_library(NebulensDesktop OBJECT ${APP_SOURCES} ${APP_HEADERS})
 target_include_directories(NebulensDesktop PUBLIC ${CMAKE_SOURCE_DIR}/src)
 target_link_libraries(NebulensDesktop PUBLIC
@@ -265,6 +277,11 @@ target_link_libraries(NebulensDesktop PUBLIC
     Qt6::Widgets
     Qt6::Network
 )
+if(APPLE)
+    target_link_libraries(NebulensDesktop PUBLIC "-framework AppKit")
+elseif(WIN32)
+    target_link_libraries(NebulensDesktop PUBLIC dwmapi comctl32 user32)
+endif()
 target_compile_definitions(NebulensDesktop PUBLIC
     STARPROCESSOR_VERSION="${PROJECT_VERSION}"
     PRIVATE
@@ -279,8 +296,24 @@ set(DESKTOP_RESOURCES
 add_executable(${PROJECT_NAME} src/main.cpp ${APP_BUNDLE_FILES} ${DESKTOP_RESOURCES})
 target_link_libraries(${PROJECT_NAME} PRIVATE NebulensDesktop)
 
+if(APPLE AND NEBULENS_BUILD_DESKTOP_QA)
+    add_executable(NebulensPaperChromeTests tests/PaperChromeMacTests.mm
+        src/ui/PaperWindowChrome.cpp src/ui/PaperWindowChrome_mac.mm)
+    target_include_directories(NebulensPaperChromeTests PRIVATE ${CMAKE_SOURCE_DIR}/src)
+    target_link_libraries(NebulensPaperChromeTests PRIVATE Qt6::Widgets
+        "-framework AppKit" "-framework ApplicationServices")
+    add_executable(NebulensDesktopWalkthrough tools/desktop_qa/Walkthrough.mm ${DESKTOP_RESOURCES})
+    set_source_files_properties(tools/desktop_qa/Walkthrough.mm PROPERTIES COMPILE_FLAGS "-fobjc-arc")
+    target_link_libraries(NebulensDesktopWalkthrough PRIVATE NebulensDesktop
+        "-framework ScreenCaptureKit" "-framework CoreGraphics" "-framework CoreMedia"
+        "-framework CoreVideo" "-framework AVFoundation")
+endif()
+
 if(BUILD_TESTING)
     find_package(Python3 REQUIRED COMPONENTS Interpreter)
+    add_executable(NebulensProofSamplesTests tests/ProductProofSamplesTests.cpp ${DESKTOP_RESOURCES})
+    target_link_libraries(NebulensProofSamplesTests PRIVATE NebulensDesktop)
+    add_test(NAME product_proof_samples COMMAND NebulensProofSamplesTests)
     # 对照生成器是本机样片工具；桌面应用和核心测试不需要 Python 图像依赖。
     if(BUILD_SAMPLE_TOOLS AND Python3_VERSION VERSION_GREATER_EQUAL 3.10)
         execute_process(COMMAND ${Python3_EXECUTABLE} -c "import numpy; from PIL import ImageFont; ImageFont.load_default(size=20)"

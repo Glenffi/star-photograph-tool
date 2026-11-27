@@ -1,4 +1,5 @@
 #include "RidgeComparisonDialog.h"
+#include "StyleTokens.h"
 
 #include <QAbstractScrollArea>
 #include <QCoreApplication>
@@ -12,6 +13,7 @@
 #include <QJsonObject>
 #include <QLabel>
 #include <QPainter>
+#include <QPushButton>
 #include <QRadioButton>
 #include <QScopedValueRollback>
 #include <QScreen>
@@ -136,6 +138,8 @@ public:
             auto* caption = new QLabel(captions[i], viewport());
             caption->setObjectName(QString::fromLatin1(names[i]));
             caption->setTextFormat(Qt::PlainText);
+            caption->setProperty(StyleTokens::Properties::kTextRole,
+                                 StyleTokens::Properties::kSection);
             caption->setAlignment(Qt::AlignCenter);
             caption->setWordWrap(true);
             m_captions[i] = caption;
@@ -168,7 +172,8 @@ protected:
 
     void paintEvent(QPaintEvent*) override {
         QPainter painter(viewport());
-        painter.fillRect(viewport()->rect(), palette().window());
+        painter.fillRect(viewport()->rect(),
+                         StyleTokens::Colors::fromHex(StyleTokens::Colors::kBackgroundBase));
         const QSize pane = paneRect(0).size();
         if (pane.isEmpty()) return;
 
@@ -186,7 +191,8 @@ protected:
                             std::max(0, (pane.height() - imageSize.height()) / 2));
         for (int i = 0; i < kColumns; ++i) {
             const QRect bounds = paneRect(i);
-            painter.fillRect(bounds, QColor(30, 30, 30));
+            painter.fillRect(bounds,
+                             StyleTokens::Colors::fromHex(StyleTokens::Colors::kBackgroundCanvas));
             painter.save();
             painter.setClipRect(bounds);
             painter.drawImage(QRect(bounds.topLeft() + origin - offset, imageSize), m_crops[i]);
@@ -251,11 +257,22 @@ RidgeComparisonDialog::RidgeComparisonDialog(Crops crops, QWidget* parent) : QDi
     fit->setChecked(true);
     auto* actual = new QRadioButton(QCoreApplication::translate("Nebulens", "100%"), this);
     actual->setObjectName(QStringLiteral("ridgeComparisonActualSize"));
-    tools->addWidget(fit);
-    tools->addWidget(actual);
+    auto* viewModes = new QHBoxLayout;
+    viewModes->setSpacing(StyleTokens::Spacing::kMicro);
+    for (auto* mode : {fit, actual}) {
+        mode->setProperty("viewMode", true);
+        mode->setAccessibleName(mode->text());
+        mode->setFocusPolicy(Qt::StrongFocus);
+        mode->setCursor(Qt::PointingHandCursor);
+        viewModes->addWidget(mode);
+    }
+    tools->addLayout(viewModes);
     tools->addStretch();
     auto* close = new QDialogButtonBox(this);
-    close->addButton(QCoreApplication::translate("Nebulens", "返回冲印单"), QDialogButtonBox::RejectRole);
+    auto* back = close->addButton(QCoreApplication::translate("Nebulens", "返回冲印单"),
+                                  QDialogButtonBox::RejectRole);
+    back->setProperty(StyleTokens::Properties::kVariant, StyleTokens::Properties::kGhost);
+    back->setAutoDefault(false);
     connect(close, &QDialogButtonBox::rejected, this, &QDialog::reject);
     tools->addWidget(close);
     layout->addLayout(tools);

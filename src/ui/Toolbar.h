@@ -10,7 +10,6 @@ class QMenu;
 class QPushButton;
 class QComboBox;
 class QLabel;
-class QGraphicsDropShadowEffect;
 
 class Toolbar : public QWidget {
     Q_OBJECT
@@ -40,7 +39,6 @@ signals:
 private:
     void setupUI();
     void updateButtonStates();
-    void showOverflowMenu();
     void setButtonVariant(QPushButton* button, const char* variant);
     QPushButton* createIconButton(const QIcon& icon, const QString& tooltip);
     QPushButton* createActionButton(const QIcon& icon, const QString& text,
@@ -48,11 +46,8 @@ private:
 
     QComboBox* m_sceneCombo = nullptr;
     QLabel* m_projectSummary = nullptr;
-    QGraphicsDropShadowEffect* m_processGlow = nullptr;
     QPushButton* m_exportResultBtn = nullptr;
     QPushButton* m_startProcessBtn = nullptr;
-    QPushButton* m_overflowBtn = nullptr;
-    QMenu* m_overflowMenu = nullptr;
     QAction* m_importFilesAction = nullptr;
     QAction* m_importFolderAction = nullptr;
     QAction* m_clearProjectAction = nullptr;

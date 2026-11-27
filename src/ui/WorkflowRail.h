@@ -30,6 +30,9 @@ public:
 signals:
     void stageChanged(WorkflowStage stage);
 
+protected:
+    bool eventFilter(QObject* watched, QEvent* event) override;
+
 private:
     void setupUi();
     void updateVisibility();

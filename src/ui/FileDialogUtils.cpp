@@ -43,19 +43,17 @@ void prepareToolbarIcons(QFileDialog& dialog) {
 }  // namespace
 
 void applyToolbarIcons(QFileDialog& dialog) {
-    const QColor color = StyleTokens::Colors::fromHex(
-        StyleTokens::Colors::kTextPrimary);
+    const QColor ink = StyleTokens::Colors::fromHex(StyleTokens::Colors::kTextPrimary);
+    constexpr int iconSize = 24;
     for (const ToolbarIcon& item : kToolbarIcons) {
         auto* button = dialog.findChild<QToolButton*>(
             QString::fromLatin1(item.objectName));
         if (!button) continue;
         button->setProperty("dialogToolbarIcon", true);
-        const QIcon sourceIcon = UiAssets::icon(item.glyph, color, 56);
-        QPixmap dialogPixmap = sourceIcon.pixmap(
-            QSize(56, 56), 1.0, QIcon::Normal, QIcon::Off);
-        dialogPixmap.setDevicePixelRatio(1.0);
-        button->setIcon(QIcon(dialogPixmap));
-        button->setIconSize(QSize(24, 24));
+        button->setIcon(UiAssets::controlIcon(item.glyph, ink, iconSize));
+        button->setIconSize(QSize(iconSize, iconSize));
+        button->setFocusPolicy(Qt::StrongFocus);
+        if (button->accessibleName().isEmpty()) button->setAccessibleName(button->toolTip());
         button->setProperty("nebDialogIcon", true);
         button->style()->unpolish(button);
         button->style()->polish(button);

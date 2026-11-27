@@ -52,6 +52,7 @@ int main(int argc, char* argv[]) {
     QApplication app(argc, argv);
     app.setStyleSheet(StyleTokens::appStyleSheet());
     QTemporaryDir settingsDirectory;
+    QSettings::setDefaultFormat(QSettings::IniFormat);
     check(settingsDirectory.isValid(),
           "Temporary settings directory should be available");
     QSettings::setPath(QSettings::NativeFormat, QSettings::UserScope,

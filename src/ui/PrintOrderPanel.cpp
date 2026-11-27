@@ -1,11 +1,16 @@
 #include "PrintOrderPanel.h"
+#include "ProductProofSamples.h"
+#include "StyleTokens.h"
+#include "UiAssets.h"
 
 #include <QAbstractButton>
 #include <QAction>
 #include <QApplication>
 #include <QButtonGroup>
 #include <QComboBox>
+#include <QColorSpace>
 #include <QDir>
+#include <QDoubleSpinBox>
 #include <QElapsedTimer>
 #include <QEvent>
 #include <QFrame>
@@ -20,11 +25,14 @@
 #include <QPushButton>
 #include <QRadioButton>
 #include <QSignalBlocker>
+#include <QShortcut>
+#include <QSlider>
 #include <QStackedWidget>
 #include <QStyle>
 #include <QStyleOptionFrame>
 #include <QStylePainter>
 #include <QTimer>
+#include <QToolButton>
 #include <QVariantAnimation>
 #include <QVBoxLayout>
 #include <QWindow>
@@ -107,6 +115,41 @@ QPushButton* command(QWidget* parent, const char* name, const char* role = "seco
     return result;
 }
 
+void drawDisclosure(QWidget* control) {
+    QPainter painter(control);
+    painter.setRenderHint(QPainter::Antialiasing);
+    painter.setPen(QPen(control->palette().color(QPalette::ButtonText), 1.3,
+                        Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+    const qreal x = control->layoutDirection() == Qt::RightToLeft ? 11 : control->width() - 11;
+    const qreal y = control->height() / 2.0 - 1;
+    painter.drawPolyline(QPolygonF{{x - 3.5, y}, {x, y + 3}, {x + 3.5, y}});
+}
+
+class DocumentMenuButton final : public QPushButton {
+public:
+    using QPushButton::QPushButton;
+    QSize sizeHint() const override {
+        return QSize(fontMetrics().horizontalAdvance(text()) + 37, QPushButton::sizeHint().height());
+    }
+protected:
+    void paintEvent(QPaintEvent*) override {
+        QStyleOptionButton option;
+        initStyleOption(&option);
+        option.text.clear();
+        option.features &= ~QStyleOptionButton::HasMenu;
+        {
+            QStylePainter painter(this);
+            painter.drawControl(QStyle::CE_PushButton, option);
+            const bool rtl = layoutDirection() == Qt::RightToLeft;
+            const QRect title = rect().adjusted(rtl ? 24 : 5, 0, rtl ? -5 : -24, 0);
+            painter.setPen(palette().color(QPalette::ButtonText));
+            painter.drawText(title, Qt::AlignVCenter | Qt::AlignLeading | Qt::TextSingleLine,
+                             fontMetrics().elidedText(text(), Qt::ElideRight, title.width()));
+        }
+        drawDisclosure(this);
+    }
+};
+
 class PaperCombo final : public QComboBox {
 public:
     using QComboBox::QComboBox;
@@ -114,13 +157,7 @@ public:
 protected:
     void paintEvent(QPaintEvent* event) override {
         QComboBox::paintEvent(event);
-        QPainter painter(this);
-        painter.setRenderHint(QPainter::Antialiasing);
-        painter.setPen(QPen(palette().color(QPalette::ButtonText), 1.3,
-                            Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
-        const qreal x = layoutDirection() == Qt::RightToLeft ? 11 : width() - 11;
-        const qreal y = height() / 2.0 - 1;
-        painter.drawPolyline(QPolygonF{{x - 3.5, y}, {x, y + 3}, {x + 3.5, y}});
+        drawDisclosure(this);
     }
 };
 
@@ -209,7 +246,7 @@ public:
 protected:
     void paintEvent(QPaintEvent*) override {
         QPainter painter(this);
-        painter.fillRect(rect(), QColor("#e7dec8"));
+        painter.fillRect(rect(), QColor(StyleTokens::Colors::kBackgroundBase));
         if (!m_grain.isNull()) {
             const qreal dpr = devicePixelRatioF();
             const QSize pixels = size() * dpr;
@@ -387,6 +424,8 @@ public:
         update();
     }
 
+    const QString& caption() const { return m_caption; }
+
     void setLight(qreal strength, qreal travel) {
         if (m_strength == strength && m_travel == travel) return;
         m_strength = strength;
@@ -398,8 +437,22 @@ protected:
     void paintEvent(QPaintEvent*) override {
         QPainter painter(this);
         const QRect space = rect().adjusted(3, 1, -8, -51);
-        QRect mount(QPoint(), QSize(480, 328).scaled(space.size(), Qt::KeepAspectRatio));
+        const QSize aspect = m_image.isNull() ? QSize(3, 2) : m_image.size();
+        QRect mount(QPoint(), aspect.scaled(space.size().expandedTo(QSize(1,1)), Qt::KeepAspectRatio));
         mount.moveCenter(space.center());
+        if (m_image.isNull()) {
+            // 没有自己的图像时留下空相片位，而不是一块像加载失败的黑色画布。
+            painter.setPen(QPen(QColor(124, 113, 88, 135), 1));
+            const QRect box = mount.adjusted(5, 5, -5, -5);
+            for (const auto corner : {box.topLeft(), box.topRight(), box.bottomLeft(), box.bottomRight()}) {
+                painter.drawLine(corner, corner + QPoint(corner.x() == box.left() ? 15 : -15, 0));
+                painter.drawLine(corner, corner + QPoint(0, corner.y() == box.top() ? 15 : -15));
+            }
+            painter.setPen(QColor(StyleTokens::Colors::kTextSecondary));
+            painter.setFont(paperFont(font(), 17));
+            painter.drawText(box.adjusted(10, 10, -10, -10), Qt::AlignCenter | Qt::TextWordWrap, m_caption);
+            return;
+        }
         const int dx = qRound(1.0 + m_travel * 19.0);
         for (int spread = 5; spread >= 0; --spread) {
             const QRect shadow = mount.translated(dx, 4)
@@ -514,16 +567,11 @@ private:
 };
 
 constexpr auto kStyle = R"qss(
-QWidget#printOrderPanel { background-color: #202b28; }
 #printOrderPanel QWidget { background-color: transparent; }
-#printOrderPanel QWidget#printOrderHeader {
-    background-color: #1d2726; border-bottom: 1px solid #394743;
-}
-#printOrderPanel QLabel { color: #303229; background: transparent; }
-#printOrderHeader QLabel { color: #d1dad0; border: none; }
-#printOrderHeader QLabel#printOrderBrand {
-    color: #f5f4ea; font-family: Baskerville, Georgia, "DejaVu Serif";
-    font-size: 28px; font-style: italic; font-weight: 500;
+#printOrderPanel QLabel { color: @ink@; background: transparent; }
+#paperMasthead QLabel#printOrderBrand {
+    color: #294337; font-family: Baskerville, Georgia, "DejaVu Serif";
+    font-size: 25px; font-style: italic; font-weight: 500;
 }
 #printOrderPanel QLabel[printRole="muted"] { color: #505044; font-size: 12px; }
 #printOrderPanel QLabel[printRole="warning"] { color: #753e30; font-size: 12px; }
@@ -532,14 +580,12 @@ QWidget#printOrderPanel { background-color: #202b28; }
     font-family: Baskerville, "Songti SC", "Noto Serif CJK SC", Georgia, SimSun, "DejaVu Serif";
 }
 #printOrderPanel QLabel[printRole="heading"] { font-size: 27px; }
-#printOrderPanel QLabel#printOrderTitle { font-size: 35px; }
 #printOrderPanel QLabel#printOrderSummary { font-size: 20px; }
-#printOrderPanel QFrame[printRole="rule"] { border: none; background-color: #978d74; }
-#printOrderHeader QFrame[printRole="rule"] { background-color: #68766e; }
+#printOrderPanel QFrame[printRole="rule"] { border: none; background-color: @rule@; }
 #printOrderPanel QStackedWidget { border: none; background: transparent; }
 #printOrderPanel QRadioButton { min-height: 57px; max-height: 57px; }
 #printOrderPanel QPushButton {
-    color: #253d33; background: #f4efdf; border: 1px solid #958b74;
+    color: @accent@; background: @stock@; border: 1px solid @rule@;
     border-radius: 3px; font-size: 13px; padding: 0 9px;
     min-height: 28px; max-height: 28px;
 }
@@ -555,10 +601,16 @@ QWidget#printOrderPanel { background-color: #202b28; }
 #printOrderPanel QPushButton[printRole="stage"]:hover { background: rgba(45, 72, 62, 20); }
 #printOrderPanel QPushButton[printRole="link"]:focus,
 #printOrderPanel QPushButton[printRole="stage"]:focus { border-color: #355a4e; }
-#printOrderPanel QPushButton#printOrderFileButton { padding-right: 20px; }
-#printOrderPanel QPushButton#printOrderFileButton::menu-indicator {
-    subcontrol-origin: padding; subcontrol-position: right center; right: 6px;
+#printOrderPanel QPushButton#printOrderFileButton {
+    padding-left: 4px; padding-right: 24px; font-family: Baskerville, "Songti SC", Georgia, SimSun, serif;
+    font-weight: 600; font-size: 19px; color: @ink@;
 }
+#printOrderPanel QPushButton#printOrderFileButton::menu-indicator {
+    image: none; width: 0px;
+}
+#printOrderPanel QPushButton#printOrderQuickToggle:checked { color: @accent@; border-bottom: 1px solid @accent@; }
+#printOrderPanel QPushButton#paperApplicationMenu { padding: 0; min-width: 28px; max-width: 28px; }
+#printOrderPanel QPushButton#paperApplicationMenu::menu-indicator { image: none; width: 0; }
 #printOrderPanel QMenu#printOrderFileMenu {
     color: #253d33; background: #f9f4e7; border: 1px solid #938b75; padding: 4px;
 }
@@ -573,7 +625,7 @@ QWidget#printOrderPanel { background-color: #202b28; }
     border-bottom: 2px solid #2d5143; color: #213e31;
 }
 #printOrderPanel QPushButton[printRole="primary"] {
-    color: #fffcef; background: #2d483e; border: 2px solid #2d483e;
+    color: #fffcef; background: @accent@; border: 2px solid @accent@;
     padding: 0 15px; font-size: 14px; font-weight: 600;
     min-width: 96px; min-height: 36px; max-height: 36px;
 }
@@ -584,7 +636,7 @@ QWidget#printOrderPanel { background-color: #202b28; }
     color: #646255; background: #ded7c4; border-color: #a9a089;
 }
 #printOrderPanel QComboBox, #printOrderPanel QLineEdit {
-    color: #30382d; background: #f3edde; border: 1px solid #938b75;
+    color: @ink@; background: @stock@; border: 1px solid @rule@;
     border-radius: 3px; padding: 0 8px; font-size: 13px;
     min-height: 28px; max-height: 28px;
 }
@@ -599,16 +651,32 @@ QWidget#printOrderPanel { background-color: #202b28; }
     color: #30382d; background: #f9f4e7; border: 1px solid #938b75;
     selection-color: #223b31; selection-background-color: #dce1d2;
 }
-#printOrderPanel QComboBox#printOrderLight {
-    color: #f3f4ea; background: #2b3934; border-color: #5c6c65;
+#printOrderPanel QToolButton[frameThumbnail="true"] {
+    padding: 0; margin: 0; border: 1px solid #a89b80; background: #f3eddd;
+    color: #3b493e; font-size: 10px;
 }
-#printOrderPanel QComboBox#printOrderLight:focus { border-color: #b0c5b4; }
-#printOrderPanel QComboBox#printOrderLight:disabled { color: #ccd5cb; }
+#printOrderPanel QToolButton[frameThumbnail="true"]:checked {
+    border: 2px solid #315747; background: #eff1e2;
+}
+#printOrderPanel QToolButton[frameThumbnail="true"]:focus { border: 2px solid #936e37; }
+#printOrderPanel QDoubleSpinBox { color: #30382d; background: #f3edde; border: 1px solid #938b75; }
 #printOrderPanel QProgressBar {
     color: transparent; background: #d0c6ae; border: 0; min-height: 5px; max-height: 5px;
 }
 #printOrderPanel QProgressBar::chunk { background: #365649; }
 )qss";
+
+const QString& orderStyleSheet() {
+    static const QString style = [] {
+        QString sheet = QString::fromLatin1(kStyle);
+        sheet.replace(QLatin1String("@ink@"), QLatin1String(StyleTokens::Colors::kTextPrimary));
+        sheet.replace(QLatin1String("@stock@"), QLatin1String(StyleTokens::Colors::kBackgroundRaised));
+        sheet.replace(QLatin1String("@rule@"), QLatin1String(StyleTokens::Colors::kLineSubtle));
+        sheet.replace(QLatin1String("@accent@"), QLatin1String(StyleTokens::Colors::kAccent));
+        return sheet;
+    }();
+    return style;
+}
 
 }  // namespace
 
@@ -654,19 +722,26 @@ struct PrintOrderPanel::Ui : QObject {
 
     PrintOrderPanel* const owner;
     PaperSurface* paper = nullptr;
+    QWidget* header = nullptr;
+    QStackedWidget* faces = nullptr;
+    QWidget* form = nullptr;
+    QWidget* detail = nullptr;
+    std::optional<WorkflowStage> lastDetailStage;
+    QPointer<QWidget> returnFocus;
     ProofPrint* proof = nullptr;
     QStackedWidget* pages = nullptr;
     QButtonGroup* stageGroup = nullptr;
     QButtonGroup* productGroup = nullptr;
     std::array<QPushButton*, 3> stageButtons{};
     std::array<ProductChoice*, 3> productButtons{};
-    QLabel* labName = nullptr;
     QLabel* lightLabel = nullptr;
     QComboBox* lightField = nullptr;
-    QLabel* orderTitle = nullptr;
+    QLabel* detailContext = nullptr;
     QPushButton* orderFiles = nullptr;
     QAction* openOrder = nullptr;
     QAction* saveOrder = nullptr;
+    QPushButton* applicationMenus = nullptr;
+    QMenu* applicationMenu = nullptr;
     QLabel* productTitle = nullptr;
     QLabel* assetsTitle = nullptr;
     QLabel* outputTitle = nullptr;
@@ -688,6 +763,10 @@ struct PrintOrderPanel::Ui : QObject {
     QComboBox* formatField = nullptr;
     QLabel* directoryLabel = nullptr;
     QLineEdit* directoryField = nullptr;
+    QPushButton* quickToggle = nullptr;
+    QWidget* exposureRow = nullptr;
+    QSlider* exposureSlider = nullptr;
+    QDoubleSpinBox* exposureSpin = nullptr;
     QPushButton* chooseDirectory = nullptr;
     QLabel* outputNote = nullptr;
     Imports outputImports{};
@@ -719,9 +798,21 @@ struct PrintOrderPanel::Ui : QObject {
     QString calibrationHint;
     QString format = QString::fromLatin1(kTiff);
     QString directory;
-    const QImage sampleImage{QStringLiteral(":/print-order/lake-complete.jpg")};
+    QImage sampleImage;
+    int sampleIndex = 0;
+    bool productSampleChosen = false;
+    QWidget* sampleTools = nullptr;
+    QWidget* frameStrip = nullptr;
+    QList<QToolButton*> frameButtons;
+    QPushButton* sampleToggle = nullptr;
     QImage proofImage;
     QString proofCaption;
+    bool proofIsSource = false;
+    int evTenths = 0;
+    qint64 draftKey = 0;
+    int draftEv = 0;
+    QImage draftBase;
+    QImage draftImage;
     bool ridgeComparisonAvailable = false;
     bool busy = false;
     bool cancelPending = false;
@@ -810,43 +901,30 @@ struct PrintOrderPanel::Ui : QObject {
         outer->setContentsMargins(0, 0, 0, 0);
         outer->setSpacing(0);
 
-        auto* header = new QWidget(owner);
-        header->setObjectName(QStringLiteral("printOrderHeader"));
+        paper = new PaperSurface(owner);
+        outer->addWidget(paper, 1);
+        auto* leaf = new QVBoxLayout(paper);
+        leaf->setContentsMargins(0, 0, 0, 0);
+        leaf->setSpacing(0);
+        header = new QWidget(paper);
+        header->setObjectName(QStringLiteral("paperMasthead"));
         header->setAttribute(Qt::WA_StyledBackground);
+        header->setMinimumHeight(56);
         auto* rail = new QHBoxLayout(header);
-        rail->setContentsMargins(24, 6, 24, 6);
-        rail->setSpacing(12);
+        rail->setContentsMargins(kPageInset, 0, kPageInset, 0);
+        rail->setSpacing(8);
         auto* brand = label(header, "printOrderBrand");
         brand->setText(QStringLiteral("Nebulens"));
-        labName = label(header, "printOrderLabName");
         lightLabel = label(header, "printOrderLightLabel");
+        lightLabel->setVisible(owner->width() >= 1080);
         lightField = choices(header, "printOrderLight");
         lightLabel->setBuddy(lightField);
         rail->addWidget(brand);
         rail->addWidget(rule(header, Qt::Vertical));
-        rail->addWidget(labName);
-        rail->addStretch();
-        rail->addWidget(lightLabel);
-        rail->addWidget(lightField);
-        outer->addWidget(header);
-
-        auto* desk = new QVBoxLayout;
-        desk->setContentsMargins(11, 9, 12, 11);
-        paper = new PaperSurface(owner);
-        auto* sheet = new QVBoxLayout(paper);
-        sheet->setContentsMargins(0, 0, 0, 0);
-        sheet->setSpacing(0);
-        desk->addWidget(paper);
-        outer->addLayout(desk, 1);
-
-        auto* mast = new QVBoxLayout;
-        mast->setContentsMargins(kPageInset, 9, kPageInset, 0);
-        mast->setSpacing(6);
-        auto* mastRow = new QHBoxLayout;
-        mastRow->setSpacing(7);
-        orderTitle = label(paper, "printOrderTitle", "heading");
-        mastRow->addWidget(orderTitle);
-        orderFiles = command(paper, "printOrderFileButton", "link");
+        orderFiles = new DocumentMenuButton(header);
+        orderFiles->setObjectName(QStringLiteral("printOrderFileButton"));
+        orderFiles->setProperty("printRole", QStringLiteral("link"));
+        orderFiles->setCursor(Qt::PointingHandCursor);
         auto* orderMenu = new QMenu(orderFiles);
         orderMenu->setObjectName(QStringLiteral("printOrderFileMenu"));
         openOrder = new QAction(orderMenu);
@@ -856,56 +934,86 @@ struct PrintOrderPanel::Ui : QObject {
         orderMenu->addAction(openOrder);
         orderMenu->addAction(saveOrder);
         orderFiles->setMenu(orderMenu);
-        mastRow->addWidget(orderFiles, 0, Qt::AlignBottom);
-        mastRow->addStretch();
+        rail->addWidget(orderFiles);
+        rail->addStretch(1);
         stageGroup = new QButtonGroup(this);
         constexpr std::array stageNames{
             "printOrderStepProduct", "printOrderStepAssets", "printOrderStepOutput"
         };
         for (int i = 0; i < static_cast<int>(stageButtons.size()); ++i) {
-            auto* stage = command(paper, stageNames[i], "stage");
+            auto* stage = command(header, stageNames[i], "stage");
             stage->setCheckable(true);
             stageGroup->addButton(stage, i);
             stageButtons[i] = stage;
-            mastRow->addWidget(stage, 0, Qt::AlignBottom);
+            rail->addWidget(stage);
         }
-        mast->addLayout(mastRow);
-        mast->addWidget(rule(paper, Qt::Horizontal));
-        sheet->addLayout(mast);
+        detailContext = label(header, "paperDetailContext", "muted");
+        rail->addWidget(detailContext);
+        detailContext->hide();
+        rail->addSpacing(10);
+        rail->addWidget(lightLabel);
+        rail->addWidget(lightField);
+        applicationMenus = command(header, "paperApplicationMenu", "link");
+        applicationMenus->setIcon(UiAssets::icon(UiAssets::Glyph::More, QColor("#304e42")));
+        applicationMenu = new QMenu(applicationMenus);
+        applicationMenus->setMenu(applicationMenu);
+        applicationMenus->hide();
+        rail->addWidget(applicationMenus);
+        leaf->addWidget(header);
+        auto* line = rule(paper, Qt::Horizontal);
+        line->setStyleSheet(QStringLiteral("background:rgba(121,109,82,105); border:0;"));
+        leaf->addWidget(line);
+
+        faces = new QStackedWidget(paper);
+        faces->setObjectName(QStringLiteral("printOrderFaces"));
+        faces->setFrameShape(QFrame::NoFrame);
+        faces->setStyleSheet(QStringLiteral("QStackedWidget#printOrderFaces { background:transparent; border:0; }"));
+        leaf->addWidget(faces, 1);
+        form = new QWidget(faces);
+        form->setObjectName(QStringLiteral("printOrderForm"));
+        faces->addWidget(form);
+        auto* sheet = new QVBoxLayout(form);
+        sheet->setContentsMargins(0, 0, 0, 0);
+        sheet->setSpacing(0);
 
         auto* spread = new QHBoxLayout;
         spread->setContentsMargins(kPageInset, 8, kPageInset, 7);
         spread->setSpacing(30);
-        pages = new QStackedWidget(paper);
+        pages = new QStackedWidget(form);
         pages->setObjectName(QStringLiteral("printOrderPages"));
         pages->setFrameStyle(QFrame::NoFrame);
         buildProduct();
         buildAssets();
         buildOutput();
         buildReceipt();
-        proof = new ProofPrint(paper);
         spread->addWidget(pages, 5);
-        spread->addWidget(proof, 7);
+        auto* proofColumn = new QVBoxLayout;
+        proofColumn->setContentsMargins(0, 0, 0, 0);
+        proofColumn->setSpacing(0);
+        proof = new ProofPrint(form);
+        proofColumn->addWidget(proof, 1);
+        buildSampleTools(proofColumn);
+        spread->addLayout(proofColumn, 7);
         sheet->addLayout(spread, 1);
-        sheet->addWidget(new Perforation(paper));
+        sheet->addWidget(new Perforation(form));
 
         auto* stub = new QHBoxLayout;
         stub->setContentsMargins(kPageInset, 8, kPageInset, 9);
         stub->setSpacing(9);
         auto* summary = new QVBoxLayout;
         summary->setSpacing(0);
-        summaryLabel = label(paper, "printOrderSummaryLabel", "muted");
-        summaryValue = new ElidedLabel(paper);
+        summaryLabel = label(form, "printOrderSummaryLabel", "muted");
+        summaryValue = new ElidedLabel(form);
         summaryValue->setObjectName(QStringLiteral("printOrderSummary"));
         summary->addWidget(summaryLabel);
         summary->addWidget(summaryValue);
         stub->addLayout(summary, 1);
-        ridgeComparison = command(paper, "printOrderRidgeComparison");
-        advanced = command(paper, "printOrderAdvanced", "link");
-        back = command(paper, "printOrderBack", "link");
-        next = command(paper, "printOrderNext", "primary");
-        newOrder = command(paper, "printOrderNewOrder", "link");
-        reveal = command(paper, "printOrderReveal", "primary");
+        ridgeComparison = command(form, "printOrderRidgeComparison");
+        advanced = command(form, "printOrderAdvanced", "link");
+        back = command(form, "printOrderBack", "link");
+        next = command(form, "printOrderNext", "primary");
+        newOrder = command(form, "printOrderNewOrder", "link");
+        reveal = command(form, "printOrderReveal", "primary");
         stub->addWidget(ridgeComparison);
         stub->addWidget(advanced);
         stub->addWidget(back);
@@ -913,7 +1021,70 @@ struct PrintOrderPanel::Ui : QObject {
         stub->addWidget(newOrder);
         stub->addWidget(reveal);
         sheet->addLayout(stub);
-        owner->setStyleSheet(QString::fromLatin1(kStyle));
+        // 局部版式只属于单据正面与页首。附页沿用应用控件样式，不继承首页按钮的限高。
+        form->setStyleSheet(orderStyleSheet());
+        header->setStyleSheet(orderStyleSheet());
+        loadSample(0);
+    }
+
+    void buildSampleTools(QVBoxLayout* column) {
+        sampleTools = new QWidget(form);
+        sampleTools->setFixedHeight(44);
+        auto* row = new QHBoxLayout(sampleTools);
+        row->setContentsMargins(1, 1, 1, 1);
+        row->setSpacing(4);
+        frameStrip = new QWidget(sampleTools);
+        frameStrip->setObjectName(QStringLiteral("printOrderSampleStrip"));
+        auto* strip = new QHBoxLayout(frameStrip);
+        strip->setContentsMargins(0,0,0,0);
+        strip->setSpacing(4);
+        const int frames = ProductProofSamples::count(ProcessingScene::Timelapse);
+        for (int i = 0; i < frames; ++i) {
+            auto* button = new QToolButton(frameStrip);
+            button->setObjectName(QStringLiteral("printOrderSampleFrame%1").arg(i+1));
+            button->setProperty("frameThumbnail", true);
+            button->setCheckable(true);
+            button->setAutoExclusive(true);
+            button->setFocusPolicy(Qt::StrongFocus);
+            button->setFixedSize(47, 41);
+            button->setIconSize(QSize(41, 23));
+            button->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
+            button->setText(QStringLiteral("%1").arg(i+1, 2, 10, QLatin1Char('0')));
+            const auto frame = ProductProofSamples::frame(ProcessingScene::Timelapse, i);
+            button->setIcon(QPixmap::fromImage(frame.scaled(button->iconSize()*2,
+                                      Qt::KeepAspectRatio, Qt::SmoothTransformation)));
+            frameButtons.append(button);
+            strip->addWidget(button);
+            connect(button, &QToolButton::clicked, this, [this, i] {
+                if (scene == ProcessingScene::Timelapse && wantsSample()) {
+                    loadSample(i);
+                    refresh();
+                }
+            });
+        }
+        for (int direction : {-1, 1}) {
+            auto* key = new QShortcut(QKeySequence(direction < 0 ? Qt::Key_Left : Qt::Key_Right), frameStrip);
+            key->setContext(Qt::WidgetWithChildrenShortcut);
+            connect(key, &QShortcut::activated, this, [this, direction] {
+                if (frameButtons.isEmpty() || !wantsSample()) return;
+                const int index = (sampleIndex + direction + int(frameButtons.size())) % int(frameButtons.size());
+                frameButtons[index]->setFocus(Qt::OtherFocusReason);
+                frameButtons[index]->click();
+            });
+        }
+        row->addStretch();
+        row->addWidget(frameStrip);
+        sampleToggle = command(sampleTools, "printOrderSampleToggle", "link");
+        row->addWidget(sampleToggle);
+        row->addStretch();
+        column->addWidget(sampleTools);
+    }
+
+    void loadSample(int index) {
+        sampleIndex = std::clamp(index, 0, std::max(0, ProductProofSamples::count(scene)-1));
+        sampleImage = ProductProofSamples::frame(scene, sampleIndex);
+        if (scene == ProcessingScene::Timelapse && sampleIndex < frameButtons.size())
+            frameButtons[sampleIndex]->setChecked(true);
     }
 
     void buildProduct() {
@@ -999,6 +1170,27 @@ struct PrintOrderPanel::Ui : QObject {
         chooseDirectory = command(parent, "printOrderChooseDirectory");
         pathRow->addWidget(chooseDirectory);
         content->addLayout(pathRow);
+        quickToggle = command(parent, "printOrderQuickToggle", "link");
+        quickToggle->setCheckable(true);
+        content->addWidget(quickToggle, 0, Qt::AlignLeft);
+        exposureRow = new QWidget(parent);
+        auto* adjustments = new QHBoxLayout(exposureRow);
+        adjustments->setContentsMargins(0, 0, 0, 0);
+        adjustments->setSpacing(8);
+        exposureSlider = new QSlider(Qt::Horizontal, exposureRow);
+        exposureSlider->setObjectName(QStringLiteral("printOrderExposureSlider"));
+        exposureSlider->setRange(-50, 50);
+        exposureSpin = new QDoubleSpinBox(exposureRow);
+        exposureSpin->setObjectName(QStringLiteral("printOrderQuickExposure"));
+        exposureSpin->setDecimals(1);
+        exposureSpin->setRange(-5, 5);
+        exposureSpin->setSingleStep(0.1);
+        exposureSpin->setSuffix(QStringLiteral(" EV"));
+        exposureSpin->setKeyboardTracking(false);
+        exposureSpin->setMinimumWidth(88);
+        adjustments->addWidget(exposureSlider, 1);
+        adjustments->addWidget(exposureSpin);
+        content->addWidget(exposureRow);
         outputNote = note(parent, "printOrderOutputNote", "warning");
         content->addWidget(outputNote);
         outputImports = imports(parent, "printOrderOutputImportFiles", "printOrderOutputImportFolder");
@@ -1069,8 +1261,48 @@ struct PrintOrderPanel::Ui : QObject {
         frameCounts.reset();
     }
     bool editable() const { return !busy && !hasReceipt(); }
-    bool showsSample() const { return total == 0 && proofImage.isNull() && !sampleImage.isNull(); }
-    const QImage& displayedProof() const { return showsSample() ? sampleImage : proofImage; }
+    bool wantsSample() const {
+        return step == Step::Product && editable() &&
+               ((total == 0 && proofImage.isNull()) || productSampleChosen);
+    }
+    bool wantsExposureDraft() const {
+        return proofIsSource && !proofImage.isNull() && !wantsSample() && editable() &&
+               step == Step::Output && scene != ProcessingScene::Timelapse && evTenths != 0;
+    }
+    const QImage& displayedProof() const {
+        if (wantsSample()) return sampleImage;
+        return wantsExposureDraft() ? draftImage : proofImage;
+    }
+    void updateExposureDraft(bool forSourceCanvas = false) {
+        if (!wantsExposureDraft() && !forSourceCanvas) return;
+        if (draftKey != proofImage.cacheKey()) {
+            draftKey = proofImage.cacheKey();
+            draftImage = {};
+            draftBase = proofImage;
+            // 来源已经是有界浏览图。与画布保持相同尺寸，100% 和蒙版坐标都不会变。
+            if (std::max(draftBase.width(), draftBase.height()) > 2400)
+                draftBase = draftBase.scaled(2400,2400,Qt::KeepAspectRatio,Qt::SmoothTransformation);
+            if (draftBase.colorSpace().isValid() && draftBase.colorSpace() != QColorSpace(QColorSpace::SRgb))
+                draftBase.convertToColorSpace(QColorSpace(QColorSpace::SRgb));
+            draftBase = draftBase.convertToFormat(QImage::Format_RGB888);
+        }
+        if (draftEv == evTenths && !draftImage.isNull()) return;
+        // 仅用于相机浏览图的曝光方向试样；正式成品仍从线性 RAW 走原来的完整管线。
+        draftEv = evTenths;
+        const double gain = std::exp2(draftEv / 10.0);
+        std::array<uchar,256> table;
+        for (int i=0; i<256; ++i) {
+            const double s=i/255.0;
+            const double y=std::clamp(gain*(s<=0.04045 ? s/12.92 : std::pow((s+0.055)/1.055, 2.4)),0.0,1.0);
+            table[i]=static_cast<uchar>(qRound(255*(y<=0.0031308 ? 12.92*y : 1.055*std::pow(y,1.0/2.4)-0.055)));
+        }
+        draftImage = draftBase.copy();
+        for (int y=0; y<draftImage.height(); ++y) {
+            auto* row=draftImage.scanLine(y);
+            for (int i=0; i<draftImage.width()*3; ++i) row[i]=table[row[i]];
+        }
+        draftImage.setColorSpace(QColorSpace::SRgb);
+    }
     bool needsCalibration() const {
         return scene == ProcessingScene::DeepSky && !calibrationReady;
     }
@@ -1101,10 +1333,12 @@ void PrintOrderPanel::Ui::connectControls() {
         if (hasReceipt() && frameCounts) emit owner->frameReceiptRequested();
     });
     connect(stageGroup, &QButtonGroup::idClicked, this, [this](int index) {
+        if (detail && faces->currentWidget() == detail) emit owner->formRequested();
         setStep(static_cast<Step>(index));
     });
     const auto selectProduct = [this](ProcessingScene requested) {
         if (!editable()) return;
+        productSampleChosen = step == Step::Product;
         owner->setScene(requested);
         emit owner->productRequested(requested);
     };
@@ -1121,24 +1355,40 @@ void PrintOrderPanel::Ui::connectControls() {
         connect(controls.files, &QPushButton::clicked, owner, &PrintOrderPanel::importFilesRequested);
         connect(controls.folder, &QPushButton::clicked, owner, &PrintOrderPanel::importFolderRequested);
     }
-    const auto openAdvanced = [this](WorkflowStage stage) {
-        if (editable()) emit owner->advancedRequested(stage);
+    const auto openAdvanced = [this](WorkflowStage stage, QWidget* origin) {
+        if (busy) return;
+        returnFocus = origin;
+        emit owner->advancedRequested(stage);
     };
-    connect(manageAssets, &QPushButton::clicked, this, [openAdvanced]() {
-        openAdvanced(WorkflowStage::Assets);
+    connect(manageAssets, &QPushButton::clicked, this, [this, openAdvanced]() {
+        openAdvanced(WorkflowStage::Assets, manageAssets);
     });
     for (auto* button : {calibration, outputCalibration}) {
-        connect(button, &QPushButton::clicked, this, [openAdvanced]() {
-            openAdvanced(WorkflowStage::Calibration);
+        connect(button, &QPushButton::clicked, this, [button, openAdvanced]() {
+            openAdvanced(WorkflowStage::Calibration, button);
         });
     }
-    connect(ground, &QPushButton::clicked, this, [openAdvanced]() {
-        openAdvanced(WorkflowStage::Stacking);
+    connect(ground, &QPushButton::clicked, this, [this, openAdvanced]() {
+        openAdvanced(WorkflowStage::Stacking, ground);
     });
     connect(advanced, &QPushButton::clicked, this, [this, openAdvanced]() {
-        openAdvanced(isStill() ? WorkflowStage::Adjustment : WorkflowStage::Stacking);
+        openAdvanced(lastDetailStage.value_or(isStill() ? WorkflowStage::Adjustment : WorkflowStage::Stacking), advanced);
     });
     connect(proof, &QAbstractButton::clicked, owner, &PrintOrderPanel::proofRequested);
+    connect(sampleToggle, &QPushButton::clicked, this, [this] {
+        productSampleChosen = !productSampleChosen;
+        refresh();
+    });
+    connect(quickToggle, &QPushButton::toggled, this, [this] { refresh(); });
+    connect(exposureSlider, &QSlider::valueChanged, this, [this](int value) {
+        owner->setExposureTenths(value);
+        emit owner->exposureRequested(value);
+    });
+    connect(exposureSpin, &QDoubleSpinBox::valueChanged, this, [this](double ev) {
+        const int value = qRound(ev * 10);
+        owner->setExposureTenths(value);
+        emit owner->exposureRequested(value);
+    });
     connect(formatField, &QComboBox::activated, this, [this](int index) {
         if (!editable()) return;
         const QString selected = formatField->itemData(index).toString();
@@ -1186,7 +1436,6 @@ void PrintOrderPanel::Ui::connectControls() {
 
 void PrintOrderPanel::Ui::retranslate() {
     owner->setAccessibleName(QCoreApplication::translate("Nebulens", "冲印单"));
-    labName->setText(QCoreApplication::translate("Nebulens", "影像冲印室"));
     lightLabel->setText(QCoreApplication::translate("Nebulens", "纸面光影"));
     lightField->setAccessibleName(lightLabel->text());
     {
@@ -1200,8 +1449,11 @@ void PrintOrderPanel::Ui::retranslate() {
     lightField->setToolTip(systemReduced
         ? QCoreApplication::translate("Nebulens", "已遵循系统的减弱动态效果设置")
         : QString());
-    orderTitle->setText(QCoreApplication::translate("Nebulens", "冲印单"));
-    orderFiles->setText(QCoreApplication::translate("Nebulens", "单据"));
+    orderFiles->setText(QCoreApplication::translate("Nebulens", "冲印单"));
+    orderFiles->setAccessibleName(QCoreApplication::translate("Nebulens", "冲印单菜单"));
+    orderFiles->setToolTip(orderFiles->accessibleName());
+    applicationMenus->setAccessibleName(QCoreApplication::translate("Nebulens", "菜单"));
+    applicationMenus->setToolTip(applicationMenus->accessibleName());
     openOrder->setText(QCoreApplication::translate("Nebulens", "打开冲印单"));
     saveOrder->setText(QCoreApplication::translate("Nebulens", "保存冲印单"));
     stageButtons[0]->setText(QStringLiteral("01   %1").arg(QCoreApplication::translate("Nebulens", "成品")));
@@ -1253,6 +1505,15 @@ void PrintOrderPanel::Ui::retranslate() {
     directoryField->setAccessibleName(directoryLabel->text());
     directoryField->setPlaceholderText(QCoreApplication::translate("Nebulens", "未选择目录"));
     chooseDirectory->setText(QCoreApplication::translate("Nebulens", "选择目录…"));
+    quickToggle->setText(QCoreApplication::translate("Nebulens", "曝光微调"));
+    exposureSlider->setAccessibleName(QCoreApplication::translate("Nebulens", "曝光微调"));
+    exposureSpin->setAccessibleName(exposureSlider->accessibleName());
+    for (int i = 0; i < frameButtons.size(); ++i) {
+        const QString name = QCoreApplication::translate("Nebulens", "示例第 %1 帧，共 %2 帧")
+            .arg(i+1).arg(frameButtons.size());
+        frameButtons[i]->setAccessibleName(name);
+        frameButtons[i]->setToolTip(name);
+    }
     outputCalibration->setText(QCoreApplication::translate("Nebulens", "补齐校准"));
     taskProgress->setAccessibleName(QCoreApplication::translate("Nebulens", "冲印进度"));
 
@@ -1263,7 +1524,7 @@ void PrintOrderPanel::Ui::retranslate() {
     frameDetails->setText(QCoreApplication::translate("Nebulens", "用片明细"));
     resultPath->setAccessibleName(resultPathLabel->text());
     ridgeComparison->setText(QCoreApplication::translate("Nebulens", "山脊对照"));
-    advanced->setText(QCoreApplication::translate("Nebulens", "高级设置"));
+    advanced->setText(QCoreApplication::translate("Nebulens", "冲印参数"));
     back->setText(QCoreApplication::translate("Nebulens", "上一步"));
     newOrder->setText(QCoreApplication::translate("Nebulens", "重新开单"));
     reveal->setText(QCoreApplication::translate("Nebulens", "打开目录"));
@@ -1379,16 +1640,31 @@ void PrintOrderPanel::Ui::refresh() {
     }
     taskProgress->setVisible(busy && progress >= 0);
 
+    updateExposureDraft();
     proof->setImage(displayedProof());
-    if (showsSample()) {
-        proof->setCopy(QCoreApplication::translate("Nebulens", "示例印样"),
-                       QCoreApplication::translate("Nebulens", "湖畔银河 · Neal Herbert / NPS"),
+    const bool sequenceExample = wantsSample() && scene == ProcessingScene::Timelapse;
+    frameStrip->setVisible(sequenceExample && frameButtons.size() > 1);
+    sampleToggle->setVisible(total > 0 && step == Step::Product && editing);
+    sampleToggle->setText(productSampleChosen ? QCoreApplication::translate("Nebulens", "看本单印样")
+                                               : QCoreApplication::translate("Nebulens", "看成品示例"));
+    if (wantsSample() && !sampleImage.isNull()) {
+        QString type = expectedCount();
+        if (sequenceExample) type = QCoreApplication::translate("Nebulens", "延时照片 %1 / %2")
+            .arg(sampleIndex+1).arg(frameButtons.size());
+        proof->setCopy(QCoreApplication::translate("Nebulens", "示例印样") + QStringLiteral(" · ") + type,
+                       ProductProofSamples::credit(scene),
                        QCoreApplication::translate("Nebulens", "查看大图"));
         proof->setEnabled(true);
     } else {
-        proof->setEnabled(!proofImage.isNull());
-        if (proofImage.isNull()) {
-            proof->setCopy(QCoreApplication::translate("Nebulens", "暂无印样"), {}, {});
+        proof->setEnabled(!displayedProof().isNull());
+        if (displayedProof().isNull()) {
+            proof->setCopy(wantsSample() ? QCoreApplication::translate("Nebulens", "示例暂不可用") :
+                           (proofCaption.isEmpty() ? QCoreApplication::translate("Nebulens", "等待原片") : proofCaption),
+                           {}, {});
+        } else if (wantsExposureDraft()) {
+            proof->setCopy(owner->exposureDraftCaption(),
+                           QCoreApplication::translate("Nebulens", "基于原片预览，非正式成品"),
+                           QCoreApplication::translate("Nebulens", "查看大图"));
         } else {
             proof->setCopy(proofCaption.isEmpty() ? QCoreApplication::translate("Nebulens", "印样")
                                                  : proofCaption,
@@ -1397,12 +1673,20 @@ void PrintOrderPanel::Ui::refresh() {
     }
 
     const Step shown = busy ? Step::Output : (complete ? Step::Receipt : step);
+    const bool onDetail = detail && faces->currentWidget() == detail;
+    detailContext->setVisible(onDetail);
+    detailContext->setText((complete ? QCoreApplication::translate("Nebulens", "冲印回执") :
+        stageButtons[std::min(static_cast<int>(shown), 2)]->text()) +
+        QStringLiteral("  /  ") + QCoreApplication::translate("Nebulens", "冲印参数"));
     auto* currentStage = stageButtons[std::min(static_cast<int>(shown), 2)];
     {
         const QSignalBlocker blocker(stageGroup);
         currentStage->setChecked(true);
     }
-    for (auto* stage : stageButtons) stage->setEnabled(editing);
+    for (auto* stage : stageButtons) {
+        stage->setVisible(!onDetail);
+        stage->setEnabled(editing);
+    }
     for (auto* option : productButtons) option->setEnabled(editing);
     subject->setEnabled(editing);
     calibration->setEnabled(editing);
@@ -1414,7 +1698,11 @@ void PrintOrderPanel::Ui::refresh() {
     if (busy && orderFiles->menu()->isVisible()) orderFiles->menu()->close();
     ridgeComparison->setVisible(ridgeComparisonAvailable);
     ridgeComparison->setEnabled(!busy && ridgeComparisonAvailable);
-    advanced->setVisible(editing);
+    advanced->setVisible(!busy);
+    const bool quickAvailable = shown == Step::Output && editing && total > 0 &&
+                                scene != ProcessingScene::Timelapse;
+    quickToggle->setVisible(quickAvailable);
+    exposureRow->setVisible(quickAvailable && quickToggle->isChecked());
     back->setVisible(editing && shown != Step::Product);
     newOrder->setVisible(complete);
     reveal->setVisible(complete);
@@ -1484,6 +1772,7 @@ void PrintOrderPanel::Ui::refresh() {
 void PrintOrderPanel::Ui::setStep(Step destination) {
     if (!editable() || step == destination) return;
     step = destination;
+    productSampleChosen = false;
     refresh();
     if (step == Step::Product) {
         productGroup->checkedButton()->setFocus(Qt::OtherFocusReason);
@@ -1600,14 +1889,20 @@ PrintOrderPanel::PrintOrderPanel(QWidget* parent) : QWidget(parent) {
 PrintOrderPanel::~PrintOrderPanel() = default;
 
 void PrintOrderPanel::setScene(ProcessingScene scene) {
-    if (m_ui->scene != scene) m_ui->frameCounts.reset();
+    const bool changed = m_ui->scene != scene;
+    if (changed) {
+        m_ui->frameCounts.reset();
+        m_ui->lastDetailStage.reset();
+    }
     m_ui->scene = scene;
+    if (changed) m_ui->loadSample(0);
     m_ui->syncScene();
     m_ui->refresh();
 }
 
 void PrintOrderPanel::setProject(int included, int total, const QString& sourceName,
                                  bool calibrationReady, const QString& calibrationHint) {
+    if (m_ui->total != total) m_ui->productSampleChosen = false;
     m_ui->total = std::max(0, total);
     m_ui->included = std::clamp(included, 0, m_ui->total);
     m_ui->sourceName = sourceName;
@@ -1623,14 +1918,77 @@ void PrintOrderPanel::setOutput(const QString& format, const QString& directory)
     m_ui->refresh();
 }
 
-void PrintOrderPanel::setProof(const QImage& image, const QString& caption) {
+void PrintOrderPanel::setProof(const QImage& image, const QString& caption, bool isSource) {
     m_ui->proofImage = image;
+    m_ui->proofIsSource = isSource;
     m_ui->proofCaption = caption;
     m_ui->refresh();
 }
 
 QImage PrintOrderPanel::proofImage() const {
     return m_ui->displayedProof();
+}
+
+QString PrintOrderPanel::proofCaption() const { return m_ui->proof->caption(); }
+
+QImage PrintOrderPanel::sourceExposureProof() {
+    if (!m_ui->proofIsSource || m_ui->proofImage.isNull() || !m_ui->evTenths ||
+        m_ui->scene == ProcessingScene::Timelapse) return {};
+    m_ui->updateExposureDraft(true);
+    return m_ui->draftImage;
+}
+
+QString PrintOrderPanel::exposureDraftCaption() const {
+    const QString ev = (m_ui->evTenths > 0 ? QStringLiteral("+") : QString()) +
+                       QLocale().toString(m_ui->evTenths / 10.0, 'f', 1);
+    return QCoreApplication::translate("Nebulens", "曝光试样 · %1 EV").arg(ev);
+}
+
+QWidget* PrintOrderPanel::masthead() const { return m_ui->header; }
+
+void PrintOrderPanel::setApplicationMenus(const QList<QAction*>& actions) {
+    m_ui->applicationMenu->addActions(actions);
+    m_ui->applicationMenus->setVisible(!actions.isEmpty());
+    if (!actions.isEmpty()) m_ui->applicationMenus->setShortcut(QKeySequence(Qt::Key_F10));
+}
+
+void PrintOrderPanel::setDetailPage(QWidget* page) {
+    Q_ASSERT(!m_ui->detail && page);
+    m_ui->detail = page;
+    m_ui->faces->addWidget(page);
+}
+
+bool PrintOrderPanel::showingDetailPage() const {
+    return m_ui->detail && m_ui->faces->currentWidget() == m_ui->detail;
+}
+
+void PrintOrderPanel::rememberDetailStage(WorkflowStage stage) { m_ui->lastDetailStage = stage; }
+
+void PrintOrderPanel::showDetailPage(bool open) {
+    if (!m_ui->detail || showingDetailPage() == open) return;
+    if (open && !m_ui->returnFocus) {
+        QWidget* focus = QApplication::focusWidget();
+        m_ui->returnFocus = focus && m_ui->form->isAncestorOf(focus) ? focus : m_ui->advanced;
+    }
+    m_ui->faces->setCurrentWidget(open ? m_ui->detail : m_ui->form);
+    m_ui->refresh();
+    if (!open) {
+        QWidget* target = m_ui->returnFocus;
+        if (!target || !target->isVisible() || !target->isEnabled()) target = m_ui->advanced;
+        if (target->isVisible() && target->isEnabled()) target->setFocus(Qt::OtherFocusReason);
+        m_ui->returnFocus.clear();
+    }
+    m_ui->updateMotion();
+}
+
+void PrintOrderPanel::setExposureTenths(int value) {
+    const QSignalBlocker slider(m_ui->exposureSlider), field(m_ui->exposureSpin);
+    m_ui->exposureSlider->setValue(value);
+    m_ui->exposureSpin->setValue(value * 0.1);
+    if (m_ui->evTenths != value) {
+        m_ui->evTenths = value;
+        m_ui->refresh();
+    }
 }
 
 void PrintOrderPanel::setProofInspectionActive(bool active) {
@@ -1703,15 +2061,25 @@ void PrintOrderPanel::showReopenedOrder() {
 }
 
 void PrintOrderPanel::resetOrder() {
+    showDetailPage(false);
     m_ui->step = Step::Product;
     m_ui->scene = ProcessingScene::Nightscape;
+    m_ui->lastDetailStage.reset();
+    m_ui->returnFocus.clear();
     m_ui->included = 0;
     m_ui->total = 0;
     m_ui->sourceName.clear();
     m_ui->calibrationReady = false;
     m_ui->calibrationHint.clear();
     m_ui->proofImage = QImage();
+    m_ui->draftImage = {};
+    m_ui->draftBase = {};
+    m_ui->draftKey = 0;
+    m_ui->proofIsSource = false;
     m_ui->proofCaption.clear();
+    m_ui->productSampleChosen = false;
+    m_ui->loadSample(0);
+    m_ui->quickToggle->setChecked(false);
     m_ui->ridgeComparisonAvailable = false;
     m_ui->busy = false;
     m_ui->cancelPending = false;
@@ -1720,6 +2088,11 @@ void PrintOrderPanel::resetOrder() {
     m_ui->status.clear();
     m_ui->syncScene();
     clearReceipt();
+}
+
+void PrintOrderPanel::resizeEvent(QResizeEvent* event) {
+    QWidget::resizeEvent(event);
+    if (m_ui) m_ui->lightLabel->setVisible(width() >= 1080);
 }
 
 void PrintOrderPanel::changeEvent(QEvent* event) {

@@ -68,8 +68,36 @@ void chooseFiles(QPushButton* button, const QStringList& paths) {
 }
 
 void pressKey(QWidget* widget, Qt::Key key) {
-    QKeyEvent event(QEvent::KeyPress, key, Qt::NoModifier);
-    QApplication::sendEvent(widget, &event);
+    QKeyEvent press(QEvent::KeyPress, key, Qt::NoModifier);
+    QKeyEvent release(QEvent::KeyRelease, key, Qt::NoModifier);
+    QApplication::sendEvent(widget, &press);
+    QApplication::sendEvent(widget, &release);
+}
+
+void checkInlineExposure(ParamsPanel& panel) {
+    auto* slider = control<QSlider>(panel, "advancedExposureSlider");
+    auto* value = control<QLabel>(panel, "advancedExposureValue");
+    panel.setExposureTenths(100);
+    check(slider->value() == 50 && value->text() == QStringLiteral("+5.0 EV") &&
+              panel.basicAdjustmentOptions().exposureTenths == 50,
+          "Inline exposure must update the advanced slider and clamp to +5.0 EV");
+    panel.setExposureTenths(-100);
+    check(slider->value() == -50 && value->text() == QStringLiteral("-5.0 EV"),
+          "Inline exposure must clamp to -5.0 EV");
+
+    int notifications = 0;
+    const auto connection = QObject::connect(&panel, &ParamsPanel::paramsChanged,
+        &panel, [&notifications]() { ++notifications; });
+    panel.setExposureTenths(12);
+    pressKey(slider, Qt::Key_Right);
+    QEventLoop eventLoop;
+    QTimer::singleShot(StyleTokens::Motion::kPreviewDebounceMs + 200,
+                       &eventLoop, &QEventLoop::quit);
+    eventLoop.exec();
+    check(notifications == 1 && panel.basicAdjustmentOptions().exposureTenths == 13 &&
+              value->text() == QStringLiteral("+1.3 EV"),
+          "The inline API and keyboard edits should share the debounced parameter notification");
+    QObject::disconnect(connection);
 }
 
 void checkReferenceSelection(ParamsPanel& panel) {
@@ -460,10 +488,33 @@ int main(int argc, char* argv[]) {
     }
     check(basicGroup && basicGroup->isCheckable(),
           "Inspector sections should be genuinely collapsible");
-    basicGroup->setChecked(false);
+    panel.resize(330, 540);
+    panel.show();
     QApplication::processEvents();
-    check(basicGroup->minimumHeight() == 34,
-          "Collapsed inspector sections should keep only their heading");
+    auto* exposure = control<QSlider>(panel, "advancedExposureSlider");
+    const int expandedHeight = basicGroup->sizeHint().height();
+    const auto adjustmentSliders = basicGroup->findChildren<QSlider*>();
+    for (auto* slider : adjustmentSliders) {
+        check(slider->geometry().left() == exposure->geometry().left() &&
+                  slider->geometry().right() == exposure->geometry().right() &&
+                  !slider->accessibleName().isEmpty(),
+              "All adjustment rows should align their tracks and label the key controls");
+    }
+    check(!adjustmentSliders.isEmpty(), "The adjustment form should expose editable sliders");
+    checkInlineExposure(panel);
+    basicGroup->setFocus(Qt::TabFocusReason);
+    pressKey(basicGroup, Qt::Key_Space);
+    QApplication::processEvents();
+    check(!basicGroup->isChecked(), "Space should collapse the focused section");
+    check(basicGroup->isVisible() && !exposure->isVisible(),
+          "Keyboard collapse should leave the heading and hide its controls");
+    check(basicGroup->sizeHint().height() < expandedHeight,
+          "The collapsed section should relinquish its form height");
+    pressKey(basicGroup, Qt::Key_Return);
+    QApplication::processEvents();
+    check(basicGroup->isChecked() && exposure->isVisible() &&
+              basicGroup->sizeHint().height() == expandedHeight,
+          "The same heading should restore the form with the keyboard");
 
     QGroupBox* optimizeGroup = nullptr;
     for (QGroupBox* group : panel.findChildren<QGroupBox*>()) {
@@ -493,9 +544,6 @@ int main(int argc, char* argv[]) {
     check(noiseToggle->isChecked() && noiseToggle->property("thumbPosition").toReal() == 1.0,
           "A toggle restored from settings with blocked signals should draw as enabled");
 
-    panel.resize(330, 620);
-    panel.show();
-    QApplication::processEvents();
     checkReferenceSelection(panel);
     checkCalibrationAndProjectClear(panel, settingsDirectory);
     checkOrderRoundTrip(settingsDirectory);

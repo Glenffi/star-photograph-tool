@@ -61,6 +61,8 @@ void MainWindow::connectPrintOrder() {
     connect(m_printOrder, &PrintOrderPanel::importFilesRequested, this, &MainWindow::onImportClicked);
     connect(m_printOrder, &PrintOrderPanel::importFolderRequested, this, &MainWindow::onImportFolderClicked);
     connect(m_printOrder, &PrintOrderPanel::advancedRequested, this, &MainWindow::showAdvanced);
+    connect(m_printOrder, &PrintOrderPanel::formRequested, this, &MainWindow::showPrintOrder);
+    connect(m_printOrder, &PrintOrderPanel::exposureRequested, m_paramsPanel, &ParamsPanel::setExposureTenths);
     connect(m_printOrder, &PrintOrderPanel::proofRequested, this, &MainWindow::inspectProof);
     connect(m_printOrder, &PrintOrderPanel::frameReceiptRequested, this, &MainWindow::inspectFrameReceipt);
     connect(m_printOrder, &PrintOrderPanel::formatRequested, m_paramsPanel, &ParamsPanel::setOutputFormat);
@@ -84,7 +86,8 @@ void MainWindow::connectPrintOrder() {
 }
 
 void MainWindow::showPrintOrder() {
-    m_workspacePages->setCurrentWidget(m_printOrder);
+    if (m_printOrder->showingDetailPage()) m_printOrder->rememberDetailStage(m_workflowRail->currentStage());
+    m_printOrder->showDetailPage(false);
     statusBar()->hide();
     updateProjectReadiness();
     refreshPrintOrderResult();
@@ -92,14 +95,16 @@ void MainWindow::showPrintOrder() {
 }
 
 void MainWindow::showAdvanced(WorkflowStage stage) {
-    m_workspacePages->setCurrentWidget(m_darkroom);
+    m_printOrder->showDetailPage(true);
     statusBar()->show();
     m_workflowRail->setCurrentStage(stage, true);
+    refreshPrintOrderResult();
     refreshExportAction();
 }
 
 void MainWindow::inspectProof() {
-    const QString caption = refreshPrintOrderResult();
+    refreshPrintOrderResult();
+    const QString caption = m_printOrder->proofCaption();
     const QImage image = m_printOrder->proofImage();
     if (image.isNull()) return;
     auto* dialog = new QDialog(this);
@@ -191,6 +196,7 @@ void MainWindow::resetProject() {
     if (m_historyPreviewWorker) m_historyPreviewWorker->requestInterruption();
     invalidateCachedResult();
     m_sourceProof = {};
+    m_sourcePreviewFailed = false;
     m_lastValidResultPreview = {};
     m_lastValidResultPreviewKey.clear();
     m_resultWasVisibleBeforeRun = false;
@@ -213,11 +219,19 @@ void MainWindow::resetProject() {
     showPrintOrder();
 }
 
-QString MainWindow::refreshPrintOrderResult() {
-    if (m_resettingProject) return {};
+void MainWindow::refreshPrintOrderResult() {
+    if (m_resettingProject) return;
     const QString source = m_projectPanel->currentFilePath();
     QImage proof = source.isEmpty() ? QImage() : m_sourceProof;
-    QString caption = QFileInfo(source).fileName();
+    bool isSource = true;
+    QString caption;
+    if (!source.isEmpty()) {
+        if (proof.isNull())
+            caption = m_sourcePreviewFailed ? QCoreApplication::translate("Nebulens", "原片预览不可用")
+                                            : QCoreApplication::translate("Nebulens", "正在读取原片…");
+        else
+            caption = QCoreApplication::translate("Nebulens", "原片 · %1").arg(QFileInfo(source).fileName());
+    }
     if (!m_lastProcessedSignature.isEmpty()) {
         const QString upstream = currentUpstreamSignature();
         const QString finishing = m_paramsPanel->finishingSignature();
@@ -227,20 +241,30 @@ QString MainWindow::refreshPrintOrderResult() {
             clearDeliveryReceipt();
         }
         if (formalCurrent) {
+            isSource = false;
             proof = m_formalProof;
-            caption = QCoreApplication::translate("Nebulens", "处理结果");
+            caption = m_scene == ProcessingScene::Timelapse
+                ? QCoreApplication::translate("Nebulens", "本次延时序列 · 中间帧")
+                : QCoreApplication::translate("Nebulens", "处理结果");
         } else if (upstream == m_lastProcessedUpstreamSignature) {
             if (!m_quickProof.isNull() && m_quickPreviewSignature == finishing) {
+                isSource = false;
                 proof = m_quickProof;
                 caption = QCoreApplication::translate("Nebulens", "快速预览已更新 · 完整导出需重新处理");
             } else if (!m_formalProof.isNull()) {
+                isSource = false;
                 proof = m_formalProof;
                 caption = QCoreApplication::translate("Nebulens", "参数已修改 · 这是上次处理的成片");
             }
         }
     }
-    m_printOrder->setProof(proof, caption);
-    return caption;
+    m_printOrder->setProof(proof, caption, isSource);
+    // 只有在看原片的调整章节才以试样代替画布显示；正式像素和取样来源不变。
+    const bool inspectExposure = isSource && !processingActive() && m_printOrder->showingDetailPage() &&
+        m_workflowRail->currentStage() == WorkflowStage::Adjustment && !m_previewPanel->isShowingResult();
+    const QImage draft = inspectExposure ? m_printOrder->sourceExposureProof() : QImage{};
+    m_previewPanel->setSourceExposureProof(m_sourceProof, draft,
+        draft.isNull() ? QString() : m_printOrder->exposureDraftCaption());
 }
 
 void MainWindow::refreshExportAction() {
@@ -272,6 +296,7 @@ void MainWindow::finishStaleDelivery(const QString& savedPath) {
     if (m_previewPanel->isShowingResult()) {
         const QString source = m_projectPanel->currentFilePath();
         m_sourceProof = {};
+        m_sourcePreviewFailed = false;
         m_previewPanel->clearImage();
         if (!source.isEmpty()) m_previewPanel->loadImage(source);
     }

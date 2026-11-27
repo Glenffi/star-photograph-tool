@@ -10,6 +10,8 @@
 
 #include <memory>
 
+class QAction;
+
 class PrintOrderPanel : public QWidget {
     Q_OBJECT
 public:
@@ -20,9 +22,19 @@ public:
     void setProject(int included, int total, const QString& sourceName,
                     bool calibrationReady, const QString& calibrationHint);
     void setOutput(const QString& format, const QString& directory);
-    void setProof(const QImage& image, const QString& caption);
+    void setProof(const QImage& image, const QString& caption, bool isSource = false);
     QImage proofImage() const;
+    QString proofCaption() const;
+    QImage sourceExposureProof();
+    QString exposureDraftCaption() const;
     void setProofInspectionActive(bool active);
+    QWidget* masthead() const;
+    void setApplicationMenus(const QList<QAction*>& actions);
+    void setDetailPage(QWidget* page);
+    void showDetailPage(bool open);
+    void rememberDetailStage(WorkflowStage stage);
+    bool showingDetailPage() const;
+    void setExposureTenths(int value);
     void setTask(bool busy, int progress, const QString& status);
     // 本次产物的文件或序列目录；frameCount 是实际交付张数。
     void setReceipt(const QString& path, int frameCount, const FrameReceipt& info = {});
@@ -41,6 +53,8 @@ signals:
     void importFilesRequested();
     void importFolderRequested();
     void advancedRequested(WorkflowStage stage);
+    void formRequested();
+    void exposureRequested(int tenths);
     void proofRequested();
     void formatRequested(const QString& format);
     void directoryRequested();
@@ -52,6 +66,7 @@ signals:
 
 protected:
     void changeEvent(QEvent* event) override;
+    void resizeEvent(QResizeEvent* event) override;
 
 private:
     struct Ui;

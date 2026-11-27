@@ -48,6 +48,7 @@ int main(int argc, char* argv[]) {
     QCoreApplication app(argc, argv);
 
     QTemporaryDir settingsDirectory;
+    QSettings::setDefaultFormat(QSettings::IniFormat);
     check(settingsDirectory.isValid(),
           "Temporary settings directory should be available");
     QSettings::setPath(QSettings::NativeFormat, QSettings::UserScope,
@@ -110,6 +111,9 @@ int main(int argc, char* argv[]) {
               "Every English translation should be finished");
         check(placeholders(source) == placeholders(translation),
               "Translation placeholders should match the source");
+        static const QRegularExpression xmlIndent(QStringLiteral("\\n[ \\t]{8,}"));
+        check(source.contains('\n') || !translation.contains(xmlIndent),
+              "XML formatting must not indent wrapped single-paragraph UI text");
         const bool intentionalLegacyPath =
             source == QString::fromUtf8("/星炼/Output");
         check(intentionalLegacyPath ||

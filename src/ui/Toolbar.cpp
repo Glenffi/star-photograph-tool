@@ -6,45 +6,45 @@
 #include <QAction>
 #include <QComboBox>
 #include <QCoreApplication>
-#include <QFont>
-#include <QGraphicsDropShadowEffect>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QFrame>
 #include <QMenu>
+#include <QPainter>
 #include <QPushButton>
 #include <QSignalBlocker>
 #include <QSizePolicy>
 #include <QStyle>
-#include <QVBoxLayout>
 
 #include <algorithm>
 
 namespace {
 
-QIcon toolbarIcon(UiAssets::Glyph glyph, const char* normalColor,
-                  const char* activeColor) {
-    constexpr int kIconSize = StyleTokens::Controls::kIconSize;
+QIcon toolbarIcon(UiAssets::Glyph glyph, const char* color) {
+    return UiAssets::controlIcon(glyph, StyleTokens::Colors::fromHex(color),
+                                 StyleTokens::Controls::kIconSize);
+}
 
-    QIcon result;
-    result.addPixmap(
-        UiAssets::icon(glyph, StyleTokens::Colors::fromHex(normalColor),
-                       kIconSize)
-            .pixmap(kIconSize, kIconSize),
-        QIcon::Normal);
-    result.addPixmap(
-        UiAssets::icon(glyph, StyleTokens::Colors::fromHex(activeColor),
-                       kIconSize)
-            .pixmap(kIconSize, kIconSize),
-        QIcon::Active);
-    result.addPixmap(
-        UiAssets::icon(glyph,
-                       StyleTokens::Colors::fromHex(
-                           StyleTokens::Colors::kTextFaint),
-                       kIconSize)
-            .pixmap(kIconSize, kIconSize),
-        QIcon::Disabled);
-    return result;
+class ProjectSummaryLabel final : public QLabel {
+public:
+    using QLabel::QLabel;
+
+protected:
+    void paintEvent(QPaintEvent*) override {
+        QPainter painter(this);
+        painter.setPen(palette().color(foregroundRole()));
+        painter.drawText(contentsRect(), Qt::AlignLeading | Qt::AlignVCenter,
+                         fontMetrics().elidedText(text(), Qt::ElideRight,
+                                                  contentsRect().width()));
+    }
+};
+
+QString appendixTitle() {
+    const QString title = QCoreApplication::translate("Nebulens", "参数附页");
+    if (title != QStringLiteral("参数附页")) return title;
+    // Older catalogs already translate the entry point into this appendix.
+    const QString existing = QCoreApplication::translate("Nebulens", "高级设置");
+    return existing == QStringLiteral("高级设置") ? title : existing;
 }
 
 }  // namespace
@@ -56,38 +56,42 @@ Toolbar::Toolbar(QWidget* parent)
 
 void Toolbar::setupUI() {
     setObjectName(QStringLiteral("mainToolbar"));
-    setFixedHeight(64);
+    setAttribute(Qt::WA_StyledBackground);
+    setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
 
     auto* layout = new QHBoxLayout(this);
-    layout->setContentsMargins(18, 0, 14, 0);
-    layout->setSpacing(10);
+    layout->setContentsMargins(0, StyleTokens::Spacing::kMicro,
+                               0, StyleTokens::Spacing::kBase);
+    layout->setSpacing(StyleTokens::Spacing::kControlGap);
 
     auto* orderButton = createActionButton(
-        toolbarIcon(UiAssets::Glyph::ChevronLeft, StyleTokens::Colors::kTextPrimary,
-                    StyleTokens::Colors::kTextSecondary),
+        toolbarIcon(UiAssets::Glyph::ChevronLeft, StyleTokens::Colors::kAccent),
         QCoreApplication::translate("Nebulens", "返回冲印单"),
-        StyleTokens::Properties::kSecondaryButton);
+        StyleTokens::Properties::kGhost);
     orderButton->setObjectName(QStringLiteral("returnToPrintOrder"));
+    orderButton->setAccessibleName(orderButton->text());
     connect(orderButton, &QPushButton::clicked, this, &Toolbar::printOrderRequested);
     layout->addWidget(orderButton);
 
     auto* divider = new QFrame(this);
     divider->setObjectName(QStringLiteral("toolbarVerticalDivider"));
-    divider->setFixedSize(1, 30);
+    divider->setFixedSize(1, 22);
     layout->addWidget(divider);
 
-    auto* modeBlock = new QWidget(this);
-    auto* modeLayout = new QVBoxLayout(modeBlock);
-    modeLayout->setContentsMargins(0, 7, 0, 6);
-    modeLayout->setSpacing(2);
-    auto* modeLabel = new QLabel(
-        QCoreApplication::translate("Nebulens", "模式 / 处理场景"),
-        modeBlock);
-    modeLabel->setObjectName(QStringLiteral("toolbarKicker"));
-    modeLayout->addWidget(modeLabel);
-    m_sceneCombo = new QComboBox(modeBlock);
+    auto* title = new QLabel(appendixTitle(), this);
+    title->setObjectName(QStringLiteral("toolbarKicker"));
+    title->setProperty(StyleTokens::Properties::kTextRole,
+                       StyleTokens::Properties::kSection);
+    layout->addWidget(title);
+
+    m_sceneCombo = new QComboBox(this);
     m_sceneCombo->setObjectName(QStringLiteral("toolbarSceneCombo"));
-    m_sceneCombo->setFixedWidth(154);
+    m_sceneCombo->setAccessibleName(
+        QCoreApplication::translate("Nebulens", "模式 / 处理场景"));
+    m_sceneCombo->setToolTip(m_sceneCombo->accessibleName());
+    m_sceneCombo->setSizeAdjustPolicy(QComboBox::AdjustToContents);
+    m_sceneCombo->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
+    m_sceneCombo->setFocusPolicy(Qt::StrongFocus);
     m_sceneCombo->addItem(QCoreApplication::translate("Nebulens", "单张精修"),
                           static_cast<int>(ProcessingScene::SingleFrame));
     m_sceneCombo->addItem(QCoreApplication::translate("Nebulens", "银河星景"),
@@ -106,20 +110,17 @@ void Toolbar::setupUI() {
                 emit sceneChanged(static_cast<ProcessingScene>(
                     m_sceneCombo->itemData(index).toInt()));
             });
-    modeLayout->addWidget(m_sceneCombo);
-    layout->addWidget(modeBlock);
+    layout->addWidget(m_sceneCombo);
 
-    m_projectSummary = new QLabel(QCoreApplication::translate("Nebulens", "银河星景 · 等待素材"), this);
+    m_projectSummary = new ProjectSummaryLabel(this);
     m_projectSummary->setObjectName(QStringLiteral("toolbarProjectSummary"));
     m_projectSummary->setSizePolicy(QSizePolicy::Ignored,
                                     QSizePolicy::Preferred);
+    setProjectSummary(QCoreApplication::translate("Nebulens", "银河星景 · 等待素材"));
     layout->addWidget(m_projectSummary, 1);
 
-
     m_exportResultBtn = createActionButton(
-        toolbarIcon(UiAssets::Glyph::Export,
-                    StyleTokens::Colors::kTextSecondary,
-                    StyleTokens::Colors::kTextPrimary),
+        toolbarIcon(UiAssets::Glyph::Export, StyleTokens::Colors::kTextPrimary),
         tr("导出"), StyleTokens::Properties::kSecondaryButton);
     m_exportResultBtn->setToolTip(tr("导出当前处理结果"));
     m_exportResultBtn->setAccessibleName(tr("导出结果"));
@@ -127,47 +128,42 @@ void Toolbar::setupUI() {
             &Toolbar::exportResultClicked);
 
     m_startProcessBtn = createActionButton(
-        toolbarIcon(UiAssets::Glyph::Play,
-                    StyleTokens::Colors::kActionText,
-                    StyleTokens::Colors::kActionText),
+        toolbarIcon(UiAssets::Glyph::Play, StyleTokens::Colors::kActionText),
         tr("开始处理"), StyleTokens::Properties::kPrimary);
     m_startProcessBtn->setToolTip(tr("使用当前参数开始处理"));
     m_startProcessBtn->setAccessibleName(tr("开始处理"));
     connect(m_startProcessBtn, &QPushButton::clicked, this,
             &Toolbar::startProcessClicked);
+    // Keep adjacent commands in place as the process button changes state.
+    const QString idleText = m_startProcessBtn->text();
+    int actionWidth = m_startProcessBtn->sizeHint().width();
+    for (const QString& text : {tr("取消处理"), tr("正在处理 %1%").arg(100)}) {
+        m_startProcessBtn->setText(text);
+        actionWidth = std::max(actionWidth, m_startProcessBtn->sizeHint().width());
+    }
+    m_startProcessBtn->setText(idleText);
+    m_startProcessBtn->setMinimumWidth(actionWidth);
     layout->addWidget(m_exportResultBtn);
     layout->addWidget(m_startProcessBtn);
 
-    m_processGlow = new QGraphicsDropShadowEffect(m_startProcessBtn);
-    m_processGlow->setBlurRadius(18.0);
-    QColor glow = StyleTokens::Colors::fromHex(
-        StyleTokens::Colors::kAccent);
-    glow.setAlpha(80);
-    m_processGlow->setColor(glow);
-    m_processGlow->setOffset(0, 0);
-    m_startProcessBtn->setGraphicsEffect(m_processGlow);
+    auto* overflow = createIconButton(
+        toolbarIcon(UiAssets::Glyph::More, StyleTokens::Colors::kTextPrimary),
+        tr("更多"));
+    overflow->setObjectName(QStringLiteral("toolbarMore"));
+    layout->addWidget(overflow);
 
-    m_overflowBtn = createIconButton(QIcon(), tr("更多"));
-    m_overflowBtn->setText(QCoreApplication::translate("Nebulens", "⋯"));
-    QFont overflowFont = m_overflowBtn->font();
-    overflowFont.setPixelSize(StyleTokens::Controls::kIconSize);
-    overflowFont.setWeight(QFont::DemiBold);
-    m_overflowBtn->setFont(overflowFont);
-    connect(m_overflowBtn, &QPushButton::clicked, this,
-            &Toolbar::showOverflowMenu);
-    layout->addWidget(m_overflowBtn);
-
-    m_overflowMenu = new QMenu(this);
-    m_importFilesAction = m_overflowMenu->addAction(tr("导入 RAW 文件..."));
-    m_importFolderAction = m_overflowMenu->addAction(tr("导入目录..."));
-    m_overflowMenu->addSeparator();
-    m_clearProjectAction = m_overflowMenu->addAction(tr("清空项目"));
-    m_overflowMenu->addSeparator();
-    m_settingsAction = m_overflowMenu->addAction(tr("设置"));
-    m_checkUpdatesAction = m_overflowMenu->addAction(tr("检查更新"));
-    m_shortcutsAction = m_overflowMenu->addAction(tr("快捷键"));
-    m_overflowMenu->addSeparator();
-    m_aboutAction = m_overflowMenu->addAction(tr("关于"));
+    auto* menu = new QMenu(overflow);
+    overflow->setMenu(menu);
+    m_importFilesAction = menu->addAction(tr("导入 RAW 文件..."));
+    m_importFolderAction = menu->addAction(tr("导入目录..."));
+    menu->addSeparator();
+    m_clearProjectAction = menu->addAction(tr("清空项目"));
+    menu->addSeparator();
+    m_settingsAction = menu->addAction(tr("设置"));
+    m_checkUpdatesAction = menu->addAction(tr("检查更新"));
+    m_shortcutsAction = menu->addAction(tr("快捷键"));
+    menu->addSeparator();
+    m_aboutAction = menu->addAction(tr("关于"));
 
     connect(m_importFilesAction, &QAction::triggered, this,
             &Toolbar::importFilesClicked);
@@ -195,6 +191,7 @@ QPushButton* Toolbar::createIconButton(const QIcon& icon,
                               StyleTokens::Controls::kIconSize));
     button->setToolTip(tooltip);
     button->setAccessibleName(tooltip);
+    button->setFocusPolicy(Qt::StrongFocus);
     button->setProperty(StyleTokens::Properties::kVariant,
                         StyleTokens::Properties::kIcon);
     button->setFixedSize(StyleTokens::Controls::kIconButtonSize,
@@ -213,6 +210,7 @@ QPushButton* Toolbar::createActionButton(const QIcon& icon,
     button->setProperty(StyleTokens::Properties::kVariant, variant);
     button->setFixedHeight(StyleTokens::Controls::kCompactHeight);
     button->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
+    button->setFocusPolicy(Qt::StrongFocus);
     button->setCursor(Qt::PointingHandCursor);
     return button;
 }
@@ -233,32 +231,20 @@ void Toolbar::setProcessing(bool processing) {
     if (m_startProcessBtn) {
         if (processing) {
             m_startProcessBtn->setText(tr("取消处理"));
-            m_startProcessBtn->setIcon(QIcon());
+            m_startProcessBtn->setIcon(toolbarIcon(
+                UiAssets::Glyph::Stop, StyleTokens::Colors::kTextPrimary));
             m_startProcessBtn->setToolTip(tr("取消当前处理任务"));
             m_startProcessBtn->setAccessibleName(tr("取消处理"));
             setButtonVariant(m_startProcessBtn,
                              StyleTokens::Properties::kSecondaryButton);
-            if (m_processGlow) {
-                QColor active = StyleTokens::Colors::fromHex(
-                    StyleTokens::Colors::kOk);
-                active.setAlpha(72);
-                m_processGlow->setColor(active);
-            }
         } else {
             m_startProcessBtn->setText(tr("开始处理"));
             m_startProcessBtn->setIcon(toolbarIcon(
-                UiAssets::Glyph::Play, StyleTokens::Colors::kActionText,
-                StyleTokens::Colors::kActionText));
+                UiAssets::Glyph::Play, StyleTokens::Colors::kActionText));
             m_startProcessBtn->setToolTip(tr("使用当前参数开始处理"));
             m_startProcessBtn->setAccessibleName(tr("开始处理"));
             setButtonVariant(m_startProcessBtn,
                              StyleTokens::Properties::kPrimary);
-            if (m_processGlow) {
-                QColor idle = StyleTokens::Colors::fromHex(
-                    StyleTokens::Colors::kAccent);
-                idle.setAlpha(80);
-                m_processGlow->setColor(idle);
-            }
         }
     }
     updateButtonStates();
@@ -291,9 +277,7 @@ void Toolbar::updateButtonStates() {
     if (m_startProcessBtn) {
         // During processing this remains enabled and emits the same signal;
         // MainWindow owns cancellation and task lifetime.
-        const bool enabled = m_processing || m_canProcess;
-        m_startProcessBtn->setEnabled(enabled);
-        if (m_processGlow) m_processGlow->setEnabled(enabled);
+        m_startProcessBtn->setEnabled(m_processing || m_canProcess);
     }
     if (m_exportResultBtn) {
         m_exportResultBtn->setEnabled(m_canExport && !m_processing);
@@ -305,16 +289,6 @@ void Toolbar::updateButtonStates() {
         m_clearProjectAction->setEnabled(!m_processing);
     }
     if (m_settingsAction) m_settingsAction->setEnabled(!m_processing);
-}
-
-void Toolbar::showOverflowMenu() {
-    if (!m_overflowMenu || !m_overflowBtn) return;
-
-    const QSize menuSize = m_overflowMenu->sizeHint();
-    const QPoint anchor = m_overflowBtn->mapToGlobal(
-        QPoint(m_overflowBtn->width() - menuSize.width(),
-               m_overflowBtn->height()));
-    m_overflowMenu->popup(anchor);
 }
 
 void Toolbar::setButtonVariant(QPushButton* button, const char* variant) {

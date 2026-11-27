@@ -1,7 +1,7 @@
 #include "UiAssets.h"
+#include "StyleTokens.h"
 
 #include <QImage>
-#include <QLinearGradient>
 #include <QPainter>
 #include <QPainterPath>
 #include <QPen>
@@ -261,16 +261,24 @@ void paintGlyph(QPainter& painter, UiAssets::Glyph glyph,
             painter.drawLine(QPointF(8.0, 5.0), QPointF(15.0, 12.0));
             painter.drawLine(QPointF(15.0, 12.0), QPointF(8.0, 19.0));
             break;
+        case UiAssets::Glyph::More:
+            painter.setPen(Qt::NoPen);
+            painter.setBrush(color);
+            for (qreal x : {5.0, 12.0, 19.0}) {
+                painter.drawEllipse(QPointF(x, 12.0), 1.5, 1.5);
+            }
+            break;
+        case UiAssets::Glyph::Stop:
+            painter.setPen(Qt::NoPen);
+            painter.setBrush(color);
+            painter.drawRoundedRect(QRectF(6.0, 6.0, 12.0, 12.0), 1.4, 1.4);
+            break;
     }
 }
 
-} // namespace
-
-QIcon UiAssets::icon(Glyph glyph, const QColor& color, int logicalSize) {
-    QIcon result;
-    // Supplying only a 2x pixmap makes Qt's non-native file dialog render the
-    // glyph at half size on 1x/offscreen surfaces. Register both density
-    // variants so every QToolButton receives the requested logical size.
+void addGlyphPixmaps(QIcon& result, UiAssets::Glyph glyph, const QColor& color,
+                     int logicalSize, QIcon::Mode mode) {
+    // Register both densities; a single 2x pixmap can appear half-size at 1x.
     for (const qreal scale : {1.0, kDeviceScale}) {
         const int pixels = qMax(1, qRound(logicalSize * scale));
         QImage image(pixels, pixels, QImage::Format_ARGB32_Premultiplied);
@@ -284,8 +292,23 @@ QIcon UiAssets::icon(Glyph glyph, const QColor& color, int logicalSize) {
 
         QPixmap pixmap = QPixmap::fromImage(image);
         pixmap.setDevicePixelRatio(scale);
-        result.addPixmap(pixmap);
+        result.addPixmap(pixmap, mode);
     }
+}
+
+} // namespace
+
+QIcon UiAssets::icon(Glyph glyph, const QColor& color, int logicalSize) {
+    QIcon result;
+    addGlyphPixmaps(result, glyph, color, logicalSize, QIcon::Normal);
+    return result;
+}
+
+QIcon UiAssets::controlIcon(Glyph glyph, const QColor& ink, int logicalSize) {
+    QIcon result = icon(glyph, ink, logicalSize);
+    addGlyphPixmaps(result, glyph,
+                     StyleTokens::Colors::fromHex(StyleTokens::Colors::kTextDisabled),
+                     logicalSize, QIcon::Disabled);
     return result;
 }
 
@@ -308,23 +331,19 @@ QPixmap UiAssets::logoMark(int logicalSize) {
     painter.setRenderHint(QPainter::Antialiasing, true);
     painter.scale(pixels / 32.0, pixels / 32.0);
 
-    QLinearGradient plate(0.0, 0.0, 0.0, 32.0);
-    plate.setColorAt(0.0, QColor("#292D2E"));
-    plate.setColorAt(1.0, QColor("#151819"));
-    painter.setPen(QPen(QColor("#414849"), 1.0));
-    painter.setBrush(plate);
+    using namespace StyleTokens::Colors;
+    painter.setPen(QPen(fromHex(kLineStrong), 1.0));
+    painter.setBrush(fromHex(kBackgroundBase));
     painter.drawRoundedRect(QRectF(2.5, 2.5, 27.0, 27.0), 6.0, 6.0);
 
-    // Offset registration frames describe alignment and stacking. The open
-    // amber frame and cool registration point form the Nebulens mark
-    // without relying on a camera, magic wand or decorative star icon.
+    // The fallback keeps the same three offset registration frames.
     painter.setBrush(Qt::NoBrush);
-    painter.setPen(iconPen(QColor("#59605F"), 1.2));
+    painter.setPen(iconPen(fromHex(kLineSubtle), 1.2));
     painter.drawRoundedRect(QRectF(10.0, 9.0, 14.0, 14.0), 3.0, 3.0);
-    painter.setPen(iconPen(QColor("#777A74"), 1.2));
+    painter.setPen(iconPen(fromHex(kLineStrong), 1.2));
     painter.drawRoundedRect(QRectF(8.0, 7.0, 14.0, 14.0), 3.0, 3.0);
 
-    painter.setPen(iconPen(QColor("#D5AA67"), 1.8));
+    painter.setPen(iconPen(fromHex(kAccent), 1.8));
     QPainterPath front;
     front.moveTo(18.5, 5.5);
     front.lineTo(6.0, 5.5);
@@ -334,10 +353,8 @@ QPixmap UiAssets::logoMark(int logicalSize) {
     front.lineTo(18.5, 21.0);
     painter.drawPath(front);
 
-    painter.setPen(QPen(QColor(111, 168, 163, 80), 4.5));
-    painter.drawPoint(QPointF(14.0, 13.5));
     painter.setPen(Qt::NoPen);
-    painter.setBrush(QColor("#78A8A2"));
+    painter.setBrush(fromHex(kOk));
     painter.drawEllipse(QPointF(14.0, 13.5), 2.2, 2.2);
     painter.end();
 

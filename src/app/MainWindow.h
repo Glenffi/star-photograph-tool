@@ -83,7 +83,7 @@ private:
     void selectProduct(ProcessingScene scene);
     void adaptStillScene();
     void resetProject();
-    QString refreshPrintOrderResult();
+    void refreshPrintOrderResult();
     void refreshExportAction();
     void setTaskFeedback(bool busy, int progress, const QString& message);
     bool matchesDeliverySnapshot(const DeliverySnapshot& snapshot) const;
@@ -128,9 +128,7 @@ private slots:
     void loadRecentResultPreview(const QString& path);
 
 private:
-    QStackedWidget* m_workspacePages = nullptr;
     PrintOrderPanel* m_printOrder = nullptr;
-    QWidget* m_darkroom = nullptr;
     QAction* m_startAction = nullptr;
     QAction* m_exportAction = nullptr;
     QAction* m_openOrderAction = nullptr;
@@ -182,6 +180,7 @@ private:
     std::vector<uint16_t> m_cachedStackedData;
     QImage m_cachedBeforePreview;
     QImage m_sourceProof;
+    bool m_sourcePreviewFailed = false;
     QImage m_formalProof;
     QImage m_quickProof;
     uint16_t m_cachedBeforeBlackPoint = 0;

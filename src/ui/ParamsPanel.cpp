@@ -22,14 +22,14 @@
 #include <QListWidget>
 #include <QListWidgetItem>
 #include <QFileInfo>
-#include <QGraphicsOpacityEffect>
 #include <QDir>
 #include <QDateTime>
 #include <QSettings>
 #include <QMessageBox>
-#include <QPropertyAnimation>
+#include <QKeyEvent>
+#include <QMouseEvent>
+#include <QPainter>
 #include <QInputDialog>
-#include <QLocale>
 #include <QSet>
 #include <QTabWidget>
 #include <QTabBar>
@@ -44,8 +44,121 @@
 #include <cmath>
 
 namespace {
-int formLabelWidth() {
-    return QLocale().language() == QLocale::English ? 112 : 88;
+
+class PaperSection final : public QGroupBox {
+public:
+    PaperSection(const QString& title, bool expanded, QWidget* parent)
+        : QGroupBox(title, parent) {
+        setFlat(true);
+        setCheckable(true);
+        setFocusPolicy(Qt::StrongFocus);
+        setMouseTracking(true);
+        setProperty("inspectorSection", true);
+        setProperty("collapsible", true);
+
+        auto* outer = new QVBoxLayout(this);
+        outer->setContentsMargins(0, kHeadingHeight, 0, StyleTokens::Spacing::kMicro);
+        auto* body = new QWidget(this);
+        m_content = new QVBoxLayout(body);
+        m_content->setContentsMargins(0, 0, 0, 0);
+        m_content->setSpacing(StyleTokens::Spacing::kMicro);
+        outer->addWidget(body);
+
+        connect(this, &QGroupBox::toggled, body, &QWidget::setVisible);
+        setChecked(expanded);
+        body->setVisible(expanded);
+    }
+
+    QVBoxLayout* contentLayout() const { return m_content; }
+
+protected:
+    void paintEvent(QPaintEvent*) override {
+        using namespace StyleTokens::Colors;
+        const QRect heading(0, 0, width(), kHeadingHeight);
+        QPainter painter(this);
+        painter.setRenderHint(QPainter::Antialiasing);
+        QFont headingFont = font();
+        QString serif = StyleTokens::Typography::serifFontFamily();
+        serif.remove(QLatin1Char('"'));
+        headingFont.setFamily(serif);
+        headingFont.setPixelSize(StyleTokens::Typography::kTitleSize);
+        headingFont.setWeight(QFont::DemiBold);
+        painter.setFont(headingFont);
+
+        const QColor ink = fromHex(isEnabled() ? kAccent : kTextDisabled);
+        constexpr int kTextInset = 18;
+        const int textWidth = std::min(std::max(0, width() - kTextInset - 8),
+                                       QFontMetrics(headingFont).horizontalAdvance(title()) + 2);
+        const qreal y = heading.center().y() + 0.5;
+        painter.setPen(QPen(fromHex(kLineSubtle), 1));
+        const int lineStart = kTextInset + textWidth + StyleTokens::Spacing::kBase;
+        if (lineStart < width()) painter.drawLine(QPointF(lineStart, y), QPointF(width(), y));
+
+        if (hasFocus()) {
+            painter.setPen(QPen(fromHex(kFocus), 1.5));
+            painter.setBrush(Qt::NoBrush);
+            painter.drawRoundedRect(QRectF(1, 3, kTextInset + textWidth + 4,
+                                           kHeadingHeight - 6), 3, 3);
+        }
+        painter.setPen(QPen(ink, 1.5, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+        if (isChecked()) {
+            const QPointF arrow[]{{3, y - 2}, {7, y + 2}, {11, y - 2}};
+            painter.drawPolyline(arrow, 3);
+        } else {
+            const QPointF arrow[]{{5, y - 4}, {9, y}, {5, y + 4}};
+            painter.drawPolyline(arrow, 3);
+        }
+        const QRect titleBounds(kTextInset, 0, textWidth, heading.height());
+        painter.drawText(titleBounds, Qt::AlignLeft | Qt::AlignVCenter,
+                         QFontMetrics(headingFont).elidedText(title(), Qt::ElideRight, textWidth));
+    }
+
+    void mousePressEvent(QMouseEvent* event) override {
+        m_headingPressed = event->button() == Qt::LeftButton &&
+            headerContains(event->position());
+        if (m_headingPressed) event->accept();
+        else QWidget::mousePressEvent(event);
+    }
+
+    void mouseReleaseEvent(QMouseEvent* event) override {
+        const bool activate = m_headingPressed && event->button() == Qt::LeftButton &&
+            headerContains(event->position());
+        m_headingPressed = false;
+        if (activate) {
+            setChecked(!isChecked());
+            event->accept();
+        } else {
+            QWidget::mouseReleaseEvent(event);
+        }
+    }
+
+    void mouseMoveEvent(QMouseEvent* event) override {
+        if (headerContains(event->position())) setCursor(Qt::PointingHandCursor);
+        else unsetCursor();
+        QWidget::mouseMoveEvent(event);
+    }
+
+    void keyPressEvent(QKeyEvent* event) override {
+        if (event->key() == Qt::Key_Return || event->key() == Qt::Key_Enter) {
+            if (!event->isAutoRepeat()) setChecked(!isChecked());
+            event->accept();
+            return;
+        }
+        QGroupBox::keyPressEvent(event);
+    }
+
+private:
+    bool headerContains(const QPointF& position) const {
+        return QRectF(0, 0, width(), kHeadingHeight).contains(position);
+    }
+
+    static constexpr int kHeadingHeight = 30;
+    QVBoxLayout* m_content;
+    bool m_headingPressed = false;
+};
+
+QVBoxLayout* sectionLayout(QGroupBox* group) {
+    return static_cast<PaperSection*>(group)->contentLayout();
 }
 
 void setRole(QWidget* widget, const char* role) {
@@ -54,7 +167,7 @@ void setRole(QWidget* widget, const char* role) {
     const QByteArray semanticRole(role);
     if (semanticRole == "panelTitle") {
         widget->setProperty(StyleTokens::Properties::kTextRole,
-                            StyleTokens::Properties::kTitle);
+                            StyleTokens::Properties::kSection);
     } else if (semanticRole == "value") {
         widget->setProperty(StyleTokens::Properties::kTextRole,
                             StyleTokens::Properties::kMono);
@@ -66,6 +179,33 @@ void setRole(QWidget* widget, const char* role) {
     // Preserve semantic hooks for status updates and future component-level
     // styling without reintroducing a page-local stylesheet.
     widget->setProperty("inspectorRole", semanticRole);
+}
+
+void setupFormLabel(QLabel* label, QWidget* control, bool inlineColumn = true) {
+    if (inlineColumn) label->setFixedWidth(StyleTokens::Controls::kFormLabelWidth);
+    label->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+    label->setWordWrap(true);
+    label->setBuddy(control);
+    setRole(label, "muted");
+    if (control->accessibleName().isEmpty()) control->setAccessibleName(label->text());
+    if (auto* combo = qobject_cast<QComboBox*>(control)) {
+        combo->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
+        combo->setMinimumContentsLength(10);
+    }
+}
+
+void addSliderRow(QVBoxLayout* section, QLabel* name, QSlider* slider,
+                  QLabel* value) {
+    auto* row = new QHBoxLayout;
+    row->setSpacing(StyleTokens::Controls::kFormRowGap);
+    setupFormLabel(name, slider);
+    value->setFixedWidth(StyleTokens::Controls::kSliderValueWidth);
+    value->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+    setRole(value, "value");
+    row->addWidget(name);
+    row->addWidget(slider, 1);
+    row->addWidget(value);
+    section->addLayout(row);
 }
 
 void setButtonVariant(QPushButton* button, const char* variant) {
@@ -372,38 +512,34 @@ void ParamsPanel::setupUI() {
 
     auto* titleBar = new QWidget(this);
     titleBar->setObjectName(QStringLiteral("paramsTitleBar"));
-    titleBar->setFixedHeight(74);
-    auto* titleLayout = new QVBoxLayout(titleBar);
+    auto* titleLayout = new QHBoxLayout(titleBar);
     titleLayout->setContentsMargins(
-        StyleTokens::Spacing::kPanelPadding, 12,
-        StyleTokens::Spacing::kPanelPadding, 10);
-    titleLayout->setSpacing(3);
+        StyleTokens::Spacing::kPanelPadding, StyleTokens::Spacing::kBase,
+        StyleTokens::Spacing::kPanelPadding, StyleTokens::Spacing::kMicro);
+    titleLayout->setSpacing(StyleTokens::Spacing::kControlGap);
     m_stageKicker = new QLabel(
         QCoreApplication::translate("Nebulens", "05 / 调整"), titleBar);
     m_stageKicker->setObjectName(QStringLiteral("inspectorKicker"));
-    m_stageKicker->setStyleSheet(QStringLiteral("font-size: %1px; letter-spacing: 0px;")
-        .arg(StyleTokens::Typography::kCaptionSize));
-    titleLayout->addWidget(m_stageKicker);
     m_titleLabel = new QLabel(QCoreApplication::translate("Nebulens", "成片调整"), titleBar);
     setRole(m_titleLabel, "panelTitle");
     m_titleLabel->setObjectName(QStringLiteral("inspectorTitle"));
-    titleLayout->addWidget(m_titleLabel);
+    m_titleLabel->setWordWrap(true);
+    titleLayout->addWidget(m_titleLabel, 1);
+    titleLayout->addWidget(m_stageKicker);
     layout->addWidget(titleBar);
 
     m_presetBar = new QWidget(this);
     m_presetBar->setObjectName("paramsPresetBar");
-    m_presetBar->setFixedHeight(44);
     auto* presetRow = new QHBoxLayout(m_presetBar);
     presetRow->setContentsMargins(StyleTokens::Spacing::kPanelPadding,
-                                  StyleTokens::Spacing::kBase,
+                                  0,
                                   StyleTokens::Spacing::kPanelPadding,
-                                  StyleTokens::Spacing::kBase);
-    presetRow->setSpacing(StyleTokens::Spacing::kControlGap);
+                                  StyleTokens::Spacing::kMicro);
+    presetRow->setSpacing(StyleTokens::Controls::kFormRowGap);
     auto* presetLabel = new QLabel(QCoreApplication::translate("Nebulens", "预设"), m_presetBar);
-    presetLabel->setFixedWidth(44);
-    setRole(presetLabel, "muted");
-    presetRow->addWidget(presetLabel);
     m_presetCombo = new QComboBox(m_presetBar);
+    setupFormLabel(presetLabel, m_presetCombo);
+    presetRow->addWidget(presetLabel);
     m_presetCombo->addItem(QCoreApplication::translate("Nebulens", "自定义"));
     for (const Preset& preset : PresetManager::builtinPresets()) {
         m_presetCombo->addItem(preset.name);
@@ -428,6 +564,7 @@ void ParamsPanel::setupUI() {
         pageLayout->setContentsMargins(0, 0, 0, 0);
         auto* scroll = new QScrollArea(page);
         scroll->setObjectName("paramsScrollArea");
+        scroll->setFrameShape(QFrame::NoFrame);
         scroll->setWidgetResizable(true);
         scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
         auto* content = new QWidget(scroll);
@@ -437,7 +574,7 @@ void ParamsPanel::setupUI() {
         auto* contentLayout = new QVBoxLayout(content);
         contentLayout->setContentsMargins(
             StyleTokens::Spacing::kPanelPadding,
-            StyleTokens::Spacing::kBase,
+            0,
             StyleTokens::Spacing::kPanelPadding,
             StyleTokens::Spacing::kSectionGap);
         contentLayout->setSpacing(0);
@@ -454,7 +591,7 @@ void ParamsPanel::setupUI() {
 
     m_assetsGroup = createCollapsibleGroup(
         QCoreApplication::translate("Nebulens", "素材与序列"), true);
-    auto* assetsLayout = new QVBoxLayout(m_assetsGroup);
+    auto* assetsLayout = sectionLayout(m_assetsGroup);
     auto* assetsSummary = new QLabel(
         QCoreApplication::translate("Nebulens",
             "底部胶片带管理 Light 素材。点击缩略图查看源文件，"
@@ -488,7 +625,7 @@ void ParamsPanel::setupUI() {
 
     m_lightCalibrationGroup = createCollapsibleGroup(
         QCoreApplication::translate("Nebulens", "镜头与传感器"), true);
-    auto* lightCalibrationLayout = new QVBoxLayout(m_lightCalibrationGroup);
+    auto* lightCalibrationLayout = sectionLayout(m_lightCalibrationGroup);
     auto* linearNote = new QLabel(
         QCoreApplication::translate("Nebulens",
             "当前场景使用 LibRaw 线性 16-bit 解码，并在处理阶段完成"
@@ -507,7 +644,8 @@ void ParamsPanel::setupUI() {
         QCoreApplication::translate("Nebulens", "校准帧"), true);
     m_calibrationGroup->setObjectName(QStringLiteral("calibrationGroup"));
     m_calibrationGroup->setVisible(false);
-    auto* calibrationLayout = new QVBoxLayout(m_calibrationGroup);
+    auto* calibrationLayout = sectionLayout(m_calibrationGroup);
+    calibrationLayout->setSpacing(StyleTokens::Spacing::kBase);
 
     m_calibrationStatus = new QLabel(m_calibrationGroup);
     m_calibrationStatus->setObjectName(QStringLiteral("calibrationStatus"));
@@ -671,20 +809,15 @@ void ParamsPanel::setupUI() {
 
     // 对齐组（默认展开）
     m_alignGroup = createCollapsibleGroup(QCoreApplication::translate("Nebulens", "对齐"), true);
-    auto* alignLayout = new QVBoxLayout(m_alignGroup);
-    alignLayout->setSpacing(8);
+    auto* alignLayout = sectionLayout(m_alignGroup);
 
     auto* refRow = new QHBoxLayout();
+    refRow->setSpacing(StyleTokens::Controls::kFormRowGap);
     auto* refLabel = new QLabel(QCoreApplication::translate("Nebulens", "参考帧:"), m_alignGroup);
-    refLabel->setFixedWidth(formLabelWidth());
-    refLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
-    setRole(refLabel, "muted");
     refRow->addWidget(refLabel);
     m_refFrame = new QComboBox(m_alignGroup);
     m_refFrame->setObjectName(QStringLiteral("referenceFrameCombo"));
-    m_refFrame->setAccessibleName(refLabel->text());
-    m_refFrame->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
-    m_refFrame->setMinimumContentsLength(10);
+    setupFormLabel(refLabel, m_refFrame);
     updateRefFrameList({});
     connect(m_refFrame, &QComboBox::activated, this, [this](int index) {
         const QString choice = m_refFrame->itemData(index).toString();
@@ -700,16 +833,14 @@ void ParamsPanel::setupUI() {
 
     // 堆栈组（默认展开）
     m_stackGroup = createCollapsibleGroup(QCoreApplication::translate("Nebulens", "堆栈与地景"), true);
-    auto* stackLayout = new QVBoxLayout(m_stackGroup);
-    stackLayout->setSpacing(8);
+    auto* stackLayout = sectionLayout(m_stackGroup);
 
     auto* algoRow = new QHBoxLayout();
+    algoRow->setSpacing(StyleTokens::Controls::kFormRowGap);
     auto* algoLabel = new QLabel(QCoreApplication::translate("Nebulens", "算法:"), m_stackGroup);
-    algoLabel->setFixedWidth(formLabelWidth());
-    algoLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
-    setRole(algoLabel, "muted");
     algoRow->addWidget(algoLabel);
     m_stackAlgorithm = new QComboBox(m_stackGroup);
+    setupFormLabel(algoLabel, m_stackAlgorithm);
     m_stackAlgorithm->addItems({QCoreApplication::translate("Nebulens", "中位数 Median"),
                                 QCoreApplication::translate("Nebulens", "平均值 Mean"),
                                 "Kappa-Sigma", "Winsorized"});
@@ -735,29 +866,20 @@ void ParamsPanel::setupUI() {
     m_stackMethodDescription->setMinimumHeight(58);
     stackLayout->addWidget(m_stackMethodDescription);
 
-    auto* kappaRow = new QHBoxLayout();
     m_kappaNameLabel = new QLabel(QCoreApplication::translate("Nebulens", "κ值:"), m_stackGroup);
-    m_kappaNameLabel->setFixedWidth(formLabelWidth());
-    m_kappaNameLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
-    setRole(m_kappaNameLabel, "muted");
     m_kappaNameLabel->setToolTip(QCoreApplication::translate("Nebulens", "κ (kappa)：异常值剔除阈值系数\n"
         "• 值越小，剔除越严格，可能误删微弱星点\n"
         "• 值越大，保留越多，可能残留飞机轨迹\n"
         "• 推荐值：2.0~3.0，深空常用 2.5"));
-    kappaRow->addWidget(m_kappaNameLabel);
     m_kappaSlider = createSlider(10, 50, 25);
-    m_kappaSlider->setMinimumWidth(96);
     m_kappaSlider->setToolTip(QCoreApplication::translate("Nebulens", "拖动调整 κ 值，值越小剔除越严格"));
     connect(m_kappaSlider, &QSlider::valueChanged, this, [this](int v) {
         m_kappaLabel->setText(QString::number(v / 10.0, 'f', 1));
+        onSliderValueChanged(v);
     });
     connect(m_kappaSlider, &QSlider::sliderReleased, this, &ParamsPanel::onSliderReleased);
-    kappaRow->addWidget(m_kappaSlider, 1);
     m_kappaLabel = new QLabel("2.5", m_stackGroup);
-    setRole(m_kappaLabel, "value");
-    m_kappaLabel->setMinimumWidth(24);
-    kappaRow->addWidget(m_kappaLabel);
-    stackLayout->addLayout(kappaRow);
+    addSliderRow(stackLayout, m_kappaNameLabel, m_kappaSlider, m_kappaLabel);
     updateStackMethodDescription();
 
     m_autoRejectQualityCheck = new CompactToggle(
@@ -791,9 +913,11 @@ void ParamsPanel::setupUI() {
 
     // 模式选择
     auto* modeRow = new QHBoxLayout();
+    modeRow->setSpacing(StyleTokens::Controls::kFormRowGap);
     m_skyGroundMode = new QComboBox(m_stackGroup);
     m_skyGroundMode->setObjectName(QStringLiteral("skyGroundModeCombo"));
-    m_skyGroundMode->addItems({"自动检测", "用户蒙版"});
+    m_skyGroundMode->addItem(QCoreApplication::translate("Nebulens", "自动"));
+    m_skyGroundMode->addItem(QCoreApplication::translate("Nebulens", "蒙版"));
     m_skyGroundMode->setEnabled(false);
     connect(m_skyGroundMode, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this](int index) {
         Q_UNUSED(index)
@@ -802,9 +926,7 @@ void ParamsPanel::setupUI() {
         emitParamsChanged();
     });
     m_skyGroundModeLabel = new QLabel(QCoreApplication::translate("Nebulens", "模式:"), m_stackGroup);
-    m_skyGroundModeLabel->setFixedWidth(formLabelWidth());
-    m_skyGroundModeLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
-    setRole(m_skyGroundModeLabel, "muted");
+    setupFormLabel(m_skyGroundModeLabel, m_skyGroundMode);
     modeRow->addWidget(m_skyGroundModeLabel);
     modeRow->addWidget(m_skyGroundMode, 1);
     stackLayout->addLayout(modeRow);
@@ -838,36 +960,29 @@ void ParamsPanel::setupUI() {
 
     m_maskPathLabel = new QLabel(m_stackGroup);
     m_maskPathLabel->setTextFormat(Qt::PlainText);
+    m_maskPathLabel->setWordWrap(true);
+    m_maskPathLabel->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
     m_maskPathLabel->setVisible(false);
     setRole(m_maskPathLabel, "muted");
     stackLayout->addWidget(m_maskPathLabel);
 
     // 羽化宽度
-    auto* featherRow = new QHBoxLayout();
     m_featherSlider = createSlider(0, 50, 20);
     m_featherSlider->setEnabled(false);
-    m_featherSlider->setMinimumWidth(96);
     m_featherLabel = new QLabel("20 px", m_stackGroup);
-    setRole(m_featherLabel, "value");
-    m_featherLabel->setMinimumWidth(38);
     connect(m_featherSlider, &QSlider::valueChanged, this, [this](int value) {
         m_featherLabel->setText(QString("%1 px").arg(value));
         onSliderValueChanged(value);
     });
     connect(m_featherSlider, &QSlider::sliderReleased, this, &ParamsPanel::onSliderReleased);
     m_featherNameLabel = new QLabel(QCoreApplication::translate("Nebulens", "羽化:"), m_stackGroup);
-    m_featherNameLabel->setFixedWidth(formLabelWidth());
-    m_featherNameLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
-    setRole(m_featherNameLabel, "muted");
-    featherRow->addWidget(m_featherNameLabel);
-    featherRow->addWidget(m_featherSlider, 1);
-    featherRow->addWidget(m_featherLabel);
-    stackLayout->addLayout(featherRow);
+    addSliderRow(stackLayout, m_featherNameLabel, m_featherSlider, m_featherLabel);
 
     // Ground frames are deliberately not aligned to the sky. Average is the
     // stable default; the other modes are useful when local motion or absolute
     // sharpness matters more than foreground noise.
-    auto* groundMethodRow = new QHBoxLayout();
+    auto* groundMethodRow = new QVBoxLayout();
+    groundMethodRow->setSpacing(StyleTokens::Spacing::kMicro);
     m_groundStackMethod = new QComboBox(m_stackGroup);
     m_groundStackMethod->addItem(QCoreApplication::translate("Nebulens", "平均降噪（推荐）"), "average");
     m_groundStackMethod->addItem(QCoreApplication::translate("Nebulens", "参考帧（单帧）"), "reference");
@@ -880,22 +995,16 @@ void ParamsPanel::setupUI() {
             this, &ParamsPanel::onComboChanged);
     m_groundStackNameLabel = new QLabel(
         QCoreApplication::translate("Nebulens", "地景合成:"), m_stackGroup);
-    m_groundStackNameLabel->setFixedWidth(formLabelWidth());
-    m_groundStackNameLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
-    setRole(m_groundStackNameLabel, "muted");
+    setupFormLabel(m_groundStackNameLabel, m_groundStackMethod, false);
     groundMethodRow->addWidget(m_groundStackNameLabel);
     groundMethodRow->addWidget(m_groundStackMethod, 1);
     stackLayout->addLayout(groundMethodRow);
 
-    auto* groundDetailRow = new QHBoxLayout();
     m_groundDetailSlider = createSlider(0, 70, 40);
     m_groundDetailSlider->setEnabled(false);
-    m_groundDetailSlider->setMinimumWidth(96);
     m_groundDetailSlider->setToolTip(QCoreApplication::translate("Nebulens",
         "恢复山体和建筑的纹理与中尺度清晰度；值过高会同时增强地景噪声"));
     m_groundDetailLabel = new QLabel("40%", m_stackGroup);
-    setRole(m_groundDetailLabel, "value");
-    m_groundDetailLabel->setMinimumWidth(32);
     connect(m_groundDetailSlider, &QSlider::valueChanged, this,
             [this](int value) {
                 m_groundDetailLabel->setText(QString::number(value) + "%");
@@ -905,21 +1014,14 @@ void ParamsPanel::setupUI() {
             this, &ParamsPanel::onSliderReleased);
     m_groundDetailNameLabel = new QLabel(
         QCoreApplication::translate("Nebulens", "地景细节:"), m_stackGroup);
-    m_groundDetailNameLabel->setFixedWidth(formLabelWidth());
-    m_groundDetailNameLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
-    setRole(m_groundDetailNameLabel, "muted");
-    groundDetailRow->addWidget(m_groundDetailNameLabel);
-    groundDetailRow->addWidget(m_groundDetailSlider, 1);
-    groundDetailRow->addWidget(m_groundDetailLabel);
-    stackLayout->addLayout(groundDetailRow);
+    addSliderRow(stackLayout, m_groundDetailNameLabel, m_groundDetailSlider, m_groundDetailLabel);
 
     stackPageLayout->addWidget(m_stackGroup);
 
     m_starTrailGroup = createCollapsibleGroup(
         QCoreApplication::translate("Nebulens", "星轨合成"), true);
     m_starTrailGroup->setVisible(false);
-    auto* starTrailLayout = new QVBoxLayout(m_starTrailGroup);
-    starTrailLayout->setSpacing(10);
+    auto* starTrailLayout = sectionLayout(m_starTrailGroup);
 
     auto* starTrailNote = new QLabel(
         QCoreApplication::translate("Nebulens",
@@ -929,19 +1031,12 @@ void ParamsPanel::setupUI() {
     setRole(starTrailNote, "noteWarm");
     starTrailLayout->addWidget(starTrailNote);
 
-    auto* cometRow = new QHBoxLayout();
     auto* cometName = new QLabel(
         QCoreApplication::translate("Nebulens", "彗星拖尾:"), m_starTrailGroup);
-    cometName->setFixedWidth(formLabelWidth());
-    cometName->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
-    setRole(cometName, "muted");
     m_starTrailCometSlider = createSlider(0, 100, 0);
-    m_starTrailCometSlider->setMinimumWidth(96);
     m_starTrailCometSlider->setToolTip(QCoreApplication::translate("Nebulens",
         "0% 为每帧等亮的连续星轨；提高后，较早帧逐渐变暗，形成一端明、一端暗的彗星效果"));
     m_starTrailCometLabel = new QLabel("0%", m_starTrailGroup);
-    setRole(m_starTrailCometLabel, "value");
-    m_starTrailCometLabel->setMinimumWidth(32);
     connect(m_starTrailCometSlider, &QSlider::valueChanged, this,
             [this](int value) {
                 m_starTrailCometLabel->setText(QString::number(value) + "%");
@@ -952,10 +1047,7 @@ void ParamsPanel::setupUI() {
             });
     connect(m_starTrailCometSlider, &QSlider::sliderReleased,
             this, &ParamsPanel::onSliderReleased);
-    cometRow->addWidget(cometName);
-    cometRow->addWidget(m_starTrailCometSlider, 1);
-    cometRow->addWidget(m_starTrailCometLabel);
-    starTrailLayout->addLayout(cometRow);
+    addSliderRow(starTrailLayout, cometName, m_starTrailCometSlider, m_starTrailCometLabel);
 
     m_starTrailReverseCheck = new CompactToggle(
         QCoreApplication::translate("Nebulens", "反转彗星方向"), m_starTrailGroup);
@@ -979,16 +1071,14 @@ void ParamsPanel::setupUI() {
     m_timelapseGroup = createCollapsibleGroup(
         QCoreApplication::translate("Nebulens", "滑动窗口降噪"), true);
     m_timelapseGroup->setVisible(false);
-    auto* timelapseLayout = new QVBoxLayout(m_timelapseGroup);
-    timelapseLayout->setSpacing(10);
+    auto* timelapseLayout = sectionLayout(m_timelapseGroup);
 
     auto* windowRow = new QHBoxLayout();
+    windowRow->setSpacing(StyleTokens::Controls::kFormRowGap);
     auto* windowLabel = new QLabel(
         QCoreApplication::translate("Nebulens", "邻近窗口:"), m_timelapseGroup);
-    windowLabel->setFixedWidth(formLabelWidth());
-    windowLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
-    setRole(windowLabel, "muted");
     m_timelapseWindow = new QComboBox(m_timelapseGroup);
+    setupFormLabel(windowLabel, m_timelapseWindow);
     m_timelapseWindow->addItem(QCoreApplication::translate("Nebulens", "3 帧（更快）"), 3);
     m_timelapseWindow->addItem(QCoreApplication::translate("Nebulens", "5 帧（更干净）"), 5);
     m_timelapseWindow->setCurrentIndex(1);
@@ -1001,19 +1091,12 @@ void ParamsPanel::setupUI() {
     windowRow->addWidget(m_timelapseWindow, 1);
     timelapseLayout->addLayout(windowRow);
 
-    auto* temporalStrengthRow = new QHBoxLayout();
     auto* temporalStrengthName = new QLabel(
         QCoreApplication::translate("Nebulens", "时域强度:"), m_timelapseGroup);
-    temporalStrengthName->setFixedWidth(formLabelWidth());
-    temporalStrengthName->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
-    setRole(temporalStrengthName, "muted");
-    temporalStrengthRow->addWidget(temporalStrengthName);
     m_timelapseStrengthSlider = createSlider(0, 100, 80);
     m_timelapseStrengthSlider->setToolTip(QCoreApplication::translate("Nebulens",
         "控制邻近帧对当前帧的贡献；值越高降噪越强，动态云层应适当降低"));
     m_timelapseStrengthLabel = new QLabel("80%", m_timelapseGroup);
-    setRole(m_timelapseStrengthLabel, "value");
-    m_timelapseStrengthLabel->setMinimumWidth(32);
     connect(m_timelapseStrengthSlider, &QSlider::valueChanged, this,
             [this](int value) {
                 m_timelapseStrengthLabel->setText(QString::number(value) + "%");
@@ -1021,23 +1104,15 @@ void ParamsPanel::setupUI() {
             });
     connect(m_timelapseStrengthSlider, &QSlider::sliderReleased,
             this, &ParamsPanel::onSliderReleased);
-    temporalStrengthRow->addWidget(m_timelapseStrengthSlider, 1);
-    temporalStrengthRow->addWidget(m_timelapseStrengthLabel);
-    timelapseLayout->addLayout(temporalStrengthRow);
+    addSliderRow(timelapseLayout, temporalStrengthName, m_timelapseStrengthSlider,
+                 m_timelapseStrengthLabel);
 
-    auto* motionProtectionRow = new QHBoxLayout();
     auto* motionProtectionName = new QLabel(
         QCoreApplication::translate("Nebulens", "动态内容保护:"), m_timelapseGroup);
-    motionProtectionName->setFixedWidth(formLabelWidth());
-    motionProtectionName->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
-    setRole(motionProtectionName, "muted");
-    motionProtectionRow->addWidget(motionProtectionName);
     m_timelapseMotionProtectionSlider = createSlider(0, 100, 75);
     m_timelapseMotionProtectionSlider->setToolTip(QCoreApplication::translate("Nebulens",
         "在云层、草木、灯光等变化区域降低邻帧贡献，并偏向保留目标帧；值越高保护越强"));
     m_timelapseMotionProtectionLabel = new QLabel("75%", m_timelapseGroup);
-    setRole(m_timelapseMotionProtectionLabel, "value");
-    m_timelapseMotionProtectionLabel->setMinimumWidth(32);
     connect(m_timelapseMotionProtectionSlider, &QSlider::valueChanged, this,
             [this](int value) {
                 m_timelapseMotionProtectionLabel->setText(
@@ -1046,9 +1121,8 @@ void ParamsPanel::setupUI() {
             });
     connect(m_timelapseMotionProtectionSlider, &QSlider::sliderReleased,
             this, &ParamsPanel::onSliderReleased);
-    motionProtectionRow->addWidget(m_timelapseMotionProtectionSlider, 1);
-    motionProtectionRow->addWidget(m_timelapseMotionProtectionLabel);
-    timelapseLayout->addLayout(motionProtectionRow);
+    addSliderRow(timelapseLayout, motionProtectionName, m_timelapseMotionProtectionSlider,
+                 m_timelapseMotionProtectionLabel);
 
     auto* motionProtectionNote = new QLabel(
         QCoreApplication::translate("Nebulens",
@@ -1079,36 +1153,25 @@ void ParamsPanel::setupUI() {
     // 基础调整与快速预览共用同一套参数和收尾处理管线。
     m_basicAdjustGroup = createCollapsibleGroup(
         QCoreApplication::translate("Nebulens", "基础调色"), true);
-    auto* basicAdjustLayout = new QVBoxLayout(m_basicAdjustGroup);
-    basicAdjustLayout->setSpacing(7);
+    auto* basicAdjustLayout = sectionLayout(m_basicAdjustGroup);
 
     auto addSectionLabel = [this, basicAdjustLayout](const QString& text) {
         auto* label = new QLabel(text, m_basicAdjustGroup);
         setRole(label, "muted");
-        label->setContentsMargins(0, 5, 0, 0);
+        label->setContentsMargins(0, StyleTokens::Spacing::kMicro, 0, 0);
         basicAdjustLayout->addWidget(label);
     };
     auto addAdjustmentRow = [this, basicAdjustLayout](
                                 const QString& name, int minimum, int maximum,
                                 QSlider*& slider, QLabel*& valueLabel,
                                 const QString& tooltip, bool exposure = false) {
-        auto* row = new QHBoxLayout();
-        row->setSpacing(8);
         auto* nameLabel = new QLabel(name, m_basicAdjustGroup);
-        nameLabel->setFixedWidth(formLabelWidth());
-        nameLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
-        setRole(nameLabel, "muted");
         nameLabel->setToolTip(tooltip);
-        row->addWidget(nameLabel);
         slider = createSlider(minimum, maximum, 0);
-        slider->setMinimumWidth(96);
         slider->setToolTip(tooltip);
         valueLabel = new QLabel(
             exposure ? exposureText(0) : signedAdjustmentText(0),
             m_basicAdjustGroup);
-        setRole(valueLabel, "value");
-        valueLabel->setMinimumWidth(exposure ? 48 : 30);
-        valueLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
         QLabel* const capturedLabel = valueLabel;
         connect(slider, &QSlider::valueChanged, this,
                 [this, capturedLabel, exposure](int value) {
@@ -1119,9 +1182,7 @@ void ParamsPanel::setupUI() {
                 });
         connect(slider, &QSlider::sliderReleased,
                 this, &ParamsPanel::onSliderReleased);
-        row->addWidget(slider, 1);
-        row->addWidget(valueLabel);
-        basicAdjustLayout->addLayout(row);
+        addSliderRow(basicAdjustLayout, nameLabel, slider, valueLabel);
     };
 
     addSectionLabel(QCoreApplication::translate("Nebulens", "白平衡"));
@@ -1136,6 +1197,8 @@ void ParamsPanel::setupUI() {
     addAdjustmentRow(QCoreApplication::translate("Nebulens", "曝光"), -50, 50,
                      m_exposureSlider, m_exposureLabel,
                      QCoreApplication::translate("Nebulens", "整体曝光补偿，范围 -5.0 EV 到 +5.0 EV"), true);
+    m_exposureSlider->setObjectName(QStringLiteral("advancedExposureSlider"));
+    m_exposureLabel->setObjectName(QStringLiteral("advancedExposureValue"));
     addAdjustmentRow(QCoreApplication::translate("Nebulens", "对比度"), -100, 100,
                      m_contrastSlider, m_contrastLabel,
                      QCoreApplication::translate("Nebulens", "围绕中间调压缩或扩展明暗层次"));
@@ -1168,32 +1231,27 @@ void ParamsPanel::setupUI() {
 
     // 自动优化组（默认展开）
     m_optimizeGroup = createCollapsibleGroup(QCoreApplication::translate("Nebulens", "降噪与增强"), true);
-    auto* optimizeLayout = new QVBoxLayout(m_optimizeGroup);
-    optimizeLayout->setSpacing(8);
+    auto* optimizeLayout = sectionLayout(m_optimizeGroup);
 
-    auto* noiseReductionRow = new QHBoxLayout();
     m_noiseReductionCheck = new CompactToggle(QCoreApplication::translate("Nebulens", "多尺度降噪"), m_optimizeGroup);
-    m_noiseReductionCheck->setMinimumWidth(106);
     m_noiseReductionCheck->setToolTip(QCoreApplication::translate("Nebulens",
         "在线性堆栈结果上抑制亮度和色彩噪声\n"
         "建议在去雾和曲线拉伸之前使用"));
     connect(m_noiseReductionCheck, &QCheckBox::toggled, this, &ParamsPanel::onCheckChanged);
-    noiseReductionRow->addWidget(m_noiseReductionCheck);
+    optimizeLayout->addWidget(m_noiseReductionCheck);
     m_noiseReductionSlider = createSlider(0, 70, 30);
     m_noiseReductionSlider->setEnabled(false);
-    m_noiseReductionSlider->setMinimumWidth(84);
     m_noiseReductionLabel = new QLabel("30%", m_optimizeGroup);
-    setRole(m_noiseReductionLabel, "value");
-    m_noiseReductionLabel->setMinimumWidth(32);
     m_noiseReductionSlider->setToolTip(QCoreApplication::translate("Nebulens", "降噪强度：0 为保留全部细节，70 为最强"));
     connect(m_noiseReductionSlider, &QSlider::valueChanged, this, [this](int value) {
         m_noiseReductionLabel->setText(QString("%1%").arg(value));
         onSliderValueChanged(value);
     });
     connect(m_noiseReductionSlider, &QSlider::sliderReleased, this, &ParamsPanel::onSliderReleased);
-    noiseReductionRow->addWidget(m_noiseReductionSlider, 1);
-    noiseReductionRow->addWidget(m_noiseReductionLabel);
-    optimizeLayout->addLayout(noiseReductionRow);
+    const QString strengthText = QCoreApplication::translate("Nebulens", "强度:");
+    m_noiseReductionSlider->setAccessibleName(m_noiseReductionCheck->text());
+    addSliderRow(optimizeLayout, new QLabel(strengthText, m_optimizeGroup),
+                 m_noiseReductionSlider, m_noiseReductionLabel);
 
     m_modifiedCameraColorCheck = new CompactToggle(
         QCoreApplication::translate("Nebulens", "BCF 改机色彩还原"), m_optimizeGroup);
@@ -1207,15 +1265,9 @@ void ParamsPanel::setupUI() {
             });
     optimizeLayout->addWidget(m_modifiedCameraColorCheck);
 
-    auto* modifiedStrengthRow = new QHBoxLayout();
     auto* modifiedStrengthName = new QLabel(
         QCoreApplication::translate("Nebulens", "校正强度"), m_optimizeGroup);
-    modifiedStrengthName->setFixedWidth(formLabelWidth());
-    modifiedStrengthName->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
-    setRole(modifiedStrengthName, "muted");
-    modifiedStrengthRow->addWidget(modifiedStrengthName);
     m_modifiedCameraColorStrengthSlider = createSlider(0, 100, 100);
-    m_modifiedCameraColorStrengthSlider->setMinimumWidth(84);
     m_modifiedCameraColorStrengthSlider->setToolTip(QCoreApplication::translate("Nebulens",
         "0 为保留原始改机色偏，100 为完整回归中性色彩"));
     connect(m_modifiedCameraColorStrengthSlider, &QSlider::valueChanged,
@@ -1226,13 +1278,9 @@ void ParamsPanel::setupUI() {
             });
     connect(m_modifiedCameraColorStrengthSlider, &QSlider::sliderReleased,
             this, &ParamsPanel::onSliderReleased);
-    modifiedStrengthRow->addWidget(
-        m_modifiedCameraColorStrengthSlider, 1);
     m_modifiedCameraColorStrengthLabel = new QLabel("100%", m_optimizeGroup);
-    setRole(m_modifiedCameraColorStrengthLabel, "value");
-    m_modifiedCameraColorStrengthLabel->setMinimumWidth(32);
-    modifiedStrengthRow->addWidget(m_modifiedCameraColorStrengthLabel);
-    optimizeLayout->addLayout(modifiedStrengthRow);
+    addSliderRow(optimizeLayout, modifiedStrengthName, m_modifiedCameraColorStrengthSlider,
+                 m_modifiedCameraColorStrengthLabel);
 
     auto* modifiedSampleRow = new QHBoxLayout();
     m_modifiedCameraColorMode = new QComboBox(m_optimizeGroup);
@@ -1240,6 +1288,7 @@ void ParamsPanel::setupUI() {
     m_modifiedCameraColorMode->addItem(QCoreApplication::translate("Nebulens", "手动灰点"));
     m_modifiedCameraColorMode->setToolTip(QCoreApplication::translate("Nebulens",
         "自动模式从中性天空估计；手动模式从预览中选择应为灰色的区域"));
+    m_modifiedCameraColorMode->setAccessibleName(m_modifiedCameraColorMode->toolTip());
     connect(m_modifiedCameraColorMode,
             QOverload<int>::of(&QComboBox::currentIndexChanged),
             this, [this](int index) {
@@ -1280,29 +1329,24 @@ void ParamsPanel::setupUI() {
     optimizeLayout->addWidget(m_modifiedCameraGrayPointStatus);
     updateModifiedCameraColorControls();
 
-    auto* dewarpRow = new QHBoxLayout();
     m_dewarpCheck = new CompactToggle(QCoreApplication::translate("Nebulens", "去雾"), m_optimizeGroup);
-    m_dewarpCheck->setMinimumWidth(106);
     m_dewarpCheck->setEnabled(true);
     m_dewarpCheck->setToolTip(QCoreApplication::translate("Nebulens",
         "亮度引导的 Dark Channel Prior 去雾\n"
         "适合明显薄雾；银河暗尘丰富时建议关闭"));
     connect(m_dewarpCheck, &QCheckBox::toggled, this, &ParamsPanel::onCheckChanged);
-    dewarpRow->addWidget(m_dewarpCheck);
+    optimizeLayout->addWidget(m_dewarpCheck);
     m_dewarpSlider = createSlider(0, 100, 30);
     m_dewarpSlider->setEnabled(true);
-    m_dewarpSlider->setMinimumWidth(84);
     m_dewarpLabel = new QLabel("30%", m_optimizeGroup);
-    setRole(m_dewarpLabel, "value");
-    m_dewarpLabel->setMinimumWidth(32);
     connect(m_dewarpSlider, &QSlider::valueChanged, this, [this](int value) {
         m_dewarpLabel->setText(QString("%1%").arg(value));
         onSliderValueChanged(value);
     });
     connect(m_dewarpSlider, &QSlider::sliderReleased, this, &ParamsPanel::onSliderReleased);
-    dewarpRow->addWidget(m_dewarpSlider, 1);
-    dewarpRow->addWidget(m_dewarpLabel);
-    optimizeLayout->addLayout(dewarpRow);
+    m_dewarpSlider->setAccessibleName(m_dewarpCheck->text());
+    addSliderRow(optimizeLayout, new QLabel(strengthText, m_optimizeGroup),
+                 m_dewarpSlider, m_dewarpLabel);
 
     m_stretchCheck = new CompactToggle(QCoreApplication::translate("Nebulens", "曲线拉伸"), m_optimizeGroup);
     m_stretchCheck->setEnabled(true);
@@ -1317,8 +1361,7 @@ void ParamsPanel::setupUI() {
     // 星点修饰沿用普通无框分区，不再额外绘制标题卡片。
     m_starReduceGroup = createCollapsibleGroup(
         QCoreApplication::translate("Nebulens", "星点修饰"), true);
-    auto* starLayout = new QVBoxLayout(m_starReduceGroup);
-    starLayout->setSpacing(10);
+    auto* starLayout = sectionLayout(m_starReduceGroup);
 
     auto* defringeRow = new QHBoxLayout();
     m_starDefringeCheck = new CompactToggle(
@@ -1331,20 +1374,11 @@ void ParamsPanel::setupUI() {
     defringeRow->addWidget(m_starDefringeCheck);
     starLayout->addLayout(defringeRow);
 
-    auto* defringeStrengthRow = new QHBoxLayout();
     auto* defringeStrengthLabel = new QLabel(
         QCoreApplication::translate("Nebulens", "去边强度:"), m_starReduceGroup);
-    defringeStrengthLabel->setFixedWidth(formLabelWidth());
-    defringeStrengthLabel->setAlignment(
-        Qt::AlignRight | Qt::AlignVCenter);
-    setRole(defringeStrengthLabel, "muted");
-    defringeStrengthRow->addWidget(defringeStrengthLabel);
     m_starDefringeSlider = createSlider(0, 100, 55);
     m_starDefringeSlider->setEnabled(false);
-    m_starDefringeSlider->setMinimumWidth(96);
     m_starDefringeLabel = new QLabel("55%", m_starReduceGroup);
-    setRole(m_starDefringeLabel, "value");
-    m_starDefringeLabel->setMinimumWidth(32);
     m_starDefringeLabel->setEnabled(false);
     m_starDefringeSlider->setToolTip(QCoreApplication::translate("Nebulens",
         "40-60 适合普通镜头色差；更高强度用于明显的蓝紫星翼\n"
@@ -1356,9 +1390,7 @@ void ParamsPanel::setupUI() {
             });
     connect(m_starDefringeSlider, &QSlider::sliderReleased,
             this, &ParamsPanel::onSliderReleased);
-    defringeStrengthRow->addWidget(m_starDefringeSlider, 1);
-    defringeStrengthRow->addWidget(m_starDefringeLabel);
-    starLayout->addLayout(defringeStrengthRow);
+    addSliderRow(starLayout, defringeStrengthLabel, m_starDefringeSlider, m_starDefringeLabel);
 
     auto* starRow = new QHBoxLayout();
     m_starReduceCheck = new CompactToggle(QCoreApplication::translate("Nebulens", "启用缩星"), m_starReduceGroup);
@@ -1370,21 +1402,13 @@ void ParamsPanel::setupUI() {
     starRow->addWidget(m_starReduceCheck);
     starLayout->addLayout(starRow);
 
-    auto* strengthRow = new QHBoxLayout();
-    auto* strengthLabel = new QLabel(QCoreApplication::translate("Nebulens", "强度:"), m_starReduceGroup);
-    strengthLabel->setFixedWidth(formLabelWidth());
-    strengthLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
-    setRole(strengthLabel, "muted");
+    auto* strengthLabel = new QLabel(strengthText, m_starReduceGroup);
     strengthLabel->setToolTip(QCoreApplication::translate("Nebulens",
         "缩星强度：40 温和，70 强烈，90 接近清星\n"
         "请在 100% 预览下判断，过高会损失星点细节"));
-    strengthRow->addWidget(strengthLabel);
     m_starReduceSlider = createSlider(0, 100, 70);
     m_starReduceSlider->setEnabled(false);
-    m_starReduceSlider->setMinimumWidth(96);
     m_starReduceLabel = new QLabel("70%", m_starReduceGroup);
-    setRole(m_starReduceLabel, "value");
-    m_starReduceLabel->setMinimumWidth(32);
     m_starReduceSlider->setToolTip(QCoreApplication::translate("Nebulens",
         "40 温和收紧；70 强烈缩星；90 会清除多数暗弱小星\n"
         "推荐在 100% 预览下调整"));
@@ -1393,9 +1417,8 @@ void ParamsPanel::setupUI() {
         onSliderValueChanged(value);
     });
     connect(m_starReduceSlider, &QSlider::sliderReleased, this, &ParamsPanel::onSliderReleased);
-    strengthRow->addWidget(m_starReduceSlider, 1);
-    strengthRow->addWidget(m_starReduceLabel);
-    starLayout->addLayout(strengthRow);
+    m_starReduceSlider->setAccessibleName(m_starReduceCheck->text());
+    addSliderRow(starLayout, strengthLabel, m_starReduceSlider, m_starReduceLabel);
 
     adjustPageLayout->addWidget(m_starReduceGroup);
     adjustPageLayout->addStretch();
@@ -1403,23 +1426,19 @@ void ParamsPanel::setupUI() {
     // 输出组与其他检查器分区共用同一套无框标题和细分隔线。
     m_outputGroup = createCollapsibleGroup(
         QCoreApplication::translate("Nebulens", "文件设置"), true);
-    auto* outputLayout = new QVBoxLayout(m_outputGroup);
-    outputLayout->setSpacing(14);
+    auto* outputLayout = sectionLayout(m_outputGroup);
 
     auto* outputForm = new QGridLayout();
     outputForm->setContentsMargins(0, 0, 0, 0);
-    outputForm->setHorizontalSpacing(12);
-    outputForm->setVerticalSpacing(11);
+    outputForm->setHorizontalSpacing(StyleTokens::Controls::kFormRowGap);
+    outputForm->setVerticalSpacing(StyleTokens::Spacing::kBase);
     outputForm->setColumnStretch(1, 1);
 
     auto* formatLabel = new QLabel(QCoreApplication::translate("Nebulens", "文件格式"), m_outputGroup);
-    formatLabel->setFixedWidth(formLabelWidth());
-    formatLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
-    setRole(formatLabel, "muted");
     formatLabel->setToolTip(QCoreApplication::translate("Nebulens", "TIFF 16-bit：最高质量，保留完整动态范围（推荐）\nPNG 8-bit：无损压缩，预览/分享首选"));
     outputForm->addWidget(formatLabel, 0, 0);
     m_outputFormat = new QComboBox(m_outputGroup);
-    m_outputFormat->setAccessibleName(formatLabel->text());
+    setupFormLabel(formatLabel, m_outputFormat);
     m_outputFormat->addItem(QStringLiteral("TIFF 16-bit"), QStringLiteral("tiff16"));
     m_outputFormat->addItem(
         QCoreApplication::translate("Nebulens", "PNG 8-bit (预览)"),
@@ -1433,12 +1452,10 @@ void ParamsPanel::setupUI() {
 
     // 输出路径选择
     auto* pathLabel = new QLabel(QCoreApplication::translate("Nebulens", "输出目录"), m_outputGroup);
-    pathLabel->setFixedWidth(formLabelWidth());
-    pathLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
-    setRole(pathLabel, "muted");
     outputForm->addWidget(pathLabel, 1, 0);
     auto* pathEdit = new QLineEdit(m_outputGroup);
     m_outputPath = pathEdit;
+    setupFormLabel(pathLabel, pathEdit);
     pathEdit->setReadOnly(true);
     displayOutputPath(
         pathEdit, defaultOutputPath());
@@ -1470,7 +1487,7 @@ void ParamsPanel::setupUI() {
 
     m_processingReportGroup = createCollapsibleGroup(
         QCoreApplication::translate("Nebulens", "本机处理报告"), true);
-    auto* reportLayout = new QVBoxLayout(m_processingReportGroup);
+    auto* reportLayout = sectionLayout(m_processingReportGroup);
     m_processingReportLabel = new QLabel(m_processingReportGroup);
     m_processingReportLabel->setTextFormat(Qt::PlainText);
     m_processingReportLabel->setToolTip(QCoreApplication::translate("Nebulens", "含本机输出路径；对外反馈可使用冲印回执中的匿名诊断。"));
@@ -1484,7 +1501,7 @@ void ParamsPanel::setupUI() {
 
     m_recentResultsGroup = createCollapsibleGroup(
         QCoreApplication::translate("Nebulens", "最近结果"), true);
-    auto* recentLayout = new QVBoxLayout(m_recentResultsGroup);
+    auto* recentLayout = sectionLayout(m_recentResultsGroup);
     m_recentResultsList = new QListWidget(m_recentResultsGroup);
     m_recentResultsList->setMaximumHeight(148);
     m_recentResultsList->setAccessibleName(QCoreApplication::translate("Nebulens", "最近处理结果"));
@@ -1522,12 +1539,12 @@ void ParamsPanel::setupUI() {
                     item->data(Qt::UserRole).toString());
             });
 
-    // 预设操作只属于输出页，避免在堆栈和调整阶段形成持续抢眼的操作栏。
     m_footerBar = new QWidget(this);
     m_footerBar->setObjectName("paramsFooter");
-    m_footerBar->setFixedHeight(52);
+    m_footerBar->setAttribute(Qt::WA_StyledBackground);
     auto* btnLayout = new QHBoxLayout(m_footerBar);
-    btnLayout->setContentsMargins(0, StyleTokens::Spacing::kBase, 0, 0);
+    btnLayout->setContentsMargins(StyleTokens::Spacing::kBase, StyleTokens::Spacing::kMicro,
+                                  StyleTokens::Spacing::kBase, 0);
     btnLayout->setSpacing(8);
 
     m_restoreBtn = new QPushButton(QCoreApplication::translate("Nebulens", "恢复默认"), m_footerBar);
@@ -1569,19 +1586,6 @@ void ParamsPanel::setupUI() {
         m_starReduceLabel->setEnabled(checked);
     });
 
-    // Keep layout metrics and styling centralized so newly added controls
-    // inherit the same visual system without another inline style block.
-    const auto groups = findChildren<QGroupBox*>();
-    for (QGroupBox* group : groups) {
-        group->setFlat(true);
-        group->setProperty("inspectorSection", true);
-        if (group->layout()) {
-            group->layout()->setContentsMargins(
-                0, StyleTokens::Spacing::kControlGap, 0,
-                StyleTokens::Spacing::kMicro);
-            group->layout()->setSpacing(StyleTokens::Spacing::kControlGap);
-        }
-    }
     const auto buttons = findChildren<QPushButton*>();
     for (QPushButton* button : buttons) {
         if (!button->property("variant").isValid() &&
@@ -1671,20 +1675,18 @@ void ParamsPanel::updateModifiedCameraColorControls() {
 }
 
 QGroupBox* ParamsPanel::createCollapsibleGroup(const QString& title, bool expanded) {
-    auto* group = new QGroupBox(title, this);
-    group->setCheckable(true);
-    group->setChecked(expanded);
-    group->setProperty("collapsible", true);
+    auto* group = new PaperSection(title, expanded, this);
     connect(group, &QGroupBox::toggled,
             this, &ParamsPanel::onGroupToggled);
     return group;
 }
 
-QSlider* ParamsPanel::createSlider(int min, int max, int value, const QString& suffix) {
-    Q_UNUSED(suffix)
+QSlider* ParamsPanel::createSlider(int min, int max, int value) {
     auto* slider = new QSlider(Qt::Horizontal, this);
     slider->setRange(min, max);
     slider->setValue(value);
+    slider->setMinimumWidth(StyleTokens::Controls::kSliderMinimumWidth);
+    slider->setFocusPolicy(Qt::StrongFocus);
     return slider;
 }
 
@@ -1692,14 +1694,8 @@ void ParamsPanel::onGroupToggled(bool checked) {
     auto* group = qobject_cast<QGroupBox*>(sender());
     if (!group) return;
 
-    // The 3px title indicator is styled globally; collapsing only changes the
-    // content visibility and never turns the section into a disabled form.
-    for (auto* child : group->findChildren<QWidget*>(QString(), Qt::FindDirectChildrenOnly)) {
-        child->setVisible(checked);
-    }
     if (checked && group == m_stackGroup) updateSkyGroundControls();
     if (checked && group == m_calibrationGroup) updateCalibrationStatus();
-    group->setMinimumHeight(checked ? 0 : 34);
 }
 
 void ParamsPanel::onSliderValueChanged(int value) {
@@ -2671,35 +2667,6 @@ void ParamsPanel::showWorkflowStage(WorkflowStage stage) {
             m_scene != ProcessingScene::StarTrail);
     }
 
-    QWidget* page = m_tabs->currentWidget();
-    if (!page || !isVisible()) return;
-    if (m_stageAnimation) {
-        m_stageAnimation->stop();
-        m_stageAnimation->deleteLater();
-        m_stageAnimation = nullptr;
-    }
-    if (m_animatedPage) {
-        m_animatedPage->setGraphicsEffect(nullptr);
-        m_animatedPage = nullptr;
-    }
-    auto* effect = new QGraphicsOpacityEffect(page);
-    page->setGraphicsEffect(effect);
-    auto* animation = new QPropertyAnimation(effect, "opacity", page);
-    m_stageAnimation = animation;
-    m_animatedPage = page;
-    animation->setDuration(StyleTokens::Motion::kBaseMs);
-    animation->setStartValue(0.35);
-    animation->setEndValue(1.0);
-    animation->setEasingCurve(QEasingCurve::OutCubic);
-    connect(animation, &QPropertyAnimation::finished, page,
-            [this, page, animation]() {
-                if (m_stageAnimation != animation) return;
-                page->setGraphicsEffect(nullptr);
-                m_stageAnimation = nullptr;
-                m_animatedPage = nullptr;
-                animation->deleteLater();
-            });
-    animation->start();
 }
 
 void ParamsPanel::setAssetSummary(int total, int available,
@@ -2951,6 +2918,10 @@ int ParamsPanel::noiseReductionStrength() const {
 
 bool ParamsPanel::stretchEnabled() const {
     return m_stretchCheck ? m_stretchCheck->isChecked() : false;
+}
+
+void ParamsPanel::setExposureTenths(int value) {
+    m_exposureSlider->setValue(value);
 }
 
 BasicAdjustmentOptions ParamsPanel::basicAdjustmentOptions() const {

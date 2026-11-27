@@ -166,7 +166,7 @@ InspectorSection::InspectorSection(const QString& title, QWidget* parent)
     m_titleLabel->setObjectName(QStringLiteral("inspectorSectionTitle"));
     m_titleLabel->setProperty(
         StyleTokens::Properties::kTextRole,
-        QString::fromLatin1(StyleTokens::Properties::kTitle));
+        QString::fromLatin1(StyleTokens::Properties::kSection));
     m_titleLabel->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
 
     m_resetButton = new QPushButton(QCoreApplication::translate("Nebulens", "重置"), header);
@@ -406,13 +406,13 @@ CompactToggle::CompactToggle(const QString& text, QWidget* parent)
     m_trackOffColor = StyleTokens::Colors::fromHex(
         StyleTokens::Colors::kBackgroundOverlay);
     m_trackOnColor = StyleTokens::Colors::fromHex(
-        StyleTokens::Colors::kAccentDim);
+        StyleTokens::Colors::kAccent);
     m_thumbOffColor = StyleTokens::Colors::fromHex(
         StyleTokens::Colors::kTextFaint);
     m_thumbOnColor = StyleTokens::Colors::fromHex(
-        StyleTokens::Colors::kAccent);
+        StyleTokens::Colors::kActionText);
     m_focusColor = StyleTokens::Colors::fromHex(
-        StyleTokens::Colors::kAccent);
+        StyleTokens::Colors::kFocus);
     m_textColor = StyleTokens::Colors::fromHex(
         StyleTokens::Colors::kTextPrimary);
 
@@ -501,10 +501,10 @@ void CompactToggle::paintEvent(QPaintEvent* event) {
     QColor thumbOn = resolvedColor(m_thumbOnColor, QPalette::Highlight, group);
 
     if (!isEnabled()) {
-        trackOff = StyleTokens::Colors::fromHex(StyleTokens::Colors::kLineSubtle);
+        trackOff = StyleTokens::Colors::fromHex(StyleTokens::Colors::kBackgroundOverlay);
         trackOn = trackOff;
         thumbOff = StyleTokens::Colors::fromHex(
-            StyleTokens::Colors::kBackgroundOverlay);
+            StyleTokens::Colors::kTextDisabled);
         thumbOn = thumbOff;
     }
 
@@ -512,7 +512,9 @@ void CompactToggle::paintEvent(QPaintEvent* event) {
     const QColor trackColor = interpolateColor(trackOff, trackOn, position);
     const QColor thumbColor = interpolateColor(thumbOff, thumbOn, position);
 
-    painter.setPen(Qt::NoPen);
+    painter.setPen(QPen(StyleTokens::Colors::fromHex(
+        !isEnabled() ? StyleTokens::Colors::kLineSubtle :
+        position < 0.5 ? StyleTokens::Colors::kLineStrong : StyleTokens::Colors::kAccent)));
     painter.setBrush(trackColor);
     painter.drawRoundedRect(
         track, StyleTokens::Controls::kToggleHeight / 2.0,
@@ -523,6 +525,7 @@ void CompactToggle::paintEvent(QPaintEvent* event) {
     const qreal leftCenter = track.left() + inset + kToggleThumbDiameter / 2.0;
     const qreal rightCenter = track.right() - inset - kToggleThumbDiameter / 2.0;
     const qreal thumbCenter = leftCenter + (rightCenter - leftCenter) * position;
+    painter.setPen(Qt::NoPen);
     painter.setBrush(thumbColor);
     painter.drawEllipse(QPointF(thumbCenter, track.center().y()),
                         kToggleThumbDiameter / 2.0,
@@ -536,7 +539,7 @@ void CompactToggle::paintEvent(QPaintEvent* event) {
                              bounds.height());
         const QColor labelColor = isEnabled()
             ? resolvedColor(m_textColor, QPalette::WindowText, group)
-            : StyleTokens::Colors::fromHex(StyleTokens::Colors::kTextFaint);
+            : StyleTokens::Colors::fromHex(StyleTokens::Colors::kTextDisabled);
         painter.setPen(labelColor);
         painter.drawText(textRect, Qt::AlignLeft | Qt::AlignVCenter,
                          fontMetrics().elidedText(text(), Qt::ElideRight,

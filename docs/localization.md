@@ -67,7 +67,8 @@ ctest --test-dir build --output-on-failure -R '^localization_(catalog|dialogs)$'
   --screenshot=/tmp/nebulens-en.png
 ```
 
+这条命令只截 Qt 内容区，不能用来证明系统窗控或连续交互正确。整窗与真实操作验收见 [desktop_qa](../tools/desktop_qa/README.md)。
 对应中文参数为 `--language=zh_CN`。两种语言都应检查 920×540 最小窗口与
-1440×900 标准窗口。去掉 `--workflow=adjust` 从冲印单开始，依次检查三步菜单、
+实际显示器能容纳的较大窗口。去掉 `--workflow=adjust` 从冲印单开始，依次检查三步菜单、
 冲印回执和实际保存位置、纸面光影选项与减弱动态效果提示，以及失败时的重试文案。
-进入高级工作台后，重点观察工作流名称、检查器标题、参数标签和数值列。
+进入冲印参数附页后，核对横向章节、参数标签、数值列和返回原步骤的入口。

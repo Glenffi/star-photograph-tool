@@ -4,6 +4,7 @@
 #include <QWidget>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
+#include <QGridLayout>
 #include <QSplitter>
 #include <QStackedWidget>
 #include <QPushButton>
@@ -43,6 +44,7 @@
 #include "ui/ProjectPanel.h"
 #include "ui/PreviewPanel.h"
 #include "ui/PrintOrderPanel.h"
+#include "ui/PaperWindowChrome.h"
 #include "ui/ParamsPanel.h"
 #include "ui/Toolbar.h"
 #include "ui/UiAssets.h"
@@ -71,6 +73,19 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     setupCentralWidget();
     m_updateManager = new UpdateManager(this);
     setupMenuBar();
+    if (!menuBar()->isNativeMenuBar()) {
+        // 非原生菜单收进同一页首。快捷键仍属于主窗口，而不依赖可见的菜单栏。
+        m_printOrder->setApplicationMenus(menuBar()->actions());
+        for (auto* action : menuBar()->findChildren<QAction*>())
+            if (!action->shortcuts().isEmpty()) addAction(action);
+        for (auto* heading : menuBar()->actions()) {
+            if (!heading->menu()) continue;
+            for (auto* action : heading->menu()->actions())
+                if (!action->shortcuts().isEmpty() && !actions().contains(action)) addAction(action);
+        }
+        menuBar()->hide();
+    }
+    PaperWindowChrome::install(this, m_printOrder->masthead());
     setupStatusBar();
     setupConnections();
     connectPrintOrder();
@@ -217,7 +232,7 @@ void MainWindow::keyPressEvent(QKeyEvent* event) {
 }
 
 bool MainWindow::handleSingleKeyShortcut(QKeyEvent* event) {
-    if (m_workspacePages->currentWidget() != m_darkroom ||
+    if (!m_printOrder->showingDetailPage() ||
         QApplication::activeModalWidget() ||
         QApplication::activePopupWidget()) {
         return false;
@@ -287,30 +302,25 @@ bool MainWindow::handleSingleKeyShortcut(QKeyEvent* event) {
 }
 
 void MainWindow::setupCentralWidget() {
-    m_workspacePages = new QStackedWidget(this);
-    setCentralWidget(m_workspacePages);
-    m_printOrder = new PrintOrderPanel(m_workspacePages);
-    m_workspacePages->addWidget(m_printOrder);
-    m_darkroom = new QWidget(m_workspacePages);
-    m_darkroom->setObjectName(QStringLiteral("advancedDarkroom"));
-    m_workspacePages->addWidget(m_darkroom);
+    m_printOrder = new PrintOrderPanel(this);
+    setCentralWidget(m_printOrder);
+    auto* attachment = new QWidget(m_printOrder);
+    attachment->setObjectName(QStringLiteral("advancedDarkroom"));
+    m_printOrder->setDetailPage(attachment);
+    auto* mainLayout = new QVBoxLayout(attachment);
+    mainLayout->setContentsMargins(16, 2, 16, 4);
+    mainLayout->setSpacing(2);
 
-    auto* mainLayout = new QVBoxLayout(m_darkroom);
-    mainLayout->setContentsMargins(0, 0, 0, 0);
-    mainLayout->setSpacing(0);
-
-    // 顶部工具栏
-    m_toolbar = new Toolbar(m_darkroom);
+    m_toolbar = new Toolbar(attachment);
     mainLayout->addWidget(m_toolbar);
 
-    auto* workspace = new QWidget(m_darkroom);
+    m_workflowRail = new WorkflowRail(attachment);
+    mainLayout->addWidget(m_workflowRail);
+    auto* workspace = new QWidget(attachment);
     workspace->setObjectName(QStringLiteral("mainWorkspace"));
     auto* workspaceLayout = new QHBoxLayout(workspace);
     workspaceLayout->setContentsMargins(0, 0, 0, 0);
     workspaceLayout->setSpacing(0);
-
-    m_workflowRail = new WorkflowRail(workspace);
-    workspaceLayout->addWidget(m_workflowRail);
 
     // The image canvas keeps the largest share; the filmstrip is part of
     // the editor column instead of competing with it as a left panel.
@@ -410,6 +420,7 @@ void MainWindow::activateScene(ProcessingScene scene, bool resetParameters) {
 
 void MainWindow::updateProjectReadiness() {
     if (!m_sceneActive || m_resettingProject) return;
+    m_printOrder->setExposureTenths(m_paramsPanel->basicAdjustmentOptions().exposureTenths);
     const int count = m_projectPanel->includedFilePaths().size();
     const int required = requiredFrameCount();
     const bool calibrationReady = m_scene != ProcessingScene::DeepSky ||
@@ -449,8 +460,8 @@ void MainWindow::updateProjectReadiness() {
         WorkflowStage::Calibration, count >= required && !calibrationReady);
     m_toolbar->setProjectSummary(
         count > 0
-            ? QCoreApplication::translate("Nebulens", "%1 · %2 张素材").arg(sceneName()).arg(count)
-            : QCoreApplication::translate("Nebulens", "%1 · 等待素材").arg(sceneName()));
+            ? QCoreApplication::translate("Nebulens", "选用 %1 / %2 张").arg(count).arg(m_projectPanel->totalFileCount())
+            : QCoreApplication::translate("Nebulens", "尚未选用原片"));
     m_paramsPanel->updateRefFrameList(m_projectPanel->includedFilePaths());
     m_paramsPanel->setAssetSummary(
         m_projectPanel->totalFileCount(), count,
@@ -536,9 +547,10 @@ void MainWindow::setupMenuBar() {
     // 视图菜单
     auto* viewMenu = menuBar()->addMenu(
         QCoreApplication::translate("Nebulens", "视图"));
-    viewMenu->addAction(QCoreApplication::translate("Nebulens", "冲印单"), this,
-                        &MainWindow::showPrintOrder);
-    viewMenu->addAction(QCoreApplication::translate("Nebulens", "高级暗房"), this,
+    auto* returnToForm = viewMenu->addAction(QCoreApplication::translate("Nebulens", "冲印单"), this,
+                                             &MainWindow::showPrintOrder);
+    returnToForm->setShortcut(QKeySequence(QStringLiteral("Alt+Left")));
+    viewMenu->addAction(QCoreApplication::translate("Nebulens", "冲印参数"), this,
                         [this]() { showAdvanced(m_workflowRail->currentStage()); });
     viewMenu->addSeparator();
 
@@ -705,6 +717,9 @@ void MainWindow::setupConnections() {
             });
     connect(m_workflowRail, &WorkflowRail::stageChanged,
             m_paramsPanel, &ParamsPanel::showWorkflowStage);
+    connect(m_workflowRail, &WorkflowRail::stageChanged, this, [this] {
+        if (m_sceneActive && !processingActive()) refreshPrintOrderResult();
+    });
     connect(m_projectPanel, &ProjectPanel::calibrationSettingsRequested,
             m_paramsPanel, &ParamsPanel::showCalibrationSettings);
     connect(m_projectPanel, &ProjectPanel::undoAvailabilityChanged,
@@ -727,6 +742,7 @@ void MainWindow::setupConnections() {
     // 文件选择 -> 预览加载
     connect(m_projectPanel, &ProjectPanel::fileSelected, this, [this](const QString& filePath) {
         m_sourceProof = {};
+        m_sourcePreviewFailed = false;
         m_previewPanel->loadImage(filePath);
         m_previewPanel->setResultAvailable(
             !m_cachedStackedData.empty() ||
@@ -749,6 +765,7 @@ void MainWindow::setupConnections() {
                     focalLength);
                 if (m_projectPanel->currentFilePath() == filePath) {
                     m_sourceProof = image;
+                    m_sourcePreviewFailed = false;
                     refreshPrintOrderResult();
                     if (!m_editedSkyGroundMask.empty() &&
                         m_editedMaskSourceFile == filePath &&
@@ -779,6 +796,9 @@ void MainWindow::setupConnections() {
             [this](const QString& filePath) {
                 m_projectPanel->requestThumbnail(filePath);
                 if (m_projectPanel->currentFilePath() == filePath) {
+                    m_sourceProof = {};
+                    m_sourcePreviewFailed = true;
+                    refreshPrintOrderResult();
                     statusBar()->showMessage(
                         QCoreApplication::translate("Nebulens", "预览加载失败：%1")
                             .arg(QFileInfo(filePath).fileName()),
@@ -1930,7 +1950,7 @@ void MainWindow::onProcessClicked() {
                                  .absolutePath()),
                     7000);
             }
-            if (m_workspacePages->currentWidget() == m_darkroom &&
+            if (m_printOrder->showingDetailPage() &&
                 m_scene == ProcessingScene::DeepSky &&
                 !calibrationWarnings.isEmpty()) {
                 auto* advice = new QMessageBox(
@@ -1948,7 +1968,7 @@ void MainWindow::onProcessClicked() {
         } else {
             restoreLastValidResultAfterFailedRun();
             setTaskFeedback(false, -1, worker->errorString());
-            if (m_workspacePages->currentWidget() == m_darkroom)
+            if (m_printOrder->showingDetailPage())
                 failureDialog = worker->errorString();
             setWorkflowStage(1, QCoreApplication::translate("Nebulens", "处理失败，请检查素材或参数"));
             statusBar()->showMessage(QCoreApplication::translate(
@@ -2071,7 +2091,9 @@ void MainWindow::onSettingsClicked() {
     auto* dialog = new QDialog(this);
     dialog->setWindowTitle(
         QCoreApplication::translate("Nebulens", "设置"));
-    dialog->setFixedSize(520, 252);
+    dialog->setObjectName(QStringLiteral("paperPreferences"));
+    dialog->setWindowModality(Qt::WindowModal);
+    dialog->resize(520, 252);
 
     auto* layout = new QVBoxLayout(dialog);
     layout->setSpacing(16);
@@ -2085,11 +2107,15 @@ void MainWindow::onSettingsClicked() {
 
     QSettings settings("StarProcessor", "App");
     const QString currentLanguage = AppLocalization::preferredLanguage();
-    auto* languageRow = new QHBoxLayout();
+    auto* fields = new QGridLayout();
+    fields->setHorizontalSpacing(12);
+    fields->setVerticalSpacing(8);
+    fields->setColumnStretch(1, 1);
+    layout->addLayout(fields);
     auto* languageLabel = new QLabel(
         QCoreApplication::translate("Nebulens", "界面语言:"), dialog);
-    languageLabel->setFixedWidth(82);
     auto* languageCombo = new QComboBox(dialog);
+    languageLabel->setBuddy(languageCombo);
     languageCombo->addItem(
         QCoreApplication::translate("Nebulens", "简体中文"),
         QString::fromLatin1(AppLocalization::kSimplifiedChinese));
@@ -2098,9 +2124,8 @@ void MainWindow::onSettingsClicked() {
         QString::fromLatin1(AppLocalization::kEnglish));
     const int languageIndex = languageCombo->findData(currentLanguage);
     languageCombo->setCurrentIndex(std::max(0, languageIndex));
-    languageRow->addWidget(languageLabel);
-    languageRow->addWidget(languageCombo, 1);
-    layout->addLayout(languageRow);
+    fields->addWidget(languageLabel, 0, 0);
+    fields->addWidget(languageCombo, 0, 1, 1, 2);
 
     auto* languageNote = new QLabel(
         QCoreApplication::translate(
@@ -2108,17 +2133,17 @@ void MainWindow::onSettingsClicked() {
     languageNote->setProperty(
         StyleTokens::Properties::kTextRole,
         StyleTokens::Properties::kCaption);
-    layout->addWidget(languageNote);
+    languageNote->setWordWrap(true);
+    fields->addWidget(languageNote, 1, 1, 1, 2);
 
     // 输出目录
-    auto* outDirRow = new QHBoxLayout();
     auto* outDirLabel = new QLabel(
         QCoreApplication::translate("Nebulens", "输出目录:"), dialog);
-    outDirLabel->setFixedWidth(82);
     QString defaultOutDir = settings.value(
         "outputPath", QDir::homePath() + "/Nebulens/Output").toString();
     auto* outDirEdit = new QLineEdit(defaultOutDir, dialog);
     outDirEdit->setReadOnly(true);
+    outDirLabel->setBuddy(outDirEdit);
     auto* outDirBtn = new QPushButton(dialog);
     outDirBtn->setIcon(
         UiAssets::icon(
@@ -2126,6 +2151,7 @@ void MainWindow::onSettingsClicked() {
             StyleTokens::Colors::fromHex(
                 StyleTokens::Colors::kTextSecondary)));
     outDirBtn->setToolTip(QCoreApplication::translate("Nebulens", "选择输出目录"));
+    outDirBtn->setAccessibleName(outDirBtn->toolTip());
     outDirBtn->setFixedSize(28, 28);
     outDirBtn->setProperty(
         StyleTokens::Properties::kVariant,
@@ -2137,10 +2163,9 @@ void MainWindow::onSettingsClicked() {
             outDirEdit->text());
         if (!dir.isEmpty()) outDirEdit->setText(dir);
     });
-    outDirRow->addWidget(outDirLabel);
-    outDirRow->addWidget(outDirEdit, 1);
-    outDirRow->addWidget(outDirBtn);
-    layout->addLayout(outDirRow);
+    fields->addWidget(outDirLabel, 2, 0);
+    fields->addWidget(outDirEdit, 2, 1);
+    fields->addWidget(outDirBtn, 2, 2);
 
     layout->addStretch();
 

@@ -8,32 +8,41 @@
 namespace StyleTokens {
 
 namespace Colors {
-inline constexpr char kBackgroundCanvas[] = "#090B0C";
-inline constexpr char kBackgroundBase[] = "#1C2021";
-inline constexpr char kBackgroundRaised[] = "#232728";
-inline constexpr char kBackgroundOverlay[] = "#2B3031";
-inline constexpr char kBackgroundScrim[] = "#070909D9";
+inline constexpr char kBackgroundBase[] = "#E8DFCB";
+inline constexpr char kBackgroundRaised[] = "#F4EDDE";
+inline constexpr char kBackgroundOverlay[] = "#DCDAC7";
 
-inline constexpr char kLineSubtle[] = "#303536";
-inline constexpr char kLineStrong[] = "#414849";
+inline constexpr char kLineSubtle[] = "#AB9D82";
+inline constexpr char kLineStrong[] = "#7A705C";
 
-inline constexpr char kTextPrimary[] = "#EBE7DE";
+inline constexpr char kTextPrimary[] = "#302F28";
 // Both secondary roles retain WCAG AA contrast against kBackgroundBase.
-inline constexpr char kTextSecondary[] = "#B7B4AC";
-inline constexpr char kTextFaint[] = "#92958F";
+inline constexpr char kTextSecondary[] = "#474438";
+inline constexpr char kTextFaint[] = "#625B4D";
+inline constexpr char kTextDisabled[] = "#756D5D";
 
-inline constexpr char kAccent[] = "#C99E5D";
-inline constexpr char kAccentStrong[] = "#E1BA78";
-inline constexpr char kAccentDim[] = "#6B5638";
+inline constexpr char kAccent[] = "#304E42";
+inline constexpr char kAccentStrong[] = "#233D33";
+inline constexpr char kAccentDim[] = "#D2DBC9";
+inline constexpr char kFocus[] = "#246148";
+inline constexpr char kFocusOnAction[] = "#D5E5D3";
 
-inline constexpr char kAction[] = "#C99E5D";
-inline constexpr char kActionHover[] = "#E1BA78";
-inline constexpr char kActionPressed[] = "#AD7F43";
-inline constexpr char kActionText[] = "#191713";
+inline constexpr char kAction[] = "#304E42";
+inline constexpr char kActionHover[] = "#263F35";
+inline constexpr char kActionPressed[] = "#192D25";
+inline constexpr char kActionText[] = "#FAF5E8";
 
-inline constexpr char kOk[] = "#78A8A2";
-inline constexpr char kWarning[] = "#D0A15C";
-inline constexpr char kError[] = "#C9786D";
+inline constexpr char kOk[] = "#365C43";
+inline constexpr char kWarning[] = "#774D24";
+inline constexpr char kError[] = "#873C34";
+
+// Image surround and image annotations are independent of the paper palette.
+inline constexpr char kBackgroundCanvas[] = "#343434";
+inline constexpr char kPhotoChrome[] = "#EEEEEE";
+inline constexpr char kPhotoLine[] = "#808080";
+inline constexpr char kPhotoInk[] = "#F5F5F5";
+inline constexpr char kPhotoBadge[] = "#242424";
+
 // Eight-digit values retain the design document's #RRGGBBAA notation.
 inline constexpr char kMaskSky[] = "#6FA8A366";
 inline constexpr char kMaskGround[] = "#C99E5D66";
@@ -52,8 +61,8 @@ inline constexpr int kCanvasPadding = 24;
 }  // namespace Spacing
 
 namespace Layout {
-inline constexpr int kWorkflowRailWidth = 96;
-inline constexpr int kFilmstripHeight = 112;
+inline constexpr int kWorkflowIndexHeight = 36;
+inline constexpr int kFilmstripHeight = 102;
 inline constexpr int kLeftPanelWidth = 112;
 inline constexpr int kLeftPanelMinimumWidth = 96;
 inline constexpr int kLeftPanelMaximumWidth = 140;
@@ -70,8 +79,9 @@ inline constexpr int kFull = 999;
 }  // namespace Radius
 
 namespace Controls {
-inline constexpr int kCompactHeight = 32;
+inline constexpr int kCompactHeight = 30;
 inline constexpr int kDialogHeight = 34;
+inline constexpr int kPreviewToolHeight = 26;
 inline constexpr int kIconButtonSize = 30;
 inline constexpr int kIconSize = 18;
 inline constexpr int kComboItemHeight = 32;
@@ -82,7 +92,10 @@ inline constexpr int kInputHorizontalPadding = 8;
 inline constexpr int kCheckIndicatorSize = 14;
 inline constexpr int kSliderTrackHeight = 2;
 inline constexpr int kSliderHandleSize = 12;
-inline constexpr int kSliderValueWidth = 54;
+inline constexpr int kSliderValueWidth = 62;
+inline constexpr int kSliderMinimumWidth = 80;
+inline constexpr int kFormLabelWidth = 124;
+inline constexpr int kFormRowGap = 10;
 inline constexpr int kToggleWidth = 32;
 inline constexpr int kToggleHeight = 18;
 inline constexpr int kStatusDotSize = 6;
@@ -108,6 +121,7 @@ inline constexpr int kMonoLineHeight = 17;
 
 QString uiFontFamily();
 QString monoFontFamily();
+QString serifFontFamily();
 }  // namespace Typography
 
 namespace Motion {
@@ -132,6 +146,7 @@ inline constexpr char kSeparator[] = "separator";
 inline constexpr char kTextRole[] = "textRole";
 inline constexpr char kDisplay[] = "display";
 inline constexpr char kTitle[] = "title";
+inline constexpr char kSection[] = "section";
 inline constexpr char kSecondary[] = "secondary";
 inline constexpr char kFaint[] = "faint";
 inline constexpr char kCaption[] = "caption";

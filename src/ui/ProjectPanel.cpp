@@ -83,7 +83,8 @@ protected:
                             StyleTokens::Radius::kSmall);
         painter.setClipPath(clip);
         painter.fillRect(rect(), StyleTokens::Colors::fromHex(
-                                     StyleTokens::Colors::kBackgroundRaised));
+            m_thumbnail.isNull() ? StyleTokens::Colors::kBackgroundRaised
+                                 : StyleTokens::Colors::kBackgroundCanvas));
 
         if (!m_thumbnail.isNull()) {
             const QPixmap scaled = m_thumbnail.scaled(
@@ -96,7 +97,8 @@ protected:
 
         painter.setClipping(false);
         painter.setPen(QPen(StyleTokens::Colors::fromHex(
-                                StyleTokens::Colors::kLineSubtle),
+                                m_thumbnail.isNull() ? StyleTokens::Colors::kLineSubtle
+                                                     : StyleTokens::Colors::kPhotoLine),
                             1.0));
         painter.setBrush(Qt::NoBrush);
         painter.drawRoundedRect(target, StyleTokens::Radius::kSmall,
@@ -185,8 +187,6 @@ FileCard::FileCard(const FileItem& item, QWidget* parent)
     m_nameLabel = new QLabel(this);
     m_nameLabel->setAttribute(Qt::WA_TransparentForMouseEvents);
     m_nameLabel->setObjectName(QStringLiteral("filmstripFileName"));
-    m_nameLabel->setStyleSheet(QStringLiteral("font-size: %1px;")
-        .arg(StyleTokens::Typography::kCaptionSize));
     m_nameLabel->setMinimumWidth(0);
     m_nameLabel->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
     m_nameLabel->setTextFormat(Qt::PlainText);
@@ -205,8 +205,7 @@ FileCard::FileCard(const FileItem& item, QWidget* parent)
     m_statusLabel = new QLabel(this);
     m_statusLabel->setAttribute(Qt::WA_TransparentForMouseEvents);
     m_statusLabel->setObjectName(QStringLiteral("filmstripStatus"));
-    m_statusLabel->setStyleSheet(QStringLiteral("font-size: %1px;")
-        .arg(StyleTokens::Typography::kCaptionSize));
+    m_statusLabel->setTextFormat(Qt::PlainText);
     m_statusLabel->setAlignment(Qt::AlignCenter);
     setStringProperty(m_statusLabel, StyleTokens::Properties::kTextRole,
                       StyleTokens::Properties::kCaption);
@@ -338,33 +337,14 @@ void FileCard::focusOutEvent(QFocusEvent* event) {
 void FileCard::paintEvent(QPaintEvent* event) {
     QWidget::paintEvent(event);
 
+    using namespace StyleTokens::Colors;
     QPainter painter(this);
-    if (m_selected) {
-        QColor selection = StyleTokens::Colors::fromHex(
-            StyleTokens::Colors::kAccent);
-        selection.setAlpha(22);
-        painter.fillRect(rect(), selection);
-        for (int inset = 0; inset < 3; ++inset) {
-            QColor edge = StyleTokens::Colors::fromHex(
-                StyleTokens::Colors::kAccentStrong);
-            edge.setAlpha(170 - inset * 52);
-            painter.setPen(QPen(edge, 1.0));
-            painter.setBrush(Qt::NoBrush);
-            painter.drawRoundedRect(
-                QRectF(rect()).adjusted(inset + 0.5, inset + 0.5,
-                                        -inset - 0.5, -inset - 0.5),
-                StyleTokens::Radius::kSmall,
-                StyleTokens::Radius::kSmall);
-        }
-    } else if (m_hovered) {
-        painter.fillRect(rect(), StyleTokens::Colors::fromHex(
-                                     StyleTokens::Colors::kBackgroundOverlay));
-    }
-    if (hasFocus()) {
+    painter.setRenderHint(QPainter::Antialiasing);
+    if (m_selected || hasFocus() || m_hovered) {
+        const QColor border = fromHex(hasFocus() ? kFocus
+                                     : m_selected ? kAccent : kLineStrong);
         painter.setBrush(Qt::NoBrush);
-        painter.setPen(QPen(StyleTokens::Colors::fromHex(
-                                StyleTokens::Colors::kTextPrimary),
-                            2.0));
+        painter.setPen(QPen(border, m_selected || hasFocus() ? 2.0 : 1.0));
         painter.drawRoundedRect(QRectF(rect()).adjusted(1, 1, -1, -1),
                                 StyleTokens::Radius::kSmall,
                                 StyleTokens::Radius::kSmall);
@@ -522,13 +502,16 @@ void ProjectPanel::setupUI() {
 QWidget* ProjectPanel::setupHeader() {
     auto* header = new QWidget(this);
     header->setObjectName(QStringLiteral("filmstripHeader"));
-    header->setFixedWidth(112);
+    header->setAttribute(Qt::WA_StyledBackground);
+    header->setMinimumWidth(112);
+    header->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Preferred);
     setStringProperty(header, StyleTokens::Properties::kUiRole,
                       StyleTokens::Properties::kPanel);
 
     auto* headerLayout = new QVBoxLayout(header);
-    headerLayout->setContentsMargins(13, 12, 10, 10);
-    headerLayout->setSpacing(6);
+    headerLayout->setContentsMargins(0, StyleTokens::Spacing::kBase,
+                                     StyleTokens::Spacing::kBase, StyleTokens::Spacing::kBase);
+    headerLayout->setSpacing(StyleTokens::Spacing::kMicro);
 
     auto* titleRow = new QHBoxLayout();
     titleRow->setContentsMargins(0, 0, 0, 0);
@@ -537,8 +520,8 @@ QWidget* ProjectPanel::setupHeader() {
     auto* titleLabel = new QLabel(
         QCoreApplication::translate("Nebulens", "亮场素材"), header);
     titleLabel->setObjectName(QStringLiteral("filmstripKicker"));
-    titleLabel->setStyleSheet(QStringLiteral("font-size: %1px; letter-spacing: 0px;")
-        .arg(StyleTokens::Typography::kCaptionSize));
+    setStringProperty(titleLabel, StyleTokens::Properties::kTextRole,
+                      StyleTokens::Properties::kSection);
     titleRow->addWidget(titleLabel);
 
     titleRow->addStretch();
@@ -546,7 +529,7 @@ QWidget* ProjectPanel::setupHeader() {
     m_headerImportBtn = new QPushButton(header);
     setStringProperty(m_headerImportBtn, StyleTokens::Properties::kVariant,
                       StyleTokens::Properties::kIcon);
-    m_headerImportBtn->setIcon(UiAssets::icon(
+    m_headerImportBtn->setIcon(UiAssets::controlIcon(
         UiAssets::Glyph::Add,
         StyleTokens::Colors::fromHex(StyleTokens::Colors::kTextSecondary)));
     m_headerImportBtn->setIconSize(
@@ -565,12 +548,7 @@ QWidget* ProjectPanel::setupHeader() {
     setStringProperty(m_countLabel, StyleTokens::Properties::kTextRole,
                       StyleTokens::Properties::kTitle);
     headerLayout->addWidget(m_countLabel);
-    auto* hint = new QLabel(QCoreApplication::translate("Nebulens", "点击查看 · 空格排除"), header);
-    hint->setToolTip(hint->text());
-    hint->setText(QCoreApplication::translate("Nebulens", "空格排除"));
-    setStringProperty(hint, StyleTokens::Properties::kTextRole,
-                      StyleTokens::Properties::kCaption);
-    headerLayout->addWidget(hint);
+    header->setToolTip(QCoreApplication::translate("Nebulens", "点击查看 · 空格排除"));
     headerLayout->addStretch(1);
     return header;
 }
@@ -687,7 +665,7 @@ void ProjectPanel::setupFileList() {
                       StyleTokens::Properties::kPanel);
     m_listLayout = new QHBoxLayout(m_listContainer);
     m_listLayout->setSizeConstraint(QLayout::SetMinimumSize);
-    m_listLayout->setContentsMargins(10, 9, 10, 9);
+    m_listLayout->setContentsMargins(10, 7, 10, 7);
     m_listLayout->setSpacing(7);
     m_listLayout->addStretch();
 

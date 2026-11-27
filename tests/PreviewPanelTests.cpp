@@ -27,10 +27,89 @@ void processLayout() {
     QApplication::processEvents();
 }
 
+void checkSourceExposureProof() {
+    PreviewPanel panel;
+    panel.resize(640, 430);
+    panel.show();
+    QImage source(400, 200, QImage::Format_RGB32);
+    QImage mapped(source.size(), source.format());
+    const QColor sourceColor(32, 44, 56);
+    const QColor mappedColor(64, 88, 112);
+    source.fill(sourceColor);
+    mapped.fill(mappedColor);
+
+    const QString sourceKey = QStringLiteral("source:one");
+    panel.loadImage(source, sourceKey);
+    processLayout();
+    panel.setZoom(1.5);
+    auto* pixels = panel.findChild<QLabel*>(QStringLiteral("previewImageLabel"));
+    auto* status = panel.findChild<QLabel*>(QStringLiteral("previewResultState"));
+    check(pixels && status, "Source proof requires the existing canvas and status label");
+    const auto displayedPixel = [pixels] {
+        const QImage image = pixels->pixmap().toImage();
+        return image.pixelColor(image.rect().center());
+    };
+    const QSize previewSize = pixels->pixmap().size();
+    const QString label = QStringLiteral("Exposure proof: +1.0 EV");
+    panel.setSourceExposureProof(source, mapped, label);
+    check(displayedPixel() == mappedColor && status->isVisible() && status->text() == label &&
+              panel.currentImage().cacheKey() == source.cacheKey() &&
+              panel.currentContentKey() == sourceKey && panel.zoom() == 1.5 &&
+              pixels->pixmap().size() == previewSize &&
+              !panel.isShowingResult() && !panel.hasComparison(),
+          "Exposure proof must change only the rendered source and its status");
+
+    QColor sampled;
+    QObject::connect(&panel, &PreviewPanel::mousePixelInfo, &panel,
+        [&sampled](int, int, int r, int g, int b) { sampled = QColor(r, g, b); });
+    const QPoint local(100, 60);
+    QMouseEvent move(QEvent::MouseMove, local, pixels->mapToGlobal(local),
+                     Qt::NoButton, Qt::NoButton, Qt::NoModifier);
+    QApplication::sendEvent(pixels, &move);
+    check(sampled == sourceColor, "RGB sampling must still address the source pixels");
+
+    const qint64 renderedKey = pixels->pixmap().cacheKey();
+    panel.setSourceExposureProof(source, mapped, label);
+    panel.setSourceExposureProof(source.copy(), mapped, QStringLiteral("Foreign source"));
+    panel.setSourceExposureProof(source, mapped.copy(0, 0, 100, 100), QStringLiteral("Wrong size"));
+    check(pixels->pixmap().cacheKey() == renderedKey && status->text() == label,
+          "Repeated or ineligible proof updates must not rebuild the canvas");
+
+    panel.setSourceExposureProof(source, {}, {});
+    check(displayedPixel() == sourceColor && !status->isVisible(),
+          "An empty proof must restore the current source in place");
+    panel.setSourceExposureProof(source, mapped, label);
+    const QImage next = source.copy();
+    panel.loadImage(next, QStringLiteral("source:two"));
+    processLayout();
+    panel.setSourceExposureProof(source, mapped, label);
+    check(displayedPixel() == sourceColor && !status->isVisible(),
+          "Changing source must discard the prior proof and reject its late update");
+    panel.setSourceExposureProof(next, mapped, label);
+    panel.clearImage();
+    panel.loadImage(next, QStringLiteral("source:two"));
+    processLayout();
+    check(displayedPixel() == sourceColor && !status->isVisible(),
+          "Clearing and reloading the same source must not resurrect its proof");
+
+    panel.setSourceExposureProof(next, mapped, label);
+    panel.setComparisonImages(source, next);
+    panel.setSourceExposureProof(next, mapped, label);
+    check(panel.hasComparison() && displayedPixel() == sourceColor && !status->isVisible(),
+          "A comparison must take priority over an exposure proof");
+    const QString resultLabel = QStringLiteral("Saved result");
+    panel.loadReadOnlyResultPreview(next, QStringLiteral("history:result"), resultLabel);
+    panel.setSourceExposureProof(next, mapped, label);
+    check(panel.isShowingResult() && displayedPixel() == sourceColor &&
+              status->isVisible() && status->text() == resultLabel,
+          "An exposure proof must not replace a result or its label");
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
     QApplication app(argc, argv);
+    checkSourceExposureProof();
 
     PreviewPanel panel;
     panel.resize(1000, 640);

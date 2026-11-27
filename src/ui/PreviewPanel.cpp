@@ -32,10 +32,20 @@
 
 namespace {
 
-constexpr int kPreviewMargin = StyleTokens::Spacing::kCanvasPadding * 2;
+constexpr int kPreviewSideInset = StyleTokens::Spacing::kCanvasPadding;
+constexpr int kPreviewVerticalInset = StyleTokens::Spacing::kBase;
+
+class PreviewScrollArea final : public QScrollArea {
+public:
+    using QScrollArea::QScrollArea;
+
+    void setToolsInset(int top) {
+        if (viewportMargins().top() != top) setViewportMargins(0, top, 0, 0);
+    }
+};
 
 QColor tokenColor(const char* value) {
-    return QColor(QString::fromLatin1(value));
+    return StyleTokens::Colors::fromHex(value);
 }
 
 void setButtonVariant(QPushButton* button, const char* variant) {
@@ -69,8 +79,6 @@ void PreviewPanel::setupUI() {
 
     m_canvasHost = new QWidget(this);
     m_canvasHost->setObjectName("previewCanvas");
-    m_canvasHost->setProperty(StyleTokens::Properties::kUiRole,
-                              StyleTokens::Properties::kCanvas);
     m_canvasHost->installEventFilter(this);
 
     setupEmptyState();
@@ -87,11 +95,12 @@ void PreviewPanel::setupUI() {
     setupBottomBar();
     m_resultSummary = new QWidget(m_canvasHost);
     m_resultSummary->setObjectName(QStringLiteral("resultSummaryOverlay"));
-    m_resultSummary->setProperty(StyleTokens::Properties::kUiRole,
-                                 StyleTokens::Properties::kOverlay);
+    m_resultSummary->setAttribute(Qt::WA_StyledBackground);
     auto* summaryLayout = new QVBoxLayout(m_resultSummary);
     summaryLayout->setContentsMargins(12, 8, 12, 8);
     m_resultSummaryLabel = new QLabel(m_resultSummary);
+    m_resultSummaryLabel->setTextFormat(Qt::PlainText);
+    m_resultSummaryLabel->setWordWrap(true);
     m_resultSummaryLabel->setProperty(
         StyleTokens::Properties::kTextRole,
         StyleTokens::Properties::kMono);
@@ -111,9 +120,7 @@ void PreviewPanel::setupUI() {
 void PreviewPanel::setupTopBar() {
     m_topBar = new QWidget(m_canvasHost);
     m_topBar->setObjectName("previewFloatingToolbar");
-    m_topBar->setProperty(StyleTokens::Properties::kUiRole,
-                          StyleTokens::Properties::kOverlay);
-    m_topBar->setFixedHeight(32);
+    m_topBar->setAttribute(Qt::WA_StyledBackground);
     m_topBar->setVisible(false);
 
     auto* layout = new QHBoxLayout(m_topBar);
@@ -127,13 +134,16 @@ void PreviewPanel::setupTopBar() {
         btn->setAccessibleName(tooltip);
         btn->setProperty(StyleTokens::Properties::kVariant,
                          StyleTokens::Properties::kGhost);
+        btn->setProperty(StyleTokens::Properties::kSizeRole, "previewTool");
+        btn->setFocusPolicy(Qt::StrongFocus);
         btn->setIconSize(QSize(16, 16));
         btn->setCursor(Qt::PointingHandCursor);
         return btn;
     };
 
-    m_resultBtn = createToolBtn(m_topBar, QCoreApplication::translate("Nebulens", "结果"),
+    m_resultBtn = createToolBtn(m_topBar, QString(),
                                 QCoreApplication::translate("Nebulens", "回到当前处理结果 (R)"));
+    m_resultBtn->setProperty(StyleTokens::Properties::kVariant, StyleTokens::Properties::kIcon);
     m_resultBtn->setIcon(UiAssets::icon(
         UiAssets::Glyph::Result,
         tokenColor(StyleTokens::Colors::kAccent)));
@@ -142,7 +152,10 @@ void PreviewPanel::setupTopBar() {
             this, &PreviewPanel::resultRequested);
     layout->addWidget(m_resultBtn);
 
-    m_resultStateLabel = new QLabel(m_topBar);
+    m_resultStateLabel = new QLabel(m_canvasHost);
+    m_resultStateLabel->setObjectName(QStringLiteral("previewResultState"));
+    m_resultStateLabel->setTextFormat(Qt::PlainText);
+    m_resultStateLabel->setWordWrap(true);
     m_resultStateLabel->setProperty(
         StyleTokens::Properties::kTextRole,
         StyleTokens::Properties::kCaption);
@@ -150,7 +163,6 @@ void PreviewPanel::setupTopBar() {
         StyleTokens::Properties::kStatusRole,
         StyleTokens::Properties::kWarning);
     m_resultStateLabel->hide();
-    layout->addWidget(m_resultStateLabel);
 
     m_fitBtn = createToolBtn(m_topBar, QString(),
                              QCoreApplication::translate("Nebulens", "适应视图 (F)"));
@@ -195,9 +207,7 @@ void PreviewPanel::setupTopBar() {
     // 蒙版编辑工具在主浮层下独立排列，避免窄画布时挤压缩放控件。
     m_maskEditControls = new QWidget(m_canvasHost);
     m_maskEditControls->setObjectName("previewMaskToolbar");
-    m_maskEditControls->setProperty(StyleTokens::Properties::kUiRole,
-                                    StyleTokens::Properties::kOverlay);
-    m_maskEditControls->setFixedHeight(32);
+    m_maskEditControls->setAttribute(Qt::WA_StyledBackground);
     auto* maskLayout = new QHBoxLayout(m_maskEditControls);
     maskLayout->setContentsMargins(4, 2, 4, 2);
     maskLayout->setSpacing(4);
@@ -223,13 +233,15 @@ void PreviewPanel::setupTopBar() {
     m_maskBrushSize->setValue(36);
     m_maskBrushSize->setFixedWidth(84);
     m_maskBrushSize->setToolTip(QCoreApplication::translate("Nebulens", "粗略提示笔刷直径"));
+    m_maskBrushSize->setAccessibleName(m_maskBrushSize->toolTip());
     maskLayout->addWidget(m_maskBrushSize);
     m_maskBrushSizeLabel = new QLabel("36 px", m_maskEditControls);
     m_maskBrushSizeLabel->setProperty(StyleTokens::Properties::kTextRole,
                                       StyleTokens::Properties::kMono);
     m_maskBrushSizeLabel->setProperty(StyleTokens::Properties::kStatusRole,
                                       StyleTokens::Properties::kWarning);
-    m_maskBrushSizeLabel->setMinimumWidth(40);
+    m_maskBrushSizeLabel->setFixedWidth(StyleTokens::Controls::kSliderValueWidth);
+    m_maskBrushSizeLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
     connect(m_maskBrushSize, &QSlider::valueChanged, this,
             [this](int value) {
                 m_maskBrushSizeLabel->setText(QString("%1 px").arg(value));
@@ -274,10 +286,8 @@ void PreviewPanel::setupTopBar() {
 
     // 有真实的堆栈前预览后才显示三个比较模式。
     m_compareControl = new QWidget(m_topBar);
-    m_compareControl->setProperty(StyleTokens::Properties::kUiRole,
-                                  StyleTokens::Properties::kRaised);
     auto* compareLayout = new QHBoxLayout(m_compareControl);
-    compareLayout->setContentsMargins(2, 2, 2, 2);
+    compareLayout->setContentsMargins(0, 0, 0, 0);
     compareLayout->setSpacing(0);
     m_viewModeGroup = new QButtonGroup(this);
     m_viewModeGroup->setExclusive(true);
@@ -286,9 +296,11 @@ void PreviewPanel::setupTopBar() {
     m_splitBtn = new QPushButton(QCoreApplication::translate("Nebulens", "分屏"), m_compareControl);
     for (QPushButton* button : {m_beforeBtn, m_afterBtn, m_splitBtn}) {
         button->setCheckable(true);
+        button->setFocusPolicy(Qt::StrongFocus);
         button->setCursor(Qt::PointingHandCursor);
         button->setProperty(StyleTokens::Properties::kVariant,
                             StyleTokens::Properties::kGhost);
+        button->setProperty(StyleTokens::Properties::kSizeRole, "previewTool");
         compareLayout->addWidget(button);
     }
     m_viewModeGroup->addButton(m_beforeBtn, 0);
@@ -324,8 +336,7 @@ void PreviewPanel::setupTopBar() {
 
 void PreviewPanel::setupEmptyState() {
     m_emptyState = new QWidget(m_canvasHost);
-    m_emptyState->setProperty(StyleTokens::Properties::kUiRole,
-                              StyleTokens::Properties::kCanvas);
+    m_emptyState->setObjectName(QStringLiteral("previewEmptyState"));
     auto* emptyLayout = new QVBoxLayout(m_emptyState);
     emptyLayout->setSpacing(12);
     emptyLayout->setAlignment(Qt::AlignCenter);
@@ -335,8 +346,9 @@ void PreviewPanel::setupEmptyState() {
 
     m_emptyText = new QLabel(QCoreApplication::translate("Nebulens", "拖入一组 RAW 开始"), m_emptyState);
     m_emptyText->setProperty(StyleTokens::Properties::kTextRole,
-                             StyleTokens::Properties::kDisplay);
+                             StyleTokens::Properties::kTitle);
     m_emptyText->setAlignment(Qt::AlignCenter);
+    m_emptyText->setWordWrap(true);
     emptyLayout->addWidget(m_emptyText);
 
     m_emptyFormat = new QLabel(
@@ -346,6 +358,8 @@ void PreviewPanel::setupEmptyState() {
     m_emptyFormat->setProperty(StyleTokens::Properties::kTextRole,
                                StyleTokens::Properties::kSecondary);
     m_emptyFormat->setAlignment(Qt::AlignCenter);
+    m_emptyFormat->setTextFormat(Qt::PlainText);
+    m_emptyFormat->setWordWrap(true);
     emptyLayout->addWidget(m_emptyFormat);
 
     m_emptyImportBtn = new QPushButton(QCoreApplication::translate("Nebulens", "选择文件"), m_emptyState);
@@ -362,7 +376,7 @@ void PreviewPanel::setupEmptyState() {
 }
 
 void PreviewPanel::setupImageView() {
-    m_scrollArea = new QScrollArea(m_canvasHost);
+    m_scrollArea = new PreviewScrollArea(m_canvasHost);
     m_scrollArea->setWidgetResizable(true);
     m_scrollArea->setAlignment(Qt::AlignCenter);
     m_scrollArea->setProperty(StyleTokens::Properties::kUiRole,
@@ -370,14 +384,12 @@ void PreviewPanel::setupImageView() {
     m_scrollArea->setFrameShape(QFrame::NoFrame);
 
     m_imageContainer = new QWidget();
+    m_imageContainer->setAttribute(Qt::WA_StyledBackground);
     m_imageContainer->setProperty(StyleTokens::Properties::kUiRole,
                                   StyleTokens::Properties::kCanvas);
     auto* containerLayout = new QVBoxLayout(m_imageContainer);
-    containerLayout->setContentsMargins(
-        StyleTokens::Spacing::kCanvasPadding,
-        StyleTokens::Spacing::kCanvasPadding,
-        StyleTokens::Spacing::kCanvasPadding,
-        StyleTokens::Spacing::kCanvasPadding);
+    containerLayout->setContentsMargins(kPreviewSideInset, kPreviewVerticalInset,
+                                        kPreviewSideInset, kPreviewVerticalInset);
     containerLayout->setAlignment(Qt::AlignCenter);
 
     m_imageLabel = new QLabel(m_imageContainer);
@@ -395,8 +407,7 @@ void PreviewPanel::setupImageView() {
 void PreviewPanel::setupBottomBar() {
     m_bottomBar = new QWidget(m_canvasHost);
     m_bottomBar->setObjectName("previewInfoOverlay");
-    m_bottomBar->setProperty(StyleTokens::Properties::kUiRole,
-                             StyleTokens::Properties::kOverlay);
+    m_bottomBar->setAttribute(Qt::WA_StyledBackground);
     m_bottomBar->setFixedHeight(26);
     m_bottomBar->setVisible(false);
 
@@ -420,31 +431,55 @@ void PreviewPanel::setupBottomBar() {
 
 void PreviewPanel::positionCanvasOverlays() {
     if (!m_canvasHost) return;
-    const int availableWidth = std::max(1, m_canvasHost->width() - 32);
-    const auto placeCentered = [this, availableWidth](QWidget* widget, int y) {
-        if (!widget) return;
-        widget->adjustSize();
-        const int width = std::min(availableWidth, widget->sizeHint().width());
-        widget->resize(width, widget->height());
-        widget->move(std::max(16, (m_canvasHost->width() - width) / 2), y);
+    constexpr int inset = StyleTokens::Spacing::kBase;
+    constexpr int gap = StyleTokens::Spacing::kMicro;
+    const int availableWidth = std::max(1, m_canvasHost->width() - 2 * inset);
+    int top = inset;
+    for (auto* widget : {m_topBar, m_maskEditControls}) {
+        if (!widget || widget->isHidden()) continue;
+        const QSize hint = widget->sizeHint();
+        const int width = std::min(availableWidth, hint.width());
+        widget->setGeometry((m_canvasHost->width() - width) / 2,
+                            top, width, hint.height());
         widget->raise();
-    };
-    placeCentered(m_topBar, 12);
-    placeCentered(m_maskEditControls, 52);
-    if (m_bottomBar) {
-        const int width = std::max(1, m_canvasHost->width() - 48);
-        m_bottomBar->setGeometry(
-            24, std::max(24, m_canvasHost->height() - 50), width, 26);
+        top += hint.height() + gap;
+    }
+    if (m_scrollArea) {
+        // Keep the top tools outside the photo and its split-view labels.
+        static_cast<PreviewScrollArea*>(m_scrollArea)->setToolsInset(top);
+    }
+
+    int bottom = m_canvasHost->height() - inset;
+    if (m_bottomBar && !m_bottomBar->isHidden()) {
+        bottom -= m_bottomBar->height();
+        m_bottomBar->setGeometry(inset, bottom, availableWidth, m_bottomBar->height());
         m_bottomBar->raise();
+        bottom -= gap;
     }
-    if (m_resultSummary && m_resultSummary->isVisible()) {
-        m_resultSummary->adjustSize();
-        m_resultSummary->move(
-            std::max(24, m_canvasHost->width() -
-                             m_resultSummary->width() - 24),
-            56);
-        m_resultSummary->raise();
-    }
+    const auto placeNote = [this, availableWidth, top, &bottom](QWidget* widget) {
+        if (!widget || widget->isHidden()) return;
+        const QSize hint = widget->sizeHint();
+        int width = std::min(availableWidth, hint.width());
+        if (widget == m_resultStateLabel) {
+            // A word-wrapped QLabel prefers a short line even on a wide canvas.
+            const int minimumHeight = widget->heightForWidth(availableWidth);
+            int upper = availableWidth;
+            while (width < upper) {
+                const int middle = width + (upper - width) / 2;
+                if (widget->heightForWidth(middle) <= minimumHeight) upper = middle;
+                else width = middle + 1;
+            }
+        }
+        const int preferredHeight = widget->heightForWidth(width);
+        const int height = std::max(0, std::min(bottom - top,
+            preferredHeight >= 0 ? preferredHeight : hint.height()));
+        widget->setGeometry((m_canvasHost->width() - width) / 2,
+                            bottom - height, width, height);
+        widget->raise();
+        bottom -= height + StyleTokens::Spacing::kMicro;
+    };
+    placeNote(m_resultStateLabel);
+    placeNote(m_resultSummary);
 }
 
 void PreviewPanel::showImageCanvas() {
@@ -452,10 +487,7 @@ void PreviewPanel::showImageCanvas() {
     m_scrollArea->setVisible(true);
     m_topBar->setVisible(true);
     if (m_infoBtn) m_infoBtn->setVisible(m_showingResult);
-    if (m_resultStateLabel) {
-        m_resultStateLabel->setVisible(
-            m_showingResult && !m_resultStateLabel->text().isEmpty());
-    }
+    updatePreviewStateLabel();
     m_bottomBar->setVisible(false);
     positionCanvasOverlays();
 }
@@ -497,6 +529,7 @@ bool PreviewPanel::beginContentSwitch(const QString& contentKey) {
     const QString key = contentKey.trimmed();
     const bool sameContent = !key.isEmpty() && key == m_currentContentKey;
     saveCurrentViewState();
+    m_sourceExposureProof = {};
     ++m_viewRestoreGeneration;
     m_currentContentKey = key;
     m_pendingViewState = key.isEmpty()
@@ -677,6 +710,8 @@ void PreviewPanel::loadImage(const QString& filePath) {
     m_scrollArea->setVisible(false);
     m_emptyState->setVisible(true);
     m_topBar->setVisible(false);
+    m_resultStateLabel->hide();
+    m_resultSummary->hide();
     m_bottomBar->setVisible(false);
     m_emptyText->setText(QCoreApplication::translate("Nebulens", "正在生成 RAW 预览..."));
     m_emptyFormat->setText(info.fileName());
@@ -923,6 +958,8 @@ void PreviewPanel::clearImage() {
     m_maskOverlay = QImage();
     m_maskOverlayVisible = false;
     m_currentImage = QImage();
+    m_sourceExposureProof = {};
+    m_resultLabel.clear();
     m_beforeImage = QImage();
     m_afterImage = QImage();
     m_currentFilePath.clear();
@@ -946,6 +983,8 @@ void PreviewPanel::clearImage() {
     m_emptyImportBtn->setVisible(true);
     m_scrollArea->setVisible(false);
     m_topBar->setVisible(false);
+    updatePreviewStateLabel();
+    m_resultSummary->hide();
     m_maskEditControls->setVisible(false);
     m_bottomBar->setVisible(false);
     m_bottomInfo->setText(QCoreApplication::translate("Nebulens", "缩放: 100% | 就绪"));
@@ -968,12 +1007,47 @@ void PreviewPanel::setResultLabel(const QString& label) {
     if (!m_showingResult) return;
     m_imageFileName = label.isEmpty()
         ? QCoreApplication::translate("Nebulens", "处理结果") : label;
-    if (m_resultStateLabel) {
-        m_resultStateLabel->setText(label);
-        m_resultStateLabel->setVisible(!label.isEmpty());
-    }
-    positionCanvasOverlays();
+    m_resultLabel = label;
+    if (updatePreviewStateLabel()) positionCanvasOverlays();
     updateZoomDisplay();
+}
+
+void PreviewPanel::setSourceExposureProof(const QImage& source,
+                                          const QImage& mapped,
+                                          const QString& label) {
+    if (!mapped.isNull() &&
+        (m_showingResult || hasComparison() || source.isNull() ||
+         source.cacheKey() != m_currentImage.cacheKey() ||
+         mapped.size() != source.size())) {
+        return;
+    }
+    const qint64 previousDisplayKey = displayedImage().cacheKey();
+    if (mapped.isNull()) {
+        if (m_sourceExposureProof.mapped.isNull()) return;
+        m_sourceExposureProof = {};
+    } else {
+        if (m_sourceExposureProof.sourceCacheKey == source.cacheKey() &&
+            m_sourceExposureProof.mapped.cacheKey() == mapped.cacheKey() &&
+            m_sourceExposureProof.label == label) {
+            return;
+        }
+        m_sourceExposureProof = {source.cacheKey(), mapped, label};
+    }
+    if (displayedImage().cacheKey() != previousDisplayKey) updateImageDisplay();
+    if (updatePreviewStateLabel()) positionCanvasOverlays();
+}
+
+bool PreviewPanel::updatePreviewStateLabel() {
+    const QString label = m_showingResult ? m_resultLabel
+        : hasSourceExposureProof() ? m_sourceExposureProof.label : QString();
+    const bool textChanged = m_resultStateLabel->text() != label;
+    const bool visibilityChanged = m_resultStateLabel->isHidden() != label.isEmpty();
+    if (textChanged) {
+        m_resultStateLabel->setText(label);
+        m_resultStateLabel->setToolTip(label.toHtmlEscaped());
+    }
+    if (visibilityChanged) m_resultStateLabel->setVisible(!label.isEmpty());
+    return textChanged || visibilityChanged;
 }
 
 void PreviewPanel::setPointSelectionActive(bool active) {
@@ -1043,8 +1117,8 @@ double PreviewPanel::fitZoomForViewport() const {
     const QImage& image = displayedImage();
     if (image.isNull()) return 0.0;
 
-    int viewW = m_scrollArea->viewport()->width() - kPreviewMargin;
-    const int viewH = m_scrollArea->viewport()->height() - kPreviewMargin;
+    const int viewW = m_scrollArea->viewport()->width() - 2 * kPreviewSideInset;
+    const int viewH = m_scrollArea->viewport()->height() - 2 * kPreviewVerticalInset;
     if (viewW <= 0 || viewH <= 0) return 0.0;
 
     const double scaleW = static_cast<double>(viewW) / image.width();
@@ -1090,6 +1164,7 @@ void PreviewPanel::onViewModeChanged(int id) {
 void PreviewPanel::onToggleInfo() {
     m_showInfo = m_infoBtn->isChecked();
     m_bottomBar->setVisible(m_showInfo);
+    positionCanvasOverlays();
 }
 
 void PreviewPanel::onToggleMaskOverlay() {
@@ -1148,18 +1223,19 @@ void PreviewPanel::applyZoom() {
         comparisonPainter.setClipRect(QRect(0, 0, splitX, h));
         comparisonPainter.drawPixmap(0, 0, m_scaledBeforeCache);
         comparisonPainter.setClipping(false);
-        comparisonPainter.setPen(QPen(
-            StyleTokens::Colors::fromHex(
-                StyleTokens::Colors::kAccentStrong), 1));
+        const QColor light = tokenColor(StyleTokens::Colors::kPhotoInk);
+        QColor shadow = tokenColor(StyleTokens::Colors::kPhotoBadge);
+        shadow.setAlpha(220);
+        comparisonPainter.setPen(QPen(shadow, 3));
+        comparisonPainter.drawLine(splitX, 0, splitX, h);
+        comparisonPainter.setPen(QPen(light, 1));
         comparisonPainter.drawLine(splitX, 0, splitX, h);
         if (w > 120 && h > 80) {
-            comparisonPainter.setPen(QPen(QColor(15, 17, 18, 210), 5));
+            comparisonPainter.setPen(QPen(shadow, 4));
             comparisonPainter.drawEllipse(
                 QPointF(splitX, h / 2.0), 9.0, 15.0);
-            comparisonPainter.setPen(QPen(
-                StyleTokens::Colors::fromHex(
-                    StyleTokens::Colors::kAccentStrong), 1.5));
-            comparisonPainter.setBrush(QColor(28, 32, 33, 235));
+            comparisonPainter.setPen(QPen(light, 1.5));
+            comparisonPainter.setBrush(shadow);
             comparisonPainter.drawEllipse(
                 QPointF(splitX, h / 2.0), 9.0, 15.0);
             comparisonPainter.drawLine(splitX - 3, h / 2 - 5,
@@ -1168,17 +1244,23 @@ void PreviewPanel::applyZoom() {
                                        splitX + 3, h / 2 + 5);
         }
         if (w > 180 && h > 48) {
-            comparisonPainter.setPen(Qt::NoPen);
-            comparisonPainter.setBrush(QColor(12, 14, 16, 190));
-            comparisonPainter.drawRoundedRect(QRect(8, 8, 52, 22), 4, 4);
-            comparisonPainter.drawRoundedRect(
-                QRect(w - 60, 8, 52, 22), 4, 4);
-            comparisonPainter.setPen(QColor("#F5FAF8"));
-            comparisonPainter.drawText(QRect(8, 8, 52, 22), Qt::AlignCenter,
-                                       QCoreApplication::translate("Nebulens", "处理前"));
-            comparisonPainter.drawText(
-                QRect(w - 60, 8, 52, 22), Qt::AlignCenter,
-                                       QCoreApplication::translate("Nebulens", "处理后"));
+            const QString before = QCoreApplication::translate("Nebulens", "处理前");
+            const QString after = QCoreApplication::translate("Nebulens", "处理后");
+            const QFontMetrics metrics = comparisonPainter.fontMetrics();
+            const int labelHeight = metrics.height() + 6;
+            const auto drawBadge = [&](const QRect& area, const QString& text) {
+                comparisonPainter.setPen(Qt::NoPen);
+                comparisonPainter.setBrush(shadow);
+                comparisonPainter.drawRoundedRect(area, 4, 4);
+                comparisonPainter.setPen(light);
+                comparisonPainter.drawText(area, Qt::AlignCenter, text);
+            };
+            const int beforeWidth = metrics.horizontalAdvance(before) + 14;
+            const int afterWidth = metrics.horizontalAdvance(after) + 14;
+            if (splitX >= beforeWidth + 12) drawBadge(QRect(8, 8, beforeWidth, labelHeight), before);
+            if (w - splitX >= afterWidth + 12) {
+                drawBadge(QRect(w - afterWidth - 8, 8, afterWidth, labelHeight), after);
+            }
         }
         comparisonPainter.end();
         pixmap = m_splitComposite;
@@ -1210,10 +1292,9 @@ void PreviewPanel::applyZoom() {
         painter.setRenderHint(QPainter::Antialiasing, true);
         const auto drawMarker = [&painter](const QPointF& center) {
             painter.setBrush(Qt::NoBrush);
-            painter.setPen(QPen(QColor(9, 13, 15, 210), 4.0));
+            painter.setPen(QPen(tokenColor(StyleTokens::Colors::kPhotoBadge), 4.0));
             painter.drawEllipse(center, 8.0, 8.0);
-            painter.setPen(QPen(StyleTokens::Colors::fromHex(
-                                    StyleTokens::Colors::kOk), 2.0));
+            painter.setPen(QPen(tokenColor(StyleTokens::Colors::kPhotoInk), 2.0));
             painter.drawEllipse(center, 8.0, 8.0);
             painter.drawLine(center + QPointF(-12.0, 0.0),
                              center + QPointF(-5.0, 0.0));
@@ -1230,14 +1311,15 @@ void PreviewPanel::applyZoom() {
     m_imageLabel->setPixmap(pixmap);
     m_imageLabel->setFixedSize(pixmap.size());
     m_imageContainer->setMinimumSize(
-        pixmap.width() + kPreviewMargin,
-        pixmap.height() + kPreviewMargin);
+        pixmap.width() + 2 * kPreviewSideInset,
+        pixmap.height() + 2 * kPreviewVerticalInset);
 }
 
 bool PreviewPanel::imageSampleAt(const QPoint& labelPosition,
                                  const QImage*& image,
                                  int& x, int& y) const {
-    const QImage& displayed = displayedImage();
+    // The exposure proof is a display transform, not a new source sample.
+    const QImage& displayed = hasSourceExposureProof() ? m_currentImage : displayedImage();
     if (displayed.isNull()) return false;
 
     const int paneWidth = std::max(1, qRound(displayed.width() * m_zoom));
@@ -1278,9 +1360,15 @@ double PreviewPanel::maximumSafeZoom() const {
     return std::clamp(std::sqrt(maxRenderedPixels / std::max(1.0, pixels)), 1.0, 8.0);
 }
 
+bool PreviewPanel::hasSourceExposureProof() const {
+    return !m_showingResult && !hasComparison() && !m_sourceExposureProof.mapped.isNull() &&
+        m_sourceExposureProof.sourceCacheKey == m_currentImage.cacheKey();
+}
+
 const QImage& PreviewPanel::displayedImage() const {
     if (m_viewMode == 0 && hasComparison()) return m_beforeImage;
     if ((m_viewMode == 1 || m_viewMode == 2) && hasComparison()) return m_afterImage;
+    if (hasSourceExposureProof()) return m_sourceExposureProof.mapped;
     return m_currentImage;
 }
 
@@ -1605,6 +1693,7 @@ void PreviewPanel::setComparisonImages(const QImage& before, const QImage& after
         return;
     }
     const bool replacingExistingComparison = hasComparison();
+    m_sourceExposureProof = {};
     m_beforeImage = before;
     m_afterImage = after;
     invalidateComparisonRenderCache();

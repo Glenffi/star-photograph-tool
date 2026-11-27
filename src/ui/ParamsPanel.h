@@ -20,7 +20,6 @@ class QTimer;
 class QLineEdit;
 class QTabWidget;
 class QListWidget;
-class QPropertyAnimation;
 class QToolButton;
 struct PrintOrderDocument;
 
@@ -47,6 +46,7 @@ public:
     void clearModifiedCameraGrayPoint();
     bool stretchEnabled() const;
     BasicAdjustmentOptions basicAdjustmentOptions() const;
+    void setExposureTenths(int value);
     bool starDefringeEnabled() const;
     int starDefringeStrength() const;
     bool starReduceEnabled() const;
@@ -132,7 +132,7 @@ private:
     void applyPreset(const Preset& preset);
     void loadCustomPresets();
     QGroupBox* createCollapsibleGroup(const QString& title, bool expanded = true);
-    QSlider* createSlider(int min, int max, int value, const QString& suffix = QString());
+    QSlider* createSlider(int min, int max, int value);
 
     void updateSkyGroundControls();
     void updateModifiedCameraColorControls();
@@ -167,8 +167,6 @@ private:
     QTabWidget* m_tabs = nullptr;
     WorkflowStage m_activeWorkflowStage = WorkflowStage::Adjustment;
     ProcessingScene m_scene = ProcessingScene::Nightscape;
-    QPropertyAnimation* m_stageAnimation = nullptr;
-    QWidget* m_animatedPage = nullptr;
 
     // Read-only stage summaries make the six-stage rail meaningful without
     // duplicating the project model inside the inspector.
@@ -280,7 +278,7 @@ private:
     QLabel* m_sharpeningLabel = nullptr;
 
     // 星点修饰组：去色边可以独立使用，不要求同时缩星。
-    QWidget* m_starReduceGroup = nullptr;
+    QGroupBox* m_starReduceGroup = nullptr;
     QCheckBox* m_starDefringeCheck = nullptr;
     QSlider* m_starDefringeSlider = nullptr;
     QLabel* m_starDefringeLabel = nullptr;
@@ -289,10 +287,10 @@ private:
     QLabel* m_starReduceLabel = nullptr;
 
     // 输出组
-    QWidget* m_outputGroup = nullptr;
-    QWidget* m_processingReportGroup = nullptr;
+    QGroupBox* m_outputGroup = nullptr;
+    QGroupBox* m_processingReportGroup = nullptr;
     QLabel* m_processingReportLabel = nullptr;
-    QWidget* m_recentResultsGroup = nullptr;
+    QGroupBox* m_recentResultsGroup = nullptr;
     QListWidget* m_recentResultsList = nullptr;
     QPushButton* m_loadRecentResultBtn = nullptr;
     QPushButton* m_revealRecentResultBtn = nullptr;
